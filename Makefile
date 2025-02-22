@@ -63,6 +63,15 @@ pbl-flash:
 pbl-clean: 
 	+$(MAKE) -f scripts/pbl.mk clean
 
+# Add these lines before the emu target
+ifeq ($(shell uname -s),Darwin)
+ifeq ($(shell uname -m),arm64)
+export ARCH_FLAGS=-march=armv8.2-a
+else
+export ARCH_FLAGS=-march=native
+endif
+endif
+
 emu: 
 	+$(MAKE) -f scripts/lua.mk
 	+$(MAKE) -f scripts/miniz.mk

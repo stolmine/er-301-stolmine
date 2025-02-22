@@ -2,7 +2,7 @@
 %import <od/glue/prologue.cpp.swig>
 %typemap(out) std::vector<std::string>
 %{
-	stringVectorToLuaTable(L, $1);
+	stringVectorToLuaTableWrapper(L, $1);
 	SWIG_arg++;
 %}
 
@@ -62,6 +62,7 @@
 
 #include <od/glue/Expression.h>
 #include <od/glue/LongestPath.h>
+#include <od/glue/string_vector_wrapper.h>
 
 // tasks
 
