@@ -7,6 +7,7 @@ out_dir := $(build_dir)/$(program_name)
 
 src_dirs := $(program_dir) $(hal_dir) $(arch_dir)/$(ARCH) $(od_dir) $(ti_dir)
 includes += $(program_dir) $(lua_dir) $(lodepng_dir) $(miniz_dir) $(libs_dir)/SDL_FontCache
+includes += emu/od/glue
 
 libraries :=
 libraries += $(libs_build_dir)/lib$(lua_name).a
@@ -27,7 +28,13 @@ ifeq ($(ARCH),linux)
 LFLAGS += -Wl,--export-dynamic -Wl,--gc-sections
 endif
 
-ifeq ($(ARCH),darwin)
+ifeq ($(shell uname -s),Darwin)
+ifeq ($(shell uname -m),arm64)
+ARCH_FLAGS=-march=armv8.2-a
+else
+ARCH_FLAGS=-march=native
+endif
+
 # Locate our deps using brew
 sdl2 := $(shell brew --prefix sdl2)
 sdl2_ttf := $(shell brew --prefix sdl2_ttf)
@@ -35,6 +42,7 @@ fftw := $(shell brew --prefix fftw)
 
 CFLAGS += -rdynamic
 CFLAGS += -I$(sdl2)/include -I$(sdl2)/include/SDL2 -I$(sdl2_ttf)/include -I$(fftw)/include
+CFLAGS += $(ARCH_FLAGS)
 LFLAGS += -L$(sdl2)/lib -L$(sdl2_ttf)/lib -L$(fftw)/lib
 endif
 

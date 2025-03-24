@@ -117,7 +117,17 @@ pkg_install_dir = $(HOME)/.od/rear
 include scripts/darwin.mk
 
 includes += emu
-CFLAGS.darwin = -Wno-deprecated-declarations -march=native -fPIC
+# Modify this line to use ARCH_FLAGS instead of hardcoding -march=native
+CFLAGS.darwin = -Wno-deprecated-declarations $(ARCH_FLAGS) -fPIC
+endif
+
+# Move the ARCH_FLAGS definition before the darwin-specific section
+ifeq ($(shell uname -s),Darwin)
+ifeq ($(shell uname -m),arm64)
+ARCH_FLAGS=-march=armv8.2-a
+else
+ARCH_FLAGS=-march=native
+endif
 endif
 
 ###########################

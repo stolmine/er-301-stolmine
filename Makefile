@@ -1,5 +1,20 @@
 # top-level makefile
 
+# Define all build targets
+BUILD_TARGETS = firmware app-libs app core teletype emu
+
+# Define all clean targets
+CLEAN_TARGETS = firmware-clean app-libs-clean app-clean core-clean teletype-clean emu-clean
+
+# Add new all and clean targets at the top
+.PHONY: all clean $(BUILD_TARGETS) $(CLEAN_TARGETS)
+
+# Build everything
+all: $(BUILD_TARGETS)
+
+# Clean everything
+clean: $(CLEAN_TARGETS)
+
 firmware:
 	+$(MAKE) -f scripts/firmware.mk
 
@@ -62,6 +77,15 @@ pbl-flash:
 
 pbl-clean: 
 	+$(MAKE) -f scripts/pbl.mk clean
+
+# Add these lines before the emu target
+ifeq ($(shell uname -s),Darwin)
+ifeq ($(shell uname -m),arm64)
+export ARCH_FLAGS=-march=armv8.2-a
+else
+export ARCH_FLAGS=-march=native
+endif
+endif
 
 emu: 
 	+$(MAKE) -f scripts/lua.mk
