@@ -20,8 +20,10 @@ namespace txo
   {
     memset(mCVValue, 0, sizeof(mCVValue));
     memset(mCVDirty, 0, sizeof(mCVDirty));
+    memset(mCVLastSent, 0, sizeof(mCVLastSent));
     memset(mTRValue, 0, sizeof(mTRValue));
     memset(mTRDirty, 0, sizeof(mTRDirty));
+    memset(mTRLastSent, 0, sizeof(mTRLastSent));
     memset(mCVWriteFrame, 0, sizeof(mCVWriteFrame));
     memset(mTRWriteFrame, 0, sizeof(mTRWriteFrame));
     mFrameCount = 0;
@@ -77,28 +79,39 @@ namespace txo
     }
     mSampleCounter -= mSamplesPerUpdate;
 
-    // Send any dirty CV values
+    // Send any dirty CV values that actually changed
     for (int i = 0; i < MaxOutputs; i++)
     {
       if (mCVDirty[i])
       {
-        sendCV(i, mCVValue[i]);
+        int intRaw = (int)(mCVValue[i] * 16384.0f);
+        int16_t quantized = (int16_t)CLAMP(-32768, 32767, intRaw);
+        if (quantized != mCVLastSent[i])
+        {
+          sendCV(i, mCVValue[i]);
+          mCVLastSent[i] = quantized;
+        }
         mCVDirty[i] = false;
       }
     }
 
-    // Send any dirty TR values
+    // Send any dirty TR values that actually changed
     for (int i = 0; i < MaxOutputs; i++)
     {
       if (mTRDirty[i])
       {
-        sendTR(i, mTRValue[i] > 0.5f);
+        bool state = mTRValue[i] > 0.5f;
+        if (state != mTRLastSent[i])
+        {
+          sendTR(i, state);
+          mTRLastSent[i] = state;
+        }
         mTRDirty[i] = false;
       }
     }
 
-    // Drain the TX queue (max 8 messages per update to avoid hogging)
-    I2c_drainMasterQueue(8);
+    // Drain the TX queue (max 4 messages per update to limit bus time)
+    I2c_drainMasterQueue(4);
   }
 
   void TXoDispatcher::enable(uint32_t txoAddress)

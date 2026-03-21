@@ -23,10 +23,12 @@ namespace txo
     // CV state: written by TXoCV objects, read by dispatcher
     float mCVValue[MaxOutputs];
     bool mCVDirty[MaxOutputs];
+    int16_t mCVLastSent[MaxOutputs];
 
     // TR state: written by TXoTR objects, read by dispatcher
     float mTRValue[MaxOutputs];
     bool mTRDirty[MaxOutputs];
+    bool mTRLastSent[MaxOutputs];
 
     // Collision tracking: last-write-wins with frame counter
     uint32_t mCVWriteFrame[MaxOutputs];
