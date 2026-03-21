@@ -3,6 +3,7 @@
 #include <hal/log.h>
 
 static bool initialized = false;
+static bool masterOpen = false;
 
 bool I2c_popMessage(I2cMessage *msg)
 {
@@ -17,6 +18,7 @@ void I2c_init()
 void I2c_deinit()
 {
   initialized = false;
+  masterOpen = false;
 }
 
 bool I2c_openSlave(uint32_t ownAddress)
@@ -42,4 +44,57 @@ void I2c_closeSlave()
   {
     logError("I2c_closeSlave: i2c not initialized.");
   }
+}
+
+bool I2c_openMaster()
+{
+  if (initialized)
+  {
+    logInfo("I2c_openMaster: emulator stub (no real I2C).");
+    masterOpen = true;
+    return true;
+  }
+  else
+  {
+    logError("I2c_openMaster: i2c not initialized.");
+    return false;
+  }
+}
+
+void I2c_closeMaster()
+{
+  if (initialized)
+  {
+    masterOpen = false;
+    logInfo("I2c_closeMaster: emulator stub.");
+  }
+  else
+  {
+    logError("I2c_closeMaster: i2c not initialized.");
+  }
+}
+
+bool I2c_sendMessage(uint32_t slaveAddress, const uint8_t *data,
+                     uint8_t length)
+{
+  if (!masterOpen)
+  {
+    return false;
+  }
+
+  // Log the message for debugging in emulator
+  logInfo("I2c_sendMessage: addr=0x%02x len=%d cmd=0x%02x",
+          slaveAddress, length, length > 0 ? data[0] : 0);
+  return true;
+}
+
+bool I2c_isMasterOpen()
+{
+  return masterOpen;
+}
+
+void I2c_drainMasterQueue(int maxCount)
+{
+  // No-op in emulator — messages are logged in I2c_sendMessage
+  (void)maxCount;
 }

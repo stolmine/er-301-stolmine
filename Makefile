@@ -1,5 +1,20 @@
 # top-level makefile
 
+# Define all build targets
+BUILD_TARGETS = firmware app-libs app core teletype txo emu
+
+# Define all clean targets
+CLEAN_TARGETS = firmware-clean app-libs-clean app-clean core-clean teletype-clean txo-clean emu-clean
+
+# Add new all and clean targets at the top
+.PHONY: all clean $(BUILD_TARGETS) $(CLEAN_TARGETS)
+
+# Build everything
+all: $(BUILD_TARGETS)
+
+# Clean everything
+clean: $(CLEAN_TARGETS)
+
 firmware:
 	+$(MAKE) -f scripts/firmware.mk
 
@@ -44,6 +59,15 @@ core-clean:
 
 teletype-clean:
 	+$(MAKE) -f scripts/teletype.mk clean
+
+txo:
+	+$(MAKE) -f scripts/txo.mk
+
+txo-install:
+	+$(MAKE) -f scripts/txo.mk install
+
+txo-clean:
+	+$(MAKE) -f scripts/txo.mk clean
 
 sbl: 
 	+$(MAKE) -f scripts/sbl.mk
