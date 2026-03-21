@@ -33,6 +33,9 @@ extern "C"
   bool I2c_isMasterOpen();
   void I2c_drainMasterQueue(int maxCount);
 
+  // Internal: called from I2C2 ISR to handle master TX interrupts
+  void I2c_masterISRHandler(uint32_t rawStatus);
+
 #ifdef __cplusplus
 }
 #endif

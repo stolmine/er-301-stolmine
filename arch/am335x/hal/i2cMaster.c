@@ -11,7 +11,6 @@
 #define I2C_BASE_ADDRESS (SOC_I2C_2_REGS)
 #define I2C_INPUT_FUNCTIONAL_CLK (48000000U)
 #define I2C_MODULE_INTERNAL_CLK_12MHZ (12000000U)
-#define I2C_INTERRUPT (I2C2_INT)
 
 #define MASTER_TX_INTFLAGS (I2C_INT_TRANSMIT_READY | \
                             I2C_INT_ADRR_READY_ACESS | \
@@ -20,6 +19,9 @@
 
 // TX queue (lock-free SPSC FIFO, same pattern as slave RX queue)
 #define TX_QUEUE_SIZE (64)
+
+// Max messages the ISR will chain before going idle.
+#define MAX_ISR_CHAIN (4)
 
 typedef struct
 {
@@ -35,11 +37,6 @@ typedef enum
   MASTER_WAIT_ARDY
 } MasterState;
 
-// Max messages the ISR will chain before going idle.
-// Prevents the ISR from monopolizing the interrupt context
-// when the queue is continuously fed (e.g., feedback loops).
-#define MAX_ISR_CHAIN (4)
-
 typedef struct
 {
   bool isOpen;
@@ -53,9 +50,7 @@ typedef struct
   volatile MasterState state;
   TxEntry current;
   uint8_t byteIndex;
-  uint8_t chainCount; // messages sent in current chain
-
-  Hwi_Handle hwiHandle;
+  uint8_t chainCount;
 } MasterLocal;
 
 static MasterLocal master;
@@ -108,7 +103,6 @@ static bool popTxQ(TxEntry *entry)
 // Called from audio thread (with HWI disabled) and from ISR (on ARDY).
 static void startNextTransfer(bool fromISR)
 {
-  // Limit chaining from ISR to avoid starving other interrupts
   if (fromISR && master.chainCount >= MAX_ISR_CHAIN)
   {
     master.state = MASTER_IDLE;
@@ -148,17 +142,22 @@ static void startNextTransfer(bool fromISR)
                        I2C_CFG_7BIT_SLAVE_ADDR);
 }
 
-static void masterTxISR(UArg arg)
+// Called from the unified I2C2 ISR in i2cSlave.c.
+// Handles master TX interrupt status bits.
+void I2c_masterISRHandler(uint32_t stat)
 {
-  uint32_t stat = I2CMasterIntRawStatus(I2C_BASE_ADDRESS);
+  if (!master.isOpen || master.state == MASTER_IDLE)
+  {
+    return;
+  }
 
   // NACK: slave didn't acknowledge
   if (stat & I2C_INT_NO_ACK)
   {
     I2CMasterIntDisableEx(I2C_BASE_ADDRESS, MASTER_TX_INTFLAGS);
     I2CMasterStop(I2C_BASE_ADDRESS);
-    I2CMasterIntClearEx(I2C_BASE_ADDRESS, I2C_INT_ALL);
-    // Discard this message, try next
+    I2CMasterIntClearEx(I2C_BASE_ADDRESS,
+                        I2C_INT_NO_ACK | I2C_INT_ADRR_READY_ACESS);
     startNextTransfer(true);
     return;
   }
@@ -167,7 +166,7 @@ static void masterTxISR(UArg arg)
   if (stat & I2C_INT_ARBITRATION_LOST)
   {
     I2CMasterIntDisableEx(I2C_BASE_ADDRESS, MASTER_TX_INTFLAGS);
-    I2CMasterIntClearEx(I2C_BASE_ADDRESS, I2C_INT_ALL);
+    I2CMasterIntClearEx(I2C_BASE_ADDRESS, I2C_INT_ARBITRATION_LOST);
     master.state = MASTER_IDLE;
     return;
   }
@@ -183,7 +182,6 @@ static void masterTxISR(UArg arg)
 
       if (master.byteIndex >= master.current.length)
       {
-        // Last byte written — only need ARDY now
         I2CMasterIntDisableEx(I2C_BASE_ADDRESS, I2C_INT_TRANSMIT_READY);
         master.state = MASTER_WAIT_ARDY;
       }
@@ -195,8 +193,7 @@ static void masterTxISR(UArg arg)
   if (stat & I2C_INT_ADRR_READY_ACESS)
   {
     I2CMasterIntDisableEx(I2C_BASE_ADDRESS, MASTER_TX_INTFLAGS);
-    I2CMasterIntClearEx(I2C_BASE_ADDRESS, I2C_INT_ALL);
-    // Chain to next queued message (or go IDLE)
+    I2CMasterIntClearEx(I2C_BASE_ADDRESS, I2C_INT_ADRR_READY_ACESS);
     startNextTransfer(true);
   }
 }
@@ -215,9 +212,11 @@ bool I2c_openMaster()
   // I2C2 shares pins with UART0
   Uart_disable();
 
-  Board_pinmuxI2C2();
-  Board_enableI2C2();
+  // I2c_init() creates the shared HWI and enables pinmux/clock.
+  // Safe to call multiple times (idempotent).
+  I2c_init();
 
+  // Configure I2C2 peripheral for master TX
   I2CMasterDisable(I2C_BASE_ADDRESS);
   I2CAutoIdleDisable(I2C_BASE_ADDRESS);
 
@@ -232,12 +231,6 @@ bool I2c_openMaster()
   I2CMasterEnableFreeRun(I2C_BASE_ADDRESS);
   I2CFIFOClear(I2C_BASE_ADDRESS, I2C_TX_MODE);
 
-  // Register ISR for I2C2 interrupt
-  Hwi_Params params;
-  Hwi_Params_init(&params);
-  params.priority = HWI_PRIORITY_I2C;
-  master.hwiHandle = Hwi_create(I2C_INTERRUPT, masterTxISR, &params, NULL);
-
   master.isOpen = true;
   logInfo("I2c_openMaster: interrupt-driven master TX enabled on I2C2.");
   return true;
@@ -249,16 +242,9 @@ void I2c_closeMaster()
   {
     master.isOpen = false;
 
-    I2CMasterIntDisableEx(I2C_BASE_ADDRESS, I2C_INT_ALL);
+    I2CMasterIntDisableEx(I2C_BASE_ADDRESS, MASTER_TX_INTFLAGS);
     I2CMasterIntClearEx(I2C_BASE_ADDRESS, I2C_INT_ALL);
 
-    if (master.hwiHandle)
-    {
-      Hwi_delete(&master.hwiHandle);
-      master.hwiHandle = NULL;
-    }
-
-    I2CMasterDisable(I2C_BASE_ADDRESS);
     master.state = MASTER_IDLE;
     logInfo("I2c_closeMaster: master TX disabled.");
   }
@@ -285,7 +271,6 @@ bool I2c_sendMessage(uint32_t slaveAddress, const uint8_t *data,
 }
 
 // Called from the audio thread to kick the ISR if idle.
-// The ISR self-chains through queued messages on ARDY.
 void I2c_drainMasterQueue(int maxCount)
 {
   (void)maxCount;

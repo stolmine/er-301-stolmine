@@ -123,21 +123,26 @@ static void hwiOnInterrupt(UArg arg)
 {
   uint32_t rawStat = I2CSlaveIntRawStatus(I2C_BASE_ADDRESS);
 
+  // Dispatch master TX interrupts (XRDY, NACK, AL, ARDY when master active)
+  if (I2c_isMasterOpen())
+  {
+    I2c_masterISRHandler(rawStat);
+    return;
+  }
+
+  // Slave RX handling
 #if USE_SBLOCK
   if ((rawStat & I2C_INT_ADRR_SLAVE) != 0)
   {
-    //Breakpoint();
     I2CClockBlockingControl(I2C_BASE_ADDRESS, 0, 0, 0, 0);
   }
 #endif
 
   if ((rawStat & I2C_INT_RECV_READY) != 0U)
   {
-    //Breakpoint();
     appendByte(I2CSlaveDataGet(I2C_BASE_ADDRESS));
   }
 
-  //if ((rawStat & I2C_INT_STOP_CONDITION) != 0)
   if ((rawStat & I2C_INT_ADRR_READY_ACESS) != 0)
   {
     endMessage();

@@ -120,3 +120,9 @@ void I2c_drainMasterQueue(int maxCount)
   // No-op in emulator — messages are logged in I2c_sendMessage
   (void)maxCount;
 }
+
+void I2c_masterISRHandler(uint32_t rawStatus)
+{
+  // No-op in emulator
+  (void)rawStatus;
+}
