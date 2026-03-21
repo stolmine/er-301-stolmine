@@ -42,10 +42,12 @@ namespace txo
 
   void TXoDispatcher::sendCV(int output, float value)
   {
-    // Convert float voltage to 14-bit signed integer
-    // ER-301 uses 1.0f = 1V, TXo expects 16384 = 1V
-    int16_t intValue = (int16_t)CLAMP(-16384, 16383,
-                                      (int)(value * 16384.0f));
+    // Convert float voltage to 16-bit signed integer
+    // TXo protocol: 16384 per volt (same as Teletype SC.CV)
+    // int16 range ±32767 gives ~±2V at this scale
+    // Values beyond ±2V will clip at the protocol level
+    int intRaw = (int)(value * 16384.0f);
+    int16_t intValue = (int16_t)CLAMP(-32768, 32767, intRaw);
     uint8_t data[4];
     data[0] = TO_CV_SET;
     data[1] = (uint8_t)output;

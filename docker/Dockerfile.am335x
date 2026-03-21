@@ -1,0 +1,24 @@
+FROM --platform=linux/amd64 ubuntu:20.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TI_INSTALL_DIR=/root/ti
+
+# Build dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    swig \
+    python3 \
+    zip \
+    gcc-multilib \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Download TI Processor SDK RTOS for AM335x v04.01.00.06
+# Running under QEMU (not Rosetta) so the x86 installer works
+RUN wget -q http://software-dl.ti.com/processor-sdk-rtos/esd/AM335X/04_01_00_06/exports/ti-processor-sdk-rtos-am335x-evm-04.01.00.06-Linux-x86-Install.bin \
+    -O /tmp/ti-sdk.bin \
+    && chmod +x /tmp/ti-sdk.bin \
+    && /tmp/ti-sdk.bin --prefix /root/ti --mode unattended \
+    && rm /tmp/ti-sdk.bin
+
+WORKDIR /er-301

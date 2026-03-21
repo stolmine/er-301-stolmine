@@ -17,6 +17,8 @@ namespace txo
     od::Inlet mInput{"In"};
     od::Outlet mOutput{"Out"};
     od::Parameter mPort{"Port", 0.0f};
+    od::Parameter mGain{"Gain", 1.0f};
+    od::Option mMode{"Mode", 0}; // 0 = Normal, 1 = V/Oct
 #endif
 
   private:

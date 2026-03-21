@@ -10,6 +10,8 @@ namespace txo
     addInput(mInput);
     addOutput(mOutput);
     addParameter(mPort);
+    addParameter(mGain);
+    addOption(mMode);
   }
 
   TXoCV::~TXoCV()
@@ -22,7 +24,6 @@ namespace txo
                      (int)mPort.roundValue());
 
     float *in = mInput.buffer();
-
     float *out = mOutput.buffer();
 
     // Pass through input to output
@@ -33,6 +34,12 @@ namespace txo
 
     // Sample the last value in the frame for I2C
     float value = in[FRAMELENGTH - 1];
+
+    // Apply gain in Normal mode; 1:1 in V/Oct mode
+    if (mMode.value() == 0)
+    {
+      value *= mGain.value();
+    }
 
     // Write to dispatcher (last-write-wins for v1)
     mpDispatcher->mCVValue[port] = value;
