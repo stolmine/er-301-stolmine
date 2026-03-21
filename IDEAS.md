@@ -35,3 +35,20 @@ ENHANCE: Control Editor > copy/paste controls
 
 ENHANCE: Saving files, naming things > Option to generate a unique name for the user.
 
+## I2C Master Output Ideas
+
+1. **TXo output for ER-301 CV/gate** — finished. Interrupt-driven master TX with simultaneous slave RX for teletype/crow compatibility.
+
+2. **ER-301 CV/gate for other devices** — simple architecturally (I2C infra is device-agnostic), challenging in terms of UI.
+   - For the Disting EX, for instance:
+     - Unit takes trigger input from the left, or user toggles for continuous updates — separate units?
+     - Pushing voices would be trigger-from-left which samples CV inputs to other controls
+     - V/Oct, Plaits model, etc.
+     - Cumbersome because the Disting has dozens of algorithms, all requiring somewhat unique control surfaces
+     - Better left to the likes of Teletype
+
+3. **The 301 is better suited to simple CV mod outputs, gate/trig patterns** — not a general-purpose I2C controller. Focus on what it does well: signal processing feeding into CV/gate outputs.
+
+4. **The 301 has few interesting sequencers itself** — potential area for expansion with sequencer units that output via I2C.
+
+5. **Fixed-function devices like Just Friends might be decent targets** — JF has a small, well-defined command set (6 voices, run mode, etc.) — a manageable UI surface compared to something like Disting.
