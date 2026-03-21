@@ -107,7 +107,6 @@ namespace txo
     {
       mTXoAddress = txoAddress;
       logInfo("Enabling TXo I2C master to 0x%x.", txoAddress);
-      I2c_init();
       I2c_openMaster();
       od::AudioThread::addTask(this, INT_MAX - 2);
       mEnabled = true;

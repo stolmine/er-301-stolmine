@@ -1,5 +1,7 @@
 #include <hal/i2c.h>
+#include <hal/board.h>
 #include <hal/log.h>
+#include <hal/uart.h>
 #include <ti/am335x/csl_i2c.h>
 #include <ti/am335x/soc.h>
 #include <string.h>
@@ -75,8 +77,42 @@ bool I2c_openMaster()
     return true;
   }
   initTxQ();
+
+  // I2C2 shares pins with UART0 — disable UART first
+  Uart_disable();
+
+  // Enable I2C2 pinmux and module clock
+  Board_pinmuxI2C2();
+  Board_enableI2C2();
+
+  // Disable the peripheral so we can reconfigure
+  I2CMasterDisable(I2C_BASE_ADDRESS);
+
+  // Disable Auto Idle
+  I2CAutoIdleDisable(I2C_BASE_ADDRESS);
+
+  // Configure clock for 100kHz
+  I2CMasterInitExpClk(I2C_BASE_ADDRESS, I2C_INPUT_FUNCTIONAL_CLK,
+                      I2C_MODULE_INTERNAL_CLK_12MHZ,
+                      100000);
+
+  // Clear any pending interrupts
+  I2CMasterIntClearEx(I2C_BASE_ADDRESS, I2C_INT_ALL);
+
+  // Disable all interrupts — master TX uses polled mode
+  I2CMasterIntDisableEx(I2C_BASE_ADDRESS, I2C_INT_ALL);
+
+  // Enable the I2C module
+  I2CMasterEnable(I2C_BASE_ADDRESS);
+
+  // Enable free run mode (don't freeze on debug halt)
+  I2CMasterEnableFreeRun(I2C_BASE_ADDRESS);
+
+  // Clear TX FIFO
+  I2CFIFOClear(I2C_BASE_ADDRESS, I2C_TX_MODE);
+
   master.isOpen = true;
-  logInfo("I2c_openMaster: master TX enabled.");
+  logInfo("I2c_openMaster: master TX enabled, I2C2 configured for polled master.");
   return true;
 }
 
