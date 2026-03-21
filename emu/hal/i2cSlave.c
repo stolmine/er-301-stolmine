@@ -126,3 +126,13 @@ void I2c_masterISRHandler(uint32_t rawStatus)
   // No-op in emulator
   (void)rawStatus;
 }
+
+bool I2c_isMasterBusy(void)
+{
+  return false;
+}
+
+bool I2c_isSlaveOpen(void)
+{
+  return false;
+}

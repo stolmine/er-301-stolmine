@@ -21,6 +21,11 @@
 #define USE_BUS_RATE_100KHZ 1
 #define USE_BUS_RATE_400KHZ 0
 
+#define SLAVE_RX_INTFLAGS (I2C_INT_ADRR_READY_ACESS | \
+                           I2C_INT_RECV_READY | \
+                           I2C_INT_ADRR_SLAVE | \
+                           I2C_INT_RECV_OVER_RUN)
+
 typedef struct
 {
   Hwi_Handle hwiHandle;
@@ -119,40 +124,50 @@ bool I2c_popMessage(I2cMessage *msg)
   return popQ(msg);
 }
 
+bool I2c_isSlaveOpen(void)
+{
+  return self.isOpen;
+}
+
 static void hwiOnInterrupt(UArg arg)
 {
   uint32_t rawStat = I2CSlaveIntRawStatus(I2C_BASE_ADDRESS);
 
-  // Dispatch master TX interrupts (XRDY, NACK, AL, ARDY when master active)
+  // Master TX handling (XRDY, NACK, AL, and ARDY when master is mid-transfer)
   if (I2c_isMasterOpen())
   {
     I2c_masterISRHandler(rawStat);
-    return;
   }
 
-  // Slave RX handling
-#if USE_SBLOCK
-  if ((rawStat & I2C_INT_ADRR_SLAVE) != 0)
+  // Slave RX handling (AAS, RRDY, and ARDY when master is idle)
+  if (self.isOpen)
   {
-    I2CClockBlockingControl(I2C_BASE_ADDRESS, 0, 0, 0, 0);
-  }
+#if USE_SBLOCK
+    if ((rawStat & I2C_INT_ADRR_SLAVE) != 0)
+    {
+      I2CClockBlockingControl(I2C_BASE_ADDRESS, 0, 0, 0, 0);
+    }
 #endif
 
-  if ((rawStat & I2C_INT_RECV_READY) != 0U)
-  {
-    appendByte(I2CSlaveDataGet(I2C_BASE_ADDRESS));
-  }
+    if ((rawStat & I2C_INT_RECV_READY) != 0U)
+    {
+      appendByte(I2CSlaveDataGet(I2C_BASE_ADDRESS));
+    }
 
-  if ((rawStat & I2C_INT_ADRR_READY_ACESS) != 0)
-  {
-    endMessage();
+    // ARDY as slave message boundary — only when master is not mid-transfer
+    if ((rawStat & I2C_INT_ADRR_READY_ACESS) != 0 && !I2c_isMasterBusy())
+    {
+      endMessage();
 #if USE_SBLOCK
-    I2CClockBlockingControl(I2C_BASE_ADDRESS, 1, 0, 0, 0);
+      I2CClockBlockingControl(I2C_BASE_ADDRESS, 1, 0, 0, 0);
 #endif
-  }
+    }
 
-  logAssert((rawStat & I2C_INT_RECV_OVER_RUN) == 0);
-  I2CSlaveIntClearEx(I2C_BASE_ADDRESS, I2C_INT_ALL);
+    logAssert((rawStat & I2C_INT_RECV_OVER_RUN) == 0);
+
+    // Clear all slave-handled status bits
+    I2CSlaveIntClearEx(I2C_BASE_ADDRESS, SLAVE_RX_INTFLAGS);
+  }
 }
 
 void I2c_init()
@@ -276,16 +291,15 @@ void I2c_closeSlave()
     /* Clear the RX data fifo */
     I2CSlaveDataGet(I2C_BASE_ADDRESS);
 
-    /* Clear all interrupts */
-    I2CSlaveIntClearEx(I2C_BASE_ADDRESS, I2C_INT_ALL);
+    /* Disable and clear only slave-specific interrupts */
+    I2CSlaveIntDisableEx(I2C_BASE_ADDRESS, SLAVE_RX_INTFLAGS);
+    I2CSlaveIntClearEx(I2C_BASE_ADDRESS, SLAVE_RX_INTFLAGS);
 
-    /* Disable STOP condition interrupt */
-    I2CSlaveIntDisableEx(I2C_BASE_ADDRESS, I2C_INT_ALL);
-
-    /* Mask I2C interrupts */
-    I2CMasterIntDisableEx(I2C_BASE_ADDRESS, I2C_INT_ALL);
-
-    /* Disable the I2C Master */
-    I2CMasterDisable(I2C_BASE_ADDRESS);
+    /* Only disable the peripheral if master is not active */
+    if (!I2c_isMasterOpen())
+    {
+      I2CMasterIntDisableEx(I2C_BASE_ADDRESS, I2C_INT_ALL);
+      I2CMasterDisable(I2C_BASE_ADDRESS);
+    }
   }
 }

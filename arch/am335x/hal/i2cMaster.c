@@ -99,6 +99,17 @@ static bool popTxQ(TxEntry *entry)
   return true;
 }
 
+// Restore slave-mode CON register if slave is open.
+// Called whenever master goes idle after a transfer.
+static void restoreSlaveMode(void)
+{
+  if (I2c_isSlaveOpen())
+  {
+    I2CMasterControl(I2C_BASE_ADDRESS,
+                     I2C_CFG_MST_ENABLE | I2C_CFG_7BIT_OWN_ADDR_0);
+  }
+}
+
 // Pop next message from queue and initiate I2C transfer.
 // Called from audio thread (with HWI disabled) and from ISR (on ARDY).
 static void startNextTransfer(bool fromISR)
@@ -107,6 +118,15 @@ static void startNextTransfer(bool fromISR)
   {
     master.state = MASTER_IDLE;
     master.chainCount = 0;
+    restoreSlaveMode();
+    return;
+  }
+
+  // Don't start a master transfer while bus is busy (e.g., slave receiving)
+  if (I2CMasterBusBusy(I2C_BASE_ADDRESS))
+  {
+    master.state = MASTER_IDLE;
+    restoreSlaveMode();
     return;
   }
 
@@ -115,6 +135,7 @@ static void startNextTransfer(bool fromISR)
   {
     master.state = MASTER_IDLE;
     master.chainCount = 0;
+    restoreSlaveMode();
     return;
   }
 
@@ -133,9 +154,11 @@ static void startNextTransfer(bool fromISR)
   I2CMasterSlaveAddrSet(I2C_BASE_ADDRESS, entry.slaveAddress);
   I2CSetDataCount(I2C_BASE_ADDRESS, entry.length);
   I2CFIFOClear(I2C_BASE_ADDRESS, I2C_TX_MODE);
-  I2CMasterIntClearEx(I2C_BASE_ADDRESS, I2C_INT_ALL);
+  I2CMasterIntClearEx(I2C_BASE_ADDRESS, MASTER_TX_INTFLAGS);
   I2CMasterIntEnableEx(I2C_BASE_ADDRESS, MASTER_TX_INTFLAGS);
 
+  // MST_TX takes over the CON register. When master goes idle,
+  // restoreSlaveMode() re-enables slave addressing.
   I2CMasterControl(I2C_BASE_ADDRESS,
                    I2C_CFG_MST_TX | I2C_CFG_MST_ENABLE |
                        I2C_CFG_START | I2C_CFG_STOP |
@@ -168,6 +191,7 @@ void I2c_masterISRHandler(uint32_t stat)
     I2CMasterIntDisableEx(I2C_BASE_ADDRESS, MASTER_TX_INTFLAGS);
     I2CMasterIntClearEx(I2C_BASE_ADDRESS, I2C_INT_ARBITRATION_LOST);
     master.state = MASTER_IDLE;
+    restoreSlaveMode();
     return;
   }
 
@@ -216,19 +240,24 @@ bool I2c_openMaster()
   // Safe to call multiple times (idempotent).
   I2c_init();
 
-  // Configure I2C2 peripheral for master TX
-  I2CMasterDisable(I2C_BASE_ADDRESS);
-  I2CAutoIdleDisable(I2C_BASE_ADDRESS);
+  // Only do full peripheral config if slave hasn't already set it up.
+  // Slave's I2c_openSlave() configures clock, enables peripheral, etc.
+  // Reconfiguring would destroy the slave's own-address and interrupt setup.
+  if (!I2c_isSlaveOpen())
+  {
+    I2CMasterDisable(I2C_BASE_ADDRESS);
+    I2CAutoIdleDisable(I2C_BASE_ADDRESS);
 
-  I2CMasterInitExpClk(I2C_BASE_ADDRESS, I2C_INPUT_FUNCTIONAL_CLK,
-                      I2C_MODULE_INTERNAL_CLK_12MHZ,
-                      100000);
+    I2CMasterInitExpClk(I2C_BASE_ADDRESS, I2C_INPUT_FUNCTIONAL_CLK,
+                        I2C_MODULE_INTERNAL_CLK_12MHZ,
+                        100000);
 
-  I2CMasterIntClearEx(I2C_BASE_ADDRESS, I2C_INT_ALL);
-  I2CMasterIntDisableEx(I2C_BASE_ADDRESS, I2C_INT_ALL);
+    I2CMasterIntClearEx(I2C_BASE_ADDRESS, I2C_INT_ALL);
+    I2CMasterIntDisableEx(I2C_BASE_ADDRESS, I2C_INT_ALL);
 
-  I2CMasterEnable(I2C_BASE_ADDRESS);
-  I2CMasterEnableFreeRun(I2C_BASE_ADDRESS);
+    I2CMasterEnable(I2C_BASE_ADDRESS);
+    I2CMasterEnableFreeRun(I2C_BASE_ADDRESS);
+  }
   I2CFIFOClear(I2C_BASE_ADDRESS, I2C_TX_MODE);
 
   master.isOpen = true;
@@ -243,9 +272,10 @@ void I2c_closeMaster()
     master.isOpen = false;
 
     I2CMasterIntDisableEx(I2C_BASE_ADDRESS, MASTER_TX_INTFLAGS);
-    I2CMasterIntClearEx(I2C_BASE_ADDRESS, I2C_INT_ALL);
+    I2CMasterIntClearEx(I2C_BASE_ADDRESS, MASTER_TX_INTFLAGS);
 
     master.state = MASTER_IDLE;
+    restoreSlaveMode();
     logInfo("I2c_closeMaster: master TX disabled.");
   }
 }
@@ -253,6 +283,11 @@ void I2c_closeMaster()
 bool I2c_isMasterOpen()
 {
   return master.isOpen;
+}
+
+bool I2c_isMasterBusy(void)
+{
+  return master.isOpen && master.state != MASTER_IDLE;
 }
 
 bool I2c_sendMessage(uint32_t slaveAddress, const uint8_t *data,
