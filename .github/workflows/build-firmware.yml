@@ -1,0 +1,73 @@
+name: Build Firmware
+
+on:
+  push:
+    branches: [develop, feature/*]
+    tags: ['v*']
+  pull_request:
+    branches: [develop]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # full history needed for git describe versioning
+
+    - name: Install build dependencies
+      run: |
+        sudo dpkg --add-architecture i386
+        sudo apt-get update
+        sudo apt-get install -y build-essential swig python3 zip gcc-multilib libc6:i386
+
+    - name: Cache TI Processor SDK
+      id: cache-ti-sdk
+      uses: actions/cache@v4
+      with:
+        path: ~/ti
+        key: ti-sdk-rtos-am335x-04.01.00.06
+
+    - name: Install TI Processor SDK
+      if: steps.cache-ti-sdk.outputs.cache-hit != 'true'
+      run: |
+        wget -q --show-progress \
+          http://software-dl.ti.com/processor-sdk-rtos/esd/AM335X/04_01_00_06/exports/ti-processor-sdk-rtos-am335x-evm-04.01.00.06-Linux-x86-Install.bin \
+          -O /tmp/ti-sdk.bin
+        chmod +x /tmp/ti-sdk.bin
+        /tmp/ti-sdk.bin --prefix ~/ti --mode unattended
+        rm /tmp/ti-sdk.bin
+
+    - name: Verify TI SDK
+      run: |
+        ls ~/ti/gcc-arm-none-eabi-4_9-2015q3/bin/arm-none-eabi-gcc
+        ls ~/ti/xdctools_3_32_01_22_core/xs
+        ls ~/ti/bios_6_46_05_55/packages
+        ls ~/ti/pdk_am335x_1_0_8/packages
+
+    - name: Build firmware
+      run: make firmware ARCH=am335x
+
+    - name: Verify build outputs
+      run: |
+        echo "--- Firmware zip ---"
+        ls -lh release/am335x/er-301-v*.zip
+        echo "--- Zip contents ---"
+        unzip -l release/am335x/er-301-v*.zip
+
+    - name: Upload firmware artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: er-301-firmware
+        path: release/am335x/er-301-v*.zip
+
+    - name: Create release
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: release/am335x/er-301-v*.zip
+        generate_release_notes: true

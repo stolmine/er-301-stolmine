@@ -59,40 +59,50 @@ git clone git@github.com:stolmine/er-301-stolmine.git
 cd er-301-stolmine
 git checkout feature/txo-i2c-output
 
-# Build firmware (includes the I2C master HAL changes)
+# Build the full firmware package (kernel + bootloaders + all mod packages)
 make firmware ARCH=am335x
-
-# Build the TXo mod package
-make txo ARCH=am335x
 ```
 
 If TI SDK is not in ~/ti, pass the path:
 ```bash
 make firmware ARCH=am335x TI_INSTALL_DIR=/path/to/ti
-make txo ARCH=am335x TI_INSTALL_DIR=/path/to/ti
 ```
 
-### 4. Collect Build Outputs
+The `make firmware` target builds everything: kernel.bin, bootloaders (MLO, SBL),
+and all mod packages (core, teletype, txo) into a single zip archive.
 
-The files you need for the ER-301 SD card:
+### 4. Install on ER-301 Hardware
+
+The firmware build produces a zip archive containing everything needed:
 
 ```bash
-# Firmware binary
-find . -name 'kernel.bin' -path '*/am335x/*'
-
-# TXo mod package
-ls testing/am335x/mods/txo-*.pkg
+ls release/am335x/er-301-v*.zip
 ```
 
-### 5. Install on ER-301 Hardware
+**Option A: Full firmware update (recommended)**
 
-1. **Firmware**: Copy `kernel.bin` to the ER-301's rear SD card root
-   (this replaces the stock firmware — keep a backup of the original!)
-2. **TXo package**: Copy `txo-*.pkg` to `front SD/ER-301/packages/`
+1. Copy the zip to the ER-301's front SD card root
+2. On the ER-301, navigate to Admin > Install Firmware
+3. Select the zip — this installs kernel.bin to the rear card and all
+   packages (core, teletype, txo) automatically
+
+**Option B: Manual install**
+
+1. **Rear SD card**: Copy `kernel.bin`, `MLO`, and `SBL` to the root
+   (back up the originals first!)
+2. **Front SD card**: Copy all `.pkg` files to `ER-301/packages/`
 3. Boot the ER-301
-4. Go to Package Manager, install the TXo package
-5. Open the TXo Library config menu, enable I2C master
-6. Insert TXo CV or TXo TR units in your signal chains
+
+**Important**: The firmware and all packages must come from the same build.
+Mixing packages from stock firmware with this custom firmware (or vice versa)
+will cause "failed to load" errors on core units.
+
+### 5. Post-Install Setup
+
+1. Boot the ER-301
+2. Go to Package Manager, verify core/teletype/txo are all installed
+3. Open the TXo Library config menu, enable I2C master
+4. Insert TXo CV or TXo TR units in your signal chains
 
 ### 6. Hardware I2C Wiring
 

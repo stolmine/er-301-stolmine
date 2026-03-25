@@ -69,6 +69,8 @@ txo-install:
 txo-clean:
 	+$(MAKE) -f scripts/txo.mk clean
 
+install-all: core-install teletype-install txo-install
+
 sbl: 
 	+$(MAKE) -f scripts/sbl.mk
 
