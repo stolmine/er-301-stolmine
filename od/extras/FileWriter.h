@@ -1,6 +1,7 @@
 #pragma once
 
 #include <od/extras/ReferenceCounted.h>
+#include <cstdint>
 #include <string>
 
 #define FILEWRITER_USE_SYS
