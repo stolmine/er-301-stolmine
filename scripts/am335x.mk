@@ -35,7 +35,7 @@ STRIP := $(gcc_install_dir)/bin/arm-none-eabi-strip
 READELF := $(gcc_install_dir)/bin/arm-none-eabi-readelf
 NM := $(gcc_install_dir)/bin/arm-none-eabi-nm
 TIIMAGE := $(pdk_install_dir)/ti/starterware/tools/ti_image/tiimage_bin/tiimage
-SWIG := swig
+SWIG := $(HOME)/.local/swig-4.2.1/bin/swig
 XS = $(xdc_install_dir)/xs --xdcpath="$(XDCPATH)" xdc.tools.configuro -c $(gcc_install_dir)
 PYTHON := python3
 ZIP := zip

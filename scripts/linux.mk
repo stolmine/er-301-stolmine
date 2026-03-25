@@ -10,6 +10,6 @@ SIZE := size
 STRIP := strip
 READELF := readelf
 NM := nm
-SWIG := swig
+SWIG := $(HOME)/.local/swig-4.2.1/bin/swig
 PYTHON := python3
 ZIP := zip
