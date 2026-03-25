@@ -416,3 +416,40 @@ bool Uart_isEnabled();
 
 bool glob(const char * text, const char * pattern);
 int getTextWidth(const char * text, int fontSize);
+
+%init %{
+  /* SWIG Runtime Version Bridge
+   *
+   * Different SWIG versions use different Lua registry keys to store the
+   * module type table (e.g., "swig_runtime_data_type_pointer4" for SWIG
+   * 4.0-4.2, "swig_runtime_data_type_pointer5" for SWIG 4.3+). Packages
+   * compiled with a different SWIG version than the kernel can't find
+   * the kernel's type registrations, causing type check failures like:
+   *   "expected 'od::Parameter *' got 'od::Parameter *'"
+   *
+   * This bridge aliases the type table under all known runtime version
+   * keys so that packages compiled with any SWIG version can share types
+   * with the kernel and with each other.
+   */
+  {
+    static const char *swig_runtime_keys[] = {
+      "swig_runtime_data_type_pointer3",
+      "swig_runtime_data_type_pointer4",
+      "swig_runtime_data_type_pointer5",
+      NULL
+    };
+    const char *current_key = "swig_runtime_data_type_pointer" SWIG_RUNTIME_VERSION;
+    lua_pushstring(L, current_key);
+    lua_rawget(L, LUA_REGISTRYINDEX);
+    if (lua_islightuserdata(L, -1)) {
+      for (const char **key = swig_runtime_keys; *key != NULL; key++) {
+        if (strcmp(*key, current_key) != 0) {
+          lua_pushstring(L, *key);
+          lua_pushlightuserdata(L, lua_touserdata(L, -3));
+          lua_rawset(L, LUA_REGISTRYINDEX);
+        }
+      }
+    }
+    lua_pop(L, 1);
+  }
+%}
