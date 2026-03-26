@@ -1,4 +1,12 @@
-# ER-301 Sound Computer
+# ER-301 Sound Computer (stolmine fork)
+
+This is a fork of the [ER-301](https://github.com/odevices/er-301) firmware that adds a **TXo I2C master output** mod, enabling the ER-301 to send CV and gate data over I2C to Monome TXo expanders while maintaining simultaneous Teletype slave communication.
+
+## What's different from upstream
+
+* **TXo mod** — interrupt-driven I2C master TX with gain control, V/Oct mode, and simultaneous Teletype slave RX coexistence
+* **Vanilla package compatibility** — SWIG pinned to 4.2.1 so community packages compiled against upstream firmware load and share types correctly
+* **Bundled mods** — firmware zip includes core, teletype, and txo packages
 
 ## Table of Contents
 
@@ -25,7 +33,7 @@ This project contains the source code for:
 * secondary boot loader (SBL)
 * firmware (kernel.bin)
 * emulator (Linux and macOS only)
-* factory mods (core, teletype)
+* factory mods (core, teletype, txo)
 * SDK for building your own mods
 
 ## Emulator
