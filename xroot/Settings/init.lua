@@ -42,13 +42,22 @@ local defaults = {
     description = "Starts when inactive for:",
     value = "30 mins",
     choices = {
+      "1 min",
+      "2 mins",
+      "5 mins",
       "10 mins",
       "30 mins",
       "2 hours",
       "1 day"
     },
     onSet = function(value)
-      if value == "10 mins" then
+      if value == "1 min" then
+        app.UIThread.setScreenSaverTime(1 * 60)
+      elseif value == "2 mins" then
+        app.UIThread.setScreenSaverTime(2 * 60)
+      elseif value == "5 mins" then
+        app.UIThread.setScreenSaverTime(5 * 60)
+      elseif value == "10 mins" then
         app.UIThread.setScreenSaverTime(10 * 60)
       elseif value == "30 mins" then
         app.UIThread.setScreenSaverTime(30 * 60)
@@ -70,10 +79,31 @@ local defaults = {
       "bubbles",
       "pipes",
       "maze",
-      "bonsai"
+      "forest",
+      "snow",
+      "rain"
     },
     onSet = function(value)
       app.UIThread.setScreenSaver(value)
+    end
+  },
+  outputScale = {
+    category = "General",
+    description = "Output level scale:",
+    value = "modular",
+    choices = {
+      "modular",
+      "pro audio",
+      "line"
+    },
+    onSet = function(value)
+      if value == "modular" then
+        app.UIThread.setOutputScale(1.0)
+      elseif value == "pro audio" then
+        app.UIThread.setOutputScale(0.5)
+      elseif value == "line" then
+        app.UIThread.setOutputScale(0.25)
+      end
     end
   },
   enableDevMode = {
@@ -426,6 +456,11 @@ local function init()
   local screenSaver = variables["screenSaver"]
   if screenSaver and screenSaver.onSet then
     screenSaver.onSet(screenSaver.value)
+  end
+
+  local outputScale = variables["outputScale"]
+  if outputScale and outputScale.onSet then
+    outputScale.onSet(outputScale.value)
   end
 
   syncFirmwareConfig(false)

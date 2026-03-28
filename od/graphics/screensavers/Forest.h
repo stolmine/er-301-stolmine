@@ -6,11 +6,11 @@
 namespace od
 {
 
-  class Bonsai : public ScreenSaver
+  class Forest : public ScreenSaver
   {
   public:
-    Bonsai();
-    virtual ~Bonsai();
+    Forest();
+    virtual ~Forest();
 
     virtual void reset();
     virtual void draw(FrameBuffer &mainFrameBuffer,
@@ -21,7 +21,8 @@ namespace od
     {
       int16_t x0, y0, x1, y1;
       uint8_t depth;
-      uint8_t color; // grayscale value for main display
+      uint8_t color;
+      uint8_t treeIndex;
     };
 
     struct GrowTask
@@ -31,6 +32,7 @@ namespace od
       int depth;
       int segmentsLeft;
       float length;
+      uint8_t treeIndex;
     };
 
     struct Leaf
@@ -38,11 +40,23 @@ namespace od
       int16_t x, y;
       uint8_t size;
       uint8_t color;
+      uint8_t treeIndex;
     };
 
-    static const int MAX_SEGMENTS = 400;
+    struct GrassBlade
+    {
+      int16_t x;
+      uint8_t height;
+      float phase;
+      float speed;
+    };
+
+    static const int MAX_SEGMENTS = 600;
     static const int MAX_GROW_STACK = 64;
-    static const int MAX_LEAVES = 80;
+    static const int MAX_LEAVES = 120;
+    static const int MAX_TREES = 5;
+    static const int GRASS_COUNT = 80;
+    static const int GROUND_Y = 5;
 
     enum Phase
     {
@@ -60,13 +74,23 @@ namespace od
     Leaf leaves[MAX_LEAVES];
     int leafCount;
 
-    Phase phase;
-    float t = 0.0f;
-    float stepAccum = 0.0f;
-    float holdTimer = 0.0f;
-    float fadeLevel = 0.0f;
+    GrassBlade grass[GRASS_COUNT];
 
-    int fadeColor(int color);
+    int treeCount;
+    float treeFade[MAX_TREES]; // per-tree fade level (0 = solid, 1 = gone)
+    bool treeFading[MAX_TREES];
+    int treesFaded;
+
+    Phase phase;
+    float t;
+    float stepAccum;
+    float holdTimer;
+    float nextTreeTimer;
+    bool allTreesSpawned;
+
+    void spawnTree();
+    void initGrass();
+    int fadeColor(int color, float fade);
   };
 
 } /* namespace od */

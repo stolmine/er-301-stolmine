@@ -6,13 +6,16 @@
 #include <od/graphics/screensavers/Bubbles.h>
 #include <od/graphics/screensavers/Pipes.h>
 #include <od/graphics/screensavers/Maze.h>
-#include <od/graphics/screensavers/Bonsai.h>
+#include <od/graphics/screensavers/Forest.h>
+#include <od/graphics/screensavers/Snow.h>
+#include <od/graphics/screensavers/Rain.h>
 #include <od/extras/Profiler.h>
 #include <od/ui/ChannelLEDs.h>
 #include <od/AudioThread.h>
 #include <hal/events.h>
 #include <hal/display.h>
 #include <hal/encoder.h>
+#include <hal/pump.h>
 #include <hal/pwm.h>
 #include <hal/log.h>
 #include <hal/channels.h>
@@ -78,6 +81,16 @@ namespace od
     local->screenSaverThreshold = secs * GRAPHICS_REFRESH_RATE;
   }
 
+  void UIThread::activateScreenSaver()
+  {
+    local->screenSaverTimer = local->screenSaverThreshold;
+  }
+
+  void UIThread::setOutputScale(float scale)
+  {
+    Pump_setOutputGain(scale);
+  }
+
   void UIThread::setScreenSaver(const char *name)
   {
     std::string tmp = name;
@@ -102,9 +115,17 @@ namespace od
     {
       local->screenSaver = new Maze();
     }
-    else if (tmp == "bonsai")
+    else if (tmp == "forest")
     {
-      local->screenSaver = new Bonsai();
+      local->screenSaver = new Forest();
+    }
+    else if (tmp == "snow")
+    {
+      local->screenSaver = new Snow();
+    }
+    else if (tmp == "rain")
+    {
+      local->screenSaver = new Rain();
     }
     else
     {
