@@ -212,6 +212,11 @@ void Audio_callback(int *samples)
   }
 }
 
+void Pump_setOutputGain(float scale)
+{
+  self.output_gain = AUDIO_SAFE_MAX_OUTPUT_VALUE * scale;
+}
+
 void Pump_resetThrottle()
 {
   self.renderCallCount = 0;

@@ -7,6 +7,7 @@ extern "C"
 
   void Pump_init();
   void Pump_resetThrottle();
+  void Pump_setOutputGain(float scale);
 
   // Called on each frame in the audio thread.
   extern void Pump_callback(float *inputs, float *outputs);

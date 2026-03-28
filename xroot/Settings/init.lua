@@ -90,20 +90,23 @@ local defaults = {
   outputScale = {
     category = "General",
     description = "Output level scale:",
-    value = "modular",
+    value = "100%",
     choices = {
-      "modular",
-      "pro audio",
-      "line"
+      "100%",
+      "75%",
+      "50%",
+      "25%",
+      "10%"
     },
     onSet = function(value)
-      if value == "modular" then
-        app.UIThread.setOutputScale(1.0)
-      elseif value == "pro audio" then
-        app.UIThread.setOutputScale(0.5)
-      elseif value == "line" then
-        app.UIThread.setOutputScale(0.25)
-      end
+      local scales = {
+        ["100%"] = 1.0,
+        ["75%"] = 0.75,
+        ["50%"] = 0.5,
+        ["25%"] = 0.25,
+        ["10%"] = 0.1
+      }
+      app.UIThread.setOutputScale(scales[value] or 1.0)
     end
   },
   enableDevMode = {

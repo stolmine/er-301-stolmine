@@ -25,6 +25,10 @@ menuItems[#menuItems + 1] = {
   "addVariable",
   "floatingMenuDelay"
 }
+menuItems[#menuItems + 1] = {
+  "addVariable",
+  "outputScale"
+}
 if app.TESTING then
   menuItems[#menuItems + 1] = {
     "addVariable",
@@ -42,6 +46,10 @@ menuItems[#menuItems + 1] = {
 menuItems[#menuItems + 1] = {
   "addVariable",
   "screenSaverGraphics"
+}
+menuItems[#menuItems + 1] = {
+  "addAction",
+  "Preview Screen Saver"
 }
 menuItems[#menuItems + 1] = {
   "addCategory",
@@ -213,6 +221,13 @@ function Interface:addVariable(name)
   end
 end
 
+function Interface:addAction(label)
+  local mainList = self.mainList
+  local valueList = self.valueList
+  mainList:addItem("  > " .. label, "action:" .. label)
+  valueList:addItem("", "action:" .. label)
+end
+
 function Interface:reload()
   local mainList = self.mainList
   local valueList = self.valueList
@@ -221,8 +236,7 @@ function Interface:reload()
 
   for _, x in ipairs(menuItems) do
     local method = x[1]
-    local value = x[2]
-    self[method](self, value)
+    self[method](self, x[2], x[3])
   end
 
   mainList:scrollToTop()
@@ -239,6 +253,10 @@ function Interface:updateDetail()
   local name = mainList:getSelectedData()
   subList:clear()
   if name == "category" then
+    self.toggleButton:hide()
+    return
+  end
+  if name and name:sub(1, 7) == "action:" then
     self.toggleButton:hide()
     return
   end
@@ -323,6 +341,10 @@ function Interface:enterReleased()
   if self.focus == "main" then
     local mainList = self.mainList
     local name = mainList:getSelectedData()
+    if name and name:sub(1, 7) == "action:" then
+      app.UIThread.activateScreenSaver()
+      return true
+    end
     local var = Settings.variable(name)
     if var then
       self.savedName = name

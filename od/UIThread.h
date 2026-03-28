@@ -15,6 +15,8 @@ namespace od
     static bool saveScreenShotTo(const char *filename);
     static void restartScreenSaverTimer();
     static void setScreenSaverTime(int secs);
+    static void activateScreenSaver();
+    static void setOutputScale(float scale);
     static void setScreenSaver(const char *name);
 
     static void setMainGraphicContext(GraphicContext *context);
