@@ -4,6 +4,9 @@
 #include <od/graphics/screensavers/Blank.h>
 #include <od/graphics/screensavers/Lines.h>
 #include <od/graphics/screensavers/Bubbles.h>
+#include <od/graphics/screensavers/Pipes.h>
+#include <od/graphics/screensavers/Maze.h>
+#include <od/graphics/screensavers/Bonsai.h>
 #include <od/extras/Profiler.h>
 #include <od/ui/ChannelLEDs.h>
 #include <od/AudioThread.h>
@@ -90,6 +93,18 @@ namespace od
     else if (tmp == "grid")
     {
       local->screenSaver = new Lines(true);
+    }
+    else if (tmp == "pipes")
+    {
+      local->screenSaver = new Pipes();
+    }
+    else if (tmp == "maze")
+    {
+      local->screenSaver = new Maze();
+    }
+    else if (tmp == "bonsai")
+    {
+      local->screenSaver = new Bonsai();
     }
     else
     {
