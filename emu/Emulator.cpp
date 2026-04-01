@@ -275,8 +275,6 @@ namespace emu
             break;
           case SDL_MOUSEBUTTONDOWN:
           case SDL_MOUSEBUTTONUP:
-            e.button.x /= window->scale;
-            e.button.y /= window->scale;
             handleMouseButton(e.button);
             break;
           case SDL_MOUSEWHEEL:
