@@ -151,6 +151,6 @@ namespace emu
     int width = SCREEN_WIDTH;
     int height = SCREEN_HEIGHT;
     double pauseDisplayTime = 0;
-    float scale = 1.0f;
+    float scale = 3.0f;
   };
 }; // namespace emu

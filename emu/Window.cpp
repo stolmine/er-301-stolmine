@@ -13,8 +13,9 @@ namespace emu
     window = SDL_CreateWindow("ER-301 Emulator",
                               SDL_WINDOWPOS_UNDEFINED,
                               SDL_WINDOWPOS_UNDEFINED,
-                              SCREEN_WIDTH, SCREEN_HEIGHT,
-                              SDL_WINDOW_SHOWN);
+                              (int)(scale * SCREEN_WIDTH),
+                              (int)(scale * SCREEN_HEIGHT),
+                              SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
     if (window == NULL)
     {
       logFatal("Window could not be created! SDL_Error: %s\n", SDL_GetError());
@@ -26,6 +27,8 @@ namespace emu
     {
       logFatal("Renderer could not be created! SDL Error: %s", SDL_GetError());
     }
+
+    SDL_RenderSetLogicalSize(renderer, SCREEN_WIDTH, SCREEN_HEIGHT);
 
     mainTexture = SDL_CreateTexture(renderer,
                                     SDL_PIXELFORMAT_RGBA8888,
@@ -275,12 +278,11 @@ namespace emu
   void Window::setScale(float _scale)
   {
     scale = _scale;
-    if (scale < 0.1f)
+    if (scale < 0.5f)
     {
-      scale = 0.1f;
+      scale = 0.5f;
     }
-    SDL_RenderSetScale(renderer, scale, scale);
-    SDL_SetWindowSize(window, scale * SCREEN_WIDTH, scale * SCREEN_HEIGHT);
+    SDL_SetWindowSize(window, (int)(scale * SCREEN_WIDTH), (int)(scale * SCREEN_HEIGHT));
   }
 
   void Window::setPosition(int x, int y, int correction)

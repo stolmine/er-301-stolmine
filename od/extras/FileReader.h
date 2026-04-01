@@ -1,6 +1,7 @@
 #pragma once
 
 #include <od/extras/ReferenceCounted.h>
+#include <cstdint>
 #include <string>
 
 // Only use STDIO when not building SBL image.
