@@ -410,6 +410,62 @@ namespace od
         return false;
     }
 
+    bool MondrianList::scrollUpToHeader()
+    {
+        if (getRowCount() == 0)
+            return false;
+        // Search upward from current position for a non-selectable (header) row
+        // that is above the current header group.
+        // First, skip past any header rows immediately above us.
+        int i = mRowIndex - 1;
+        while (i >= 0 && !mRows[i].mSelectable)
+        {
+            i--;
+        }
+        // Now find the next header row above
+        while (i >= 0 && mRows[i].mSelectable)
+        {
+            i--;
+        }
+        // i is now on a header row (or -1). Find the first selectable row after it.
+        if (i < 0)
+        {
+            // Wrap to top
+            i = 0;
+        }
+        int target = findSelectableRowBelow(i - 1);
+        if (target != mRowIndex)
+        {
+            moveToRow(target);
+            return true;
+        }
+        return false;
+    }
+
+    bool MondrianList::scrollDownToHeader()
+    {
+        if (getRowCount() == 0)
+            return false;
+        int N = getRowCount();
+        // Search downward from current position for the next non-selectable (header) row
+        int i = mRowIndex + 1;
+        while (i < N && mRows[i].mSelectable)
+        {
+            i++;
+        }
+        // i is now on a header row (or past end)
+        if (i >= N)
+            return false;
+        // Find the first selectable row after this header
+        int target = findSelectableRowBelow(i);
+        if (target != mRowIndex)
+        {
+            moveToRow(target);
+            return true;
+        }
+        return false;
+    }
+
     void MondrianList::scrollToBottom()
     {
         if (getRowCount() == 0)

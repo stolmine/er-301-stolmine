@@ -1,4 +1,5 @@
 local Env = require "Env"
+local Encoder = require "Encoder"
 local MondrianMenu = require "MondrianMenu.AsWindow"
 local MondrianControl = require "MondrianMenu.Control"
 local Class = require "Base.Class"
@@ -99,7 +100,13 @@ function Chooser:init(ring, ordering)
   self:setClassName("Unit.Chooser.Default")
   self.ring = ring
   self.ordering = ordering
+  self.encoderState = Encoder.Fine
+  self.encoderSum = 0
   self:refresh()
+end
+
+function Chooser:onShow()
+  Encoder.set(self.encoderState)
 end
 
 function Chooser:addUnitsInCategory(category)
@@ -241,6 +248,32 @@ function Chooser:choose(loadInfo)
     self:updateRecent(loadInfo)
     self.ring:load(loadInfo)
   end
+end
+
+local threshold = Env.EncoderThreshold.Default
+function Chooser:encoder(change, shifted)
+  if self.encoderState == Encoder.Coarse then
+    self.encoderSum = (self.encoderSum or 0) + change
+    if self.encoderSum > threshold then
+      self.encoderSum = 0
+      self.mlist:scrollDownToHeader()
+    elseif self.encoderSum < -threshold then
+      self.encoderSum = 0
+      self.mlist:scrollUpToHeader()
+    end
+  else
+    self.mlist:encoder(change, shifted, threshold)
+  end
+end
+
+function Chooser:dialPressed(shifted)
+  if self.encoderState == Encoder.Coarse then
+    self.encoderState = Encoder.Fine
+  else
+    self.encoderState = Encoder.Coarse
+  end
+  Encoder.set(self.encoderState)
+  return true
 end
 
 function Chooser:subReleased(i, shifted)

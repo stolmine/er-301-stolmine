@@ -36,6 +36,8 @@ namespace od
 
         bool scrollUp();
         bool scrollDown();
+        bool scrollUpToHeader();
+        bool scrollDownToHeader();
         void scrollToBottom();
         void scrollToTop();
         void scrollToRow(int index);
