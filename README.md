@@ -2,6 +2,10 @@
 
 This is a fork of the [ER-301](https://github.com/odevices/er-301) firmware that adds a **TXo I2C master output** mod, enabling the ER-301 to send CV and gate data over I2C to Monome TXo expanders while maintaining simultaneous Teletype slave communication.
 
+## Important: I2C hardware requirement
+
+> **This firmware does not allow running the ER-301 and TXo in isolation.** You will need a leader (Teletype, Crow, Michigan Synthworks Faderbank), or a "dumb" module with pull-up resistors included: TXb, or tt-busboard-jr.
+
 ## What's different from upstream
 
 * **TXo mod** — interrupt-driven I2C master TX with gain control, V/Oct mode, and simultaneous Teletype slave RX coexistence

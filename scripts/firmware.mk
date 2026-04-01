@@ -46,7 +46,7 @@ $(build_dir)/pbl/MLO:
 	+$(MAKE) -f scripts/pbl.mk PROFILE=$(PROFILE) ARCH=$(ARCH)
 
 clean:
-	rm -rf $(firmware_archive)
+	rm -rf $(firmware_archive) $(build_dir)/install.lua
 	+$(MAKE) -f scripts/lua.mk PROFILE=$(PROFILE) ARCH=$(ARCH) clean
 	+$(MAKE) -f scripts/miniz.mk PROFILE=$(PROFILE) ARCH=$(ARCH) clean
 	+$(MAKE) -f scripts/lodepng.mk PROFILE=$(PROFILE) ARCH=$(ARCH) clean
