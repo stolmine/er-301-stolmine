@@ -267,11 +267,13 @@ function Chooser:encoder(change, shifted)
 end
 
 function Chooser:dialPressed(shifted)
-  if self.encoderState == Encoder.Coarse then
-    self.encoderState = Encoder.Fine
-  else
-    self.encoderState = Encoder.Coarse
-  end
+  self.encoderState = Encoder.Coarse
+  Encoder.set(self.encoderState)
+  return true
+end
+
+function Chooser:dialReleased(shifted)
+  self.encoderState = Encoder.Fine
   Encoder.set(self.encoderState)
   return true
 end
