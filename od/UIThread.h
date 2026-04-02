@@ -17,6 +17,7 @@ namespace od
     static void setScreenSaverTime(int secs);
     static void activateScreenSaver();
     static void deactivateScreenSaver();
+    static void setCycleMode(bool enabled);
     static void setOutputScale(float scale);
     static void setScreenSaver(const char *name);
 

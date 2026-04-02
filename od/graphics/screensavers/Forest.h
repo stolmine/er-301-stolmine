@@ -23,6 +23,7 @@ namespace od
       uint8_t depth;
       uint8_t color;
       uint8_t treeIndex;
+      uint8_t zLayer; // 0=back, 1=mid, 2=front
     };
 
     struct GrowTask
@@ -41,6 +42,7 @@ namespace od
       uint8_t size;
       uint8_t color;
       uint8_t treeIndex;
+      uint8_t zLayer;
     };
 
     struct GrassBlade
@@ -51,24 +53,26 @@ namespace od
       float speed;
     };
 
-    static const int MAX_SEGMENTS = 1600;
-    static const int MAX_GROW_STACK = 128;
-    static const int MAX_LEAVES = 400;
+    static const int MAX_SEGMENTS = 2400;
+    static const int MAX_GROW_STACK = 192;
+    static const int MAX_LEAVES = 800;
     static const int MAX_TREES = 16;
     static const int GRASS_COUNT = 80;
-    static const int GODRAY_COUNT = 5;
+    static const int GODRAY_COUNT = 6;
     static const int BIRD_COUNT = 3;
     static const int GROUND_Y = 5;
+    static const int Z_LAYERS = 3;
 
     struct GodRay
     {
       float x;
       float drift;
-      float angle; // x offset per y pixel (lean)
+      float angle;
       float width;
       float brightness;
       float life;
       float maxLife;
+      uint8_t zLayer;
       bool active;
     };
 
@@ -104,7 +108,8 @@ namespace od
     float birdSpawnTimer;
 
     int treeCount;
-    float treeFade[MAX_TREES]; // per-tree fade level (0 = solid, 1 = gone)
+    uint8_t treeZ[MAX_TREES];
+    float treeFade[MAX_TREES];
     bool treeFading[MAX_TREES];
     int treesFaded;
 
@@ -119,8 +124,10 @@ namespace od
     void initGrass();
     void initRays();
     void spawnRay(int i);
-    void updateAndDrawRays(FrameBuffer &m, FrameBuffer &s);
     void initBirds();
+    void drawLayer(FrameBuffer &m, FrameBuffer &s, int z);
+    void drawRaysForLayer(FrameBuffer &m, FrameBuffer &s, int z);
+    void updateRays();
     void updateAndDrawBirds(FrameBuffer &m, FrameBuffer &s);
     int fadeColor(int color, float fade);
   };

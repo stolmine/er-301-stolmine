@@ -17,7 +17,6 @@ Port TXo I2C master mod to v0.6.16 stable firmware base. v0.7 breaks compatibili
 Add a "Cycle" option to the screensaver selector. When idle timer triggers, pick a different screensaver each time — random (excluding current/last) or sequential through the list.
 
 ## Screensaver Polish
-- Snow screensaver: freezes after running for a while — investigate and fix
 - Forest screensaver: full-screen coverage
 - Rain screensaver: splash particles
 

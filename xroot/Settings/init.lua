@@ -81,10 +81,17 @@ local defaults = {
       "maze",
       "forest",
       "snow",
-      "rain"
+      "rain",
+      "cycle"
     },
     onSet = function(value)
-      app.UIThread.setScreenSaver(value)
+      if value == "cycle" then
+        app.UIThread.setCycleMode(true)
+        app.UIThread.setScreenSaver("bubbles")
+      else
+        app.UIThread.setCycleMode(false)
+        app.UIThread.setScreenSaver(value)
+      end
     end
   },
   outputScale = {

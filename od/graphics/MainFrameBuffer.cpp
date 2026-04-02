@@ -96,6 +96,16 @@ namespace od
     blend_pixel_safe(frame, color, x, y);
   }
 
+  Color MainFrameBuffer::readPixel(int x, int y)
+  {
+    if (((x & 0xFF) != x) || ((y & 0x3F) != y))
+      return 0;
+    x = 255 - x;
+    uint16_t *p = frame + (y << 7) + (x >> 1);
+    int shift = ((~x) & 0b1) << 2;
+    return (*p >> shift) & 0xF;
+  }
+
   void MainFrameBuffer::hlineSet(Color color, int x, int x2, int y)
   {
     if (y < 0 || y > mHeight - 1)

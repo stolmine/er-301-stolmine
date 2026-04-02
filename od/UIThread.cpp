@@ -19,7 +19,9 @@
 #include <hal/pwm.h>
 #include <hal/log.h>
 #include <hal/channels.h>
+#include <od/extras/Random.h>
 #include <lodepng.h>
+#include <string>
 
 namespace od
 {
@@ -45,6 +47,11 @@ namespace od
     int screenSaverTimer = 0;
     int screenSaverThreshold = GRAPHICS_REFRESH_RATE * 60 * 30;
     bool screenSaverLocked = false;
+    bool cycleMode = false;
+    bool screenSaverActive = false;
+    std::string currentScreenSaverName = "bubbles";
+    bool cycleSeen[8] = {}; // matches cycleListSize
+    int cycleSeenCount = 0;
   };
 
   static UIThreadLocals *local = 0;
@@ -77,6 +84,7 @@ namespace od
     if (!local->screenSaverLocked)
     {
       local->screenSaverTimer = 0;
+      local->screenSaverActive = false;
     }
   }
 
@@ -94,6 +102,7 @@ namespace od
   void UIThread::deactivateScreenSaver()
   {
     local->screenSaverLocked = false;
+    local->screenSaverActive = false;
     local->screenSaverTimer = 0;
   }
 
@@ -102,9 +111,14 @@ namespace od
     Pump_setOutputGain(scale);
   }
 
+  static const char *cycleList[] = {
+      "2lines", "grid", "bubbles", "pipes", "maze", "forest", "snow", "rain"};
+  static const int cycleListSize = sizeof(cycleList) / sizeof(cycleList[0]);
+
   void UIThread::setScreenSaver(const char *name)
   {
     std::string tmp = name;
+    local->currentScreenSaverName = tmp;
     delete local->screenSaver;
     if (tmp == "bubbles")
     {
@@ -142,6 +156,34 @@ namespace od
     {
       local->screenSaver = new Blank();
     }
+  }
+
+  void UIThread::setCycleMode(bool enabled)
+  {
+    local->cycleMode = enabled;
+  }
+
+  static void cycleScreenSaver()
+  {
+    // Reset tally if all have been shown
+    if (local->cycleSeenCount >= cycleListSize)
+    {
+      memset(local->cycleSeen, 0, sizeof(local->cycleSeen));
+      local->cycleSeenCount = 0;
+    }
+
+    // Pick a random unseen screensaver
+    int attempts = 0;
+    int idx;
+    do
+    {
+      idx = Random::generateInteger(0, cycleListSize - 1);
+      attempts++;
+    } while (local->cycleSeen[idx] && attempts < 50);
+
+    local->cycleSeen[idx] = true;
+    local->cycleSeenCount++;
+    UIThread::setScreenSaver(cycleList[idx]);
   }
 
   bool UIThread::saveScreenShotTo(const char *filename)
@@ -242,8 +284,15 @@ namespace od
     local->subFrameBuffer.clear();
 
     local->screenSaverTimer++;
-    if (local->screenSaverTimer == local->screenSaverThreshold)
+    if (local->screenSaverTimer >= local->screenSaverThreshold && !local->screenSaverActive)
     {
+      local->screenSaverActive = true;
+      logInfo("Screensaver activating: timer=%d threshold=%d cycle=%d",
+              local->screenSaverTimer, local->screenSaverThreshold, local->cycleMode);
+      if (local->cycleMode)
+      {
+        cycleScreenSaver();
+      }
       local->screenSaver->reset();
     }
     if (local->screenSaverTimer > local->screenSaverThreshold)

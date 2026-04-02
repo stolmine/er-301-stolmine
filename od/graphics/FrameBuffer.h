@@ -25,6 +25,7 @@ namespace od
     virtual void clear(int left, int bottom, int right, int top) = 0;
     virtual void blend(Color color, int x, int y) = 0;
     virtual void pixel(Color color, int x, int y) = 0;
+    virtual Color readPixel(int x, int y) = 0;
     virtual void clear(int x, int y) = 0;
     virtual void line(Color color, int x0, int y0, int x1, int y1) = 0;
     virtual void hline(Color color, int x, int x2, int y, int dotting = 0) = 0;

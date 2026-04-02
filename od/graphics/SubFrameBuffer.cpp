@@ -76,6 +76,14 @@ namespace od
     set_pixel_safe(frame, color, x, y);
   }
 
+  Color SubFrameBuffer::readPixel(int x, int y)
+  {
+    if (((x & 0x7F) != x) || ((y & 0x3F) != y))
+      return 0;
+    uint16_t *p = frame + ((y >> 3) << 7) + 127 - x;
+    return (*p >> (y & 0b111)) & 1;
+  }
+
   void SubFrameBuffer::hline(Color color, int x, int x2, int y, int dotting)
   {
     if (y < 0 || y > mHeight - 1)

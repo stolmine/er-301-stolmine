@@ -17,6 +17,7 @@ namespace od
     void clear(int x, int y);
     void pixel(Color color, int x, int y);
     void blend(Color color, int x, int y);
+    Color readPixel(int x, int y);
     void line(Color color, int x0, int y0, int x1, int y1);
     void hline(Color color, int x, int x2, int y, int dotting = 0);
     void vline(Color color, int x, int y, int y2, int dotting = 0);

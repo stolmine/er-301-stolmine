@@ -47,14 +47,8 @@ namespace od
 
   void Pipes::startNewPipe()
   {
-    if (filledCells >= (COLS * ROWS * 85) / 100)
-    {
-      reset();
-      return;
-    }
-
     // Find a random empty cell
-    for (int attempt = 0; attempt < 50; attempt++)
+    for (int attempt = 0; attempt < 100; attempt++)
     {
       int c = Random::generateInteger(0, COLS - 1);
       int r = Random::generateInteger(0, ROWS - 1);
@@ -70,7 +64,7 @@ namespace od
       }
     }
 
-    // Couldn't find empty cell
+    // All cells filled — reset
     reset();
   }
 
