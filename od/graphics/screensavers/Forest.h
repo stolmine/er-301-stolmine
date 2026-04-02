@@ -57,12 +57,14 @@ namespace od
     static const int MAX_TREES = 16;
     static const int GRASS_COUNT = 80;
     static const int GODRAY_COUNT = 5;
+    static const int BIRD_COUNT = 3;
     static const int GROUND_Y = 5;
 
     struct GodRay
     {
       float x;
       float drift;
+      float angle; // x offset per y pixel (lean)
       float width;
       float brightness;
       float life;
@@ -86,9 +88,20 @@ namespace od
     Leaf leaves[MAX_LEAVES];
     int leafCount;
 
+    struct Bird
+    {
+      float x, y;
+      float speed;
+      float wingPhase;
+      float wingSpeed;
+      bool active;
+    };
+
     GrassBlade grass[GRASS_COUNT];
     GodRay rays[GODRAY_COUNT];
+    Bird birds[BIRD_COUNT];
     float raySpawnTimer;
+    float birdSpawnTimer;
 
     int treeCount;
     float treeFade[MAX_TREES]; // per-tree fade level (0 = solid, 1 = gone)
@@ -107,6 +120,8 @@ namespace od
     void initRays();
     void spawnRay(int i);
     void updateAndDrawRays(FrameBuffer &m, FrameBuffer &s);
+    void initBirds();
+    void updateAndDrawBirds(FrameBuffer &m, FrameBuffer &s);
     int fadeColor(int color, float fade);
   };
 

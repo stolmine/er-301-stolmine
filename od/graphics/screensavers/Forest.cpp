@@ -80,6 +80,7 @@ namespace od
   {
     rays[i].x = Random::generateFloat(10.0f, 246.0f);
     rays[i].drift = Random::generateFloat(-0.15f, 0.15f);
+    rays[i].angle = 1.0f; // 45 degrees southwest (1px right per px down from top)
     rays[i].width = Random::generateFloat(2.0f, 6.0f);
     rays[i].brightness = 0.0f;
     rays[i].life = 0.0f;
@@ -125,17 +126,18 @@ namespace od
         continue;
       }
 
-      // Draw ray as a tapered vertical column, brighter at top
-      float cx = rays[i].x;
+      // Draw ray as an angled tapered column, brighter at top
+      float topX = rays[i].x;
       float hw = rays[i].width * 0.5f;
       float b = rays[i].brightness;
+      float lean = rays[i].angle;
 
       for (int y = 0; y < 64; y++)
       {
-        // Taper: narrower at bottom, wider at top
         float yFrac = (float)y / 63.0f;
+        // Center x shifts with angle: top is anchor, bottom leans away
+        float cx = topX + lean * (float)(63 - y);
         float rowHW = hw * (0.3f + 0.7f * yFrac);
-        // Brightness fades toward bottom
         float rowB = b * yFrac * yFrac;
         int color = (int)(rowB * 8.0f);
         if (color <= 0)
@@ -153,17 +155,88 @@ namespace od
         }
       }
 
-      // Sub display: single column
-      int sx = (int)(cx / 2.0f);
-      if (sx >= 0 && sx < 128)
+      // Sub display
+      for (int y = 0; y < 64; y++)
       {
-        for (int y = 0; y < 64; y++)
+        float yFrac = (float)y / 63.0f;
+        float cx = topX + lean * (float)(63 - y);
+        int sx = (int)(cx / 2.0f);
+        if (sx >= 0 && sx < 128 && b * yFrac > 0.2f)
+          s.pixel(WHITE, sx, y);
+      }
+    }
+  }
+
+  void Forest::initBirds()
+  {
+    for (int i = 0; i < BIRD_COUNT; i++)
+      birds[i].active = false;
+    birdSpawnTimer = 5.0f; // delay before first bird
+  }
+
+  void Forest::updateAndDrawBirds(FrameBuffer &m, FrameBuffer &s)
+  {
+    birdSpawnTimer += GRAPHICS_REFRESH_PERIOD;
+    if (birdSpawnTimer >= 8.0f)
+    {
+      birdSpawnTimer = 0.0f;
+      for (int i = 0; i < BIRD_COUNT; i++)
+      {
+        if (!birds[i].active)
         {
-          float yFrac = (float)y / 63.0f;
-          if (b * yFrac > 0.2f)
-            s.pixel(WHITE, sx, y);
+          birds[i].x = -5.0f;
+          birds[i].y = Random::generateFloat(40.0f, 60.0f);
+          birds[i].speed = Random::generateFloat(0.4f, 0.9f);
+          birds[i].wingPhase = Random::generateFloat(0.0f, 6.28f);
+          birds[i].wingSpeed = Random::generateFloat(4.0f, 7.0f);
+          birds[i].active = true;
+          break;
         }
       }
+    }
+
+    for (int i = 0; i < BIRD_COUNT; i++)
+    {
+      if (!birds[i].active)
+        continue;
+
+      birds[i].x += birds[i].speed;
+      birds[i].wingPhase += GRAPHICS_REFRESH_PERIOD * birds[i].wingSpeed;
+
+      if (birds[i].x > 260.0f)
+      {
+        birds[i].active = false;
+        continue;
+      }
+
+      int bx = (int)birds[i].x;
+      int by = (int)birds[i].y;
+      float wing = sinf(birds[i].wingPhase);
+      int wy = (int)(wing * 2.0f); // wing tip offset: -2 to +2
+
+      // Draw V-shape: body center, two wing tips
+      if (bx >= 0 && bx < 256 && by >= 0 && by < 64)
+        m.pixel(WHITE, bx, by);
+      int lx = bx - 2;
+      int rx = bx + 2;
+      int ty = by + wy;
+      if (lx >= 0 && lx < 256 && ty >= 0 && ty < 64)
+        m.pixel(WHITE, lx, ty);
+      if (rx >= 0 && rx < 256 && ty >= 0 && ty < 64)
+        m.pixel(WHITE, rx, ty);
+      // Inner wing
+      int lx2 = bx - 1;
+      int rx2 = bx + 1;
+      int ty2 = by + wy / 2;
+      if (lx2 >= 0 && lx2 < 256 && ty2 >= 0 && ty2 < 64)
+        m.pixel(WHITE, lx2, ty2);
+      if (rx2 >= 0 && rx2 < 256 && ty2 >= 0 && ty2 < 64)
+        m.pixel(WHITE, rx2, ty2);
+
+      // Sub display
+      int sx = bx / 2;
+      if (sx >= 0 && sx < 128 && by >= 0 && by < 64)
+        s.pixel(WHITE, sx, by);
     }
   }
 
@@ -186,6 +259,7 @@ namespace od
 
     initGrass();
     initRays();
+    initBirds();
     spawnTree();
     spawnTree();
   }
@@ -480,6 +554,12 @@ namespace od
     if (phase != FADING)
     {
       updateAndDrawRays(m, s);
+    }
+
+    // Birds
+    if (phase != FADING)
+    {
+      updateAndDrawBirds(m, s);
     }
 
     // During growth, highlight active tips
