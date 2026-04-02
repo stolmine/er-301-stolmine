@@ -21,23 +21,15 @@ namespace od
                       FrameBuffer &subFrameBuffer);
 
   private:
-    enum Phase
-    {
-      SNOWING,
-      HOLDING,
-      FADING
-    };
-
     void spawn(int i);
+    void meltGround();
 
     float mX[SNOW_N], mY[SNOW_N], mSpeed[SNOW_N], mWobble[SNOW_N];
+    int mSize[SNOW_N];
     bool mActive[SNOW_N];
     int mGround[SNOW_MAIN_W];
     int mGroundSub[SNOW_SUB_W];
-    Phase mPhase;
-    float mHoldTimer;
-    float mFadeLevel;
-    int mMaxGround;
+    float mMeltTimer;
   };
 
 } /* namespace od */

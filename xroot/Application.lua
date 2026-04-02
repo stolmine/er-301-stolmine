@@ -505,7 +505,7 @@ local function loop()
         quit = true
       else
         -- Debug.traceCalls(true)
-        app.UIThread.restartScreenSaverTimer()
+        app.UIThread.deactivateScreenSaver()
         activeDispatcher(e)
         -- Debug.traceCalls(false)
       end

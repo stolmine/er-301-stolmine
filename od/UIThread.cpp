@@ -44,6 +44,7 @@ namespace od
     std::vector<unsigned char> screenShot;
     int screenSaverTimer = 0;
     int screenSaverThreshold = GRAPHICS_REFRESH_RATE * 60 * 30;
+    bool screenSaverLocked = false;
   };
 
   static UIThreadLocals *local = 0;
@@ -73,7 +74,10 @@ namespace od
 
   void UIThread::restartScreenSaverTimer()
   {
-    local->screenSaverTimer = 0;
+    if (!local->screenSaverLocked)
+    {
+      local->screenSaverTimer = 0;
+    }
   }
 
   void UIThread::setScreenSaverTime(int secs)
@@ -84,6 +88,13 @@ namespace od
   void UIThread::activateScreenSaver()
   {
     local->screenSaverTimer = local->screenSaverThreshold;
+    local->screenSaverLocked = true;
+  }
+
+  void UIThread::deactivateScreenSaver()
+  {
+    local->screenSaverLocked = false;
+    local->screenSaverTimer = 0;
   }
 
   void UIThread::setOutputScale(float scale)
