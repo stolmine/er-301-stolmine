@@ -42,15 +42,22 @@ namespace od
     int idx = treeCount++;
 
     // Random x position across the screen
-    float baseX = Random::generateFloat(20.0f, 236.0f);
+    float baseX = Random::generateFloat(8.0f, 248.0f);
+
+    // Alternate height: odd trees shorter, even trees taller, with upward bias
+    bool tall = (idx % 2 == 0);
+    int segs = tall ? 7 + Random::generateInteger(0, 4)
+                    : 4 + Random::generateInteger(0, 2);
+    float len = tall ? 5.0f + Random::generateFloat(0.0f, 4.0f)
+                     : 3.0f + Random::generateFloat(0.0f, 2.0f);
 
     GrowTask trunk;
     trunk.x = baseX;
     trunk.y = (float)(GROUND_Y + 1);
     trunk.angle = 1.5708f; // pi/2, straight up
     trunk.depth = 0;
-    trunk.segmentsLeft = 5 + Random::generateInteger(0, 3);
-    trunk.length = 4.0f + Random::generateFloat(0.0f, 3.0f);
+    trunk.segmentsLeft = segs;
+    trunk.length = len;
     trunk.treeIndex = idx;
 
     if (growTop < MAX_GROW_STACK)
@@ -60,6 +67,104 @@ namespace od
 
     treeFade[idx] = 0.0f;
     treeFading[idx] = false;
+  }
+
+  void Forest::initRays()
+  {
+    for (int i = 0; i < GODRAY_COUNT; i++)
+      rays[i].active = false;
+    raySpawnTimer = 0.0f;
+  }
+
+  void Forest::spawnRay(int i)
+  {
+    rays[i].x = Random::generateFloat(10.0f, 246.0f);
+    rays[i].drift = Random::generateFloat(-0.15f, 0.15f);
+    rays[i].width = Random::generateFloat(2.0f, 6.0f);
+    rays[i].brightness = 0.0f;
+    rays[i].life = 0.0f;
+    rays[i].maxLife = Random::generateFloat(5.0f, 12.0f);
+    rays[i].active = true;
+  }
+
+  void Forest::updateAndDrawRays(FrameBuffer &m, FrameBuffer &s)
+  {
+    // Spawn new rays periodically
+    raySpawnTimer += GRAPHICS_REFRESH_PERIOD;
+    if (raySpawnTimer >= 1.5f)
+    {
+      raySpawnTimer = 0.0f;
+      for (int i = 0; i < GODRAY_COUNT; i++)
+      {
+        if (!rays[i].active)
+        {
+          spawnRay(i);
+          break;
+        }
+      }
+    }
+
+    for (int i = 0; i < GODRAY_COUNT; i++)
+    {
+      if (!rays[i].active)
+        continue;
+
+      rays[i].life += GRAPHICS_REFRESH_PERIOD;
+      rays[i].x += rays[i].drift;
+
+      // Fade in then fade out
+      float halfLife = rays[i].maxLife * 0.5f;
+      if (rays[i].life < halfLife)
+        rays[i].brightness = rays[i].life / halfLife;
+      else
+        rays[i].brightness = 1.0f - (rays[i].life - halfLife) / halfLife;
+
+      if (rays[i].life >= rays[i].maxLife)
+      {
+        rays[i].active = false;
+        continue;
+      }
+
+      // Draw ray as a tapered vertical column, brighter at top
+      float cx = rays[i].x;
+      float hw = rays[i].width * 0.5f;
+      float b = rays[i].brightness;
+
+      for (int y = 0; y < 64; y++)
+      {
+        // Taper: narrower at bottom, wider at top
+        float yFrac = (float)y / 63.0f;
+        float rowHW = hw * (0.3f + 0.7f * yFrac);
+        // Brightness fades toward bottom
+        float rowB = b * yFrac * yFrac;
+        int color = (int)(rowB * 8.0f);
+        if (color <= 0)
+          continue;
+        if (color > GRAY8)
+          color = GRAY8;
+
+        int x0 = (int)(cx - rowHW);
+        int x1 = (int)(cx + rowHW);
+        if (x0 < 0) x0 = 0;
+        if (x1 > 255) x1 = 255;
+        for (int x = x0; x <= x1; x++)
+        {
+          m.blend(color, x, y);
+        }
+      }
+
+      // Sub display: single column
+      int sx = (int)(cx / 2.0f);
+      if (sx >= 0 && sx < 128)
+      {
+        for (int y = 0; y < 64; y++)
+        {
+          float yFrac = (float)y / 63.0f;
+          if (b * yFrac > 0.2f)
+            s.pixel(WHITE, sx, y);
+        }
+      }
+    }
   }
 
   void Forest::reset()
@@ -80,6 +185,8 @@ namespace od
     memset(treeFading, 0, sizeof(treeFading));
 
     initGrass();
+    initRays();
+    spawnTree();
     spawnTree();
   }
 
@@ -97,16 +204,18 @@ namespace od
       if (!allTreesSpawned)
       {
         nextTreeTimer += GRAPHICS_REFRESH_PERIOD;
-        if (nextTreeTimer >= 3.0f && treeCount < MAX_TREES)
+        if (nextTreeTimer >= 2.0f && treeCount < MAX_TREES)
         {
           spawnTree();
+          if (treeCount < MAX_TREES)
+            spawnTree();
           nextTreeTimer = 0.0f;
         }
         if (treeCount >= MAX_TREES)
           allTreesSpawned = true;
       }
 
-      stepAccum += 12.0f * GRAPHICS_REFRESH_PERIOD;
+      stepAccum += 24.0f * GRAPHICS_REFRESH_PERIOD;
       while (stepAccum >= 1.0f && growTop > 0 &&
              segmentCount < MAX_SEGMENTS)
       {
@@ -142,20 +251,10 @@ namespace od
         float ex = task.x + task.length * cosf(ang);
         float ey = task.y + task.length * sinf(ang);
 
-        if (ex < 2.0f)
-          ex = 2.0f;
-        if (ex > 254.0f)
-          ex = 254.0f;
-        if (ey < 2.0f)
-          ey = 2.0f;
-        if (ey > 62.0f)
-          ey = 62.0f;
-
-        if (ey >= 62.0f || ex <= 3.0f || ex >= 253.0f)
-        {
-          task.segmentsLeft = 0;
-          continue;
-        }
+        if (ex < 0.0f)
+          ex = 0.0f;
+        if (ex > 255.0f)
+          ex = 255.0f;
 
         Segment &seg = segments[segmentCount++];
         seg.x0 = (int16_t)task.x;
@@ -375,6 +474,12 @@ namespace od
       {
         s.pixel(subColor, lf.x / 2, lf.y);
       }
+    }
+
+    // Godrays (draw after trees so they overlay)
+    if (phase != FADING)
+    {
+      updateAndDrawRays(m, s);
     }
 
     // During growth, highlight active tips

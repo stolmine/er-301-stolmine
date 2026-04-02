@@ -51,12 +51,24 @@ namespace od
       float speed;
     };
 
-    static const int MAX_SEGMENTS = 600;
-    static const int MAX_GROW_STACK = 64;
-    static const int MAX_LEAVES = 120;
-    static const int MAX_TREES = 5;
+    static const int MAX_SEGMENTS = 1600;
+    static const int MAX_GROW_STACK = 128;
+    static const int MAX_LEAVES = 400;
+    static const int MAX_TREES = 16;
     static const int GRASS_COUNT = 80;
+    static const int GODRAY_COUNT = 5;
     static const int GROUND_Y = 5;
+
+    struct GodRay
+    {
+      float x;
+      float drift;
+      float width;
+      float brightness;
+      float life;
+      float maxLife;
+      bool active;
+    };
 
     enum Phase
     {
@@ -75,6 +87,8 @@ namespace od
     int leafCount;
 
     GrassBlade grass[GRASS_COUNT];
+    GodRay rays[GODRAY_COUNT];
+    float raySpawnTimer;
 
     int treeCount;
     float treeFade[MAX_TREES]; // per-tree fade level (0 = solid, 1 = gone)
@@ -90,6 +104,9 @@ namespace od
 
     void spawnTree();
     void initGrass();
+    void initRays();
+    void spawnRay(int i);
+    void updateAndDrawRays(FrameBuffer &m, FrameBuffer &s);
     int fadeColor(int color, float fade);
   };
 
