@@ -27,17 +27,14 @@ namespace od
     static const int GRID_W = 128;
     static const int GRID_H = 32;
 
-    void drawMain(FrameBuffer &m, float blend);
-
     static const int CONTOUR_LEVELS = 6;
     static const int contourThresholds[CONTOUR_LEVELS];
 
     int mPerm[512];
-    uint8_t mField[GRID_W * GRID_H];
+    uint8_t mField[GRID_W * GRID_H];     // noise value 0-255
+    uint8_t mWarpMag[GRID_W * GRID_H];   // warp magnitude 0-255
+    float mAbsorption[GRID_W * GRID_H];  // per-cell absorption 0-1
     float mTime;
-    float mBlend;         // 0 = pure fill, 1 = pure contour
-    float mBlendTarget;
-    float mHoldTimer;
   };
 
 } /* namespace od */

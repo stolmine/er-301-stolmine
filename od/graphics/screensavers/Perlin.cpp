@@ -69,17 +69,15 @@ namespace od
     return val;
   }
 
-  // Evenly spaced contour thresholds across the 0-255 field range
   const int Perlin::contourThresholds[CONTOUR_LEVELS] = {
       36, 72, 108, 144, 180, 216};
 
   void Perlin::reset()
   {
     mTime = 0.0f;
-    mBlend = 0.0f;
-    mBlendTarget = 0.0f;
-    mHoldTimer = 0.0f;
     memset(mField, 0, sizeof(mField));
+    memset(mWarpMag, 0, sizeof(mWarpMag));
+    memset(mAbsorption, 0, sizeof(mAbsorption));
 
     // Initialize permutation table
     for (int i = 0; i < 256; i++)
@@ -95,157 +93,23 @@ namespace od
       mPerm[i + 256] = mPerm[i];
   }
 
-  void Perlin::drawMain(FrameBuffer &m, float blend)
-  {
-    float fillAmt = 1.0f - blend;
-    float contourAmt = blend;
-
-    // Fill pass: brightness scaled by (1 - blend)
-    if (fillAmt > 0.01f)
-    {
-      for (int y = 0; y < 64; y++)
-      {
-        int gy = y / 2;
-        if (gy >= GRID_H) gy = GRID_H - 1;
-        for (int x = 0; x < 256; x++)
-        {
-          int gx = x / 2;
-          if (gx >= GRID_W) gx = GRID_W - 1;
-          int val = mField[gy * GRID_W + gx];
-          int color = (int)((float)(val / 17) * fillAmt);
-          if (color > 0)
-            m.pixel(color, x, y);
-        }
-      }
-    }
-
-    // Contour pass: line brightness scaled by blend
-    if (contourAmt > 0.01f)
-    {
-      static const int segTable[16][4] = {
-          {-1, -1, -1, -1}, {0, 3, -1, -1}, {0, 1, -1, -1}, {1, 3, -1, -1},
-          {2, 3, -1, -1}, {0, 1, 2, 3}, {0, 2, -1, -1}, {1, 2, -1, -1},
-          {1, 2, -1, -1}, {0, 2, -1, -1}, {0, 3, 1, 2}, {1, 2, -1, -1},
-          {1, 3, -1, -1}, {0, 1, -1, -1}, {0, 3, -1, -1}, {-1, -1, -1, -1}};
-
-      for (int level = 0; level < CONTOUR_LEVELS; level++)
-      {
-        int thresh = contourThresholds[level];
-        int baseColor = GRAY3 + level * 2;
-        if (baseColor > WHITE) baseColor = WHITE;
-        int color = (int)((float)baseColor * contourAmt);
-        if (color < 1) continue;
-
-        for (int cy = 0; cy < GRID_H - 1; cy++)
-        {
-          for (int cx = 0; cx < GRID_W - 1; cx++)
-          {
-            int v00 = mField[cy * GRID_W + cx];
-            int v10 = mField[cy * GRID_W + cx + 1];
-            int v01 = mField[(cy + 1) * GRID_W + cx];
-            int v11 = mField[(cy + 1) * GRID_W + cx + 1];
-
-            int config = 0;
-            if (v00 >= thresh) config |= 1;
-            if (v10 >= thresh) config |= 2;
-            if (v01 >= thresh) config |= 4;
-            if (v11 >= thresh) config |= 8;
-
-            if (config == 0 || config == 15) continue;
-
-            float ex[4], ey[4];
-            bool eActive[4] = {false, false, false, false};
-
-            if ((v00 >= thresh) != (v10 >= thresh))
-            {
-              float t = (float)(thresh - v00) / (float)(v10 - v00);
-              ex[0] = (float)cx + t;
-              ey[0] = (float)cy;
-              eActive[0] = true;
-            }
-            if ((v10 >= thresh) != (v11 >= thresh))
-            {
-              float t = (float)(thresh - v10) / (float)(v11 - v10);
-              ex[1] = (float)(cx + 1);
-              ey[1] = (float)cy + t;
-              eActive[1] = true;
-            }
-            if ((v01 >= thresh) != (v11 >= thresh))
-            {
-              float t = (float)(thresh - v01) / (float)(v11 - v01);
-              ex[2] = (float)cx + t;
-              ey[2] = (float)(cy + 1);
-              eActive[2] = true;
-            }
-            if ((v00 >= thresh) != (v01 >= thresh))
-            {
-              float t = (float)(thresh - v00) / (float)(v01 - v00);
-              ex[3] = (float)cx;
-              ey[3] = (float)cy + t;
-              eActive[3] = true;
-            }
-
-            const int *segs = segTable[config];
-
-            for (int si = 0; si < 4; si += 2)
-            {
-              if (segs[si] < 0 || segs[si + 1] < 0) continue;
-              if (!eActive[segs[si]] || !eActive[segs[si + 1]]) continue;
-
-              int px0 = (int)(ex[segs[si]] * 2.0f + 0.5f);
-              int py0 = (int)(ey[segs[si]] * 2.0f + 0.5f);
-              int px1 = (int)(ex[segs[si + 1]] * 2.0f + 0.5f);
-              int py1 = (int)(ey[segs[si + 1]] * 2.0f + 0.5f);
-
-              m.line(color, px0, py0, px1, py1);
-            }
-          }
-        }
-      }
-    }
-  }
-
   void Perlin::draw(FrameBuffer &m, FrameBuffer &s)
   {
     mTime += GRAPHICS_REFRESH_PERIOD * 0.15f;
-
-    // Crossfade: hold at each extreme, then ramp to the other
-    mHoldTimer += GRAPHICS_REFRESH_PERIOD;
-    float holdDuration = 20.0f;
-    float rampSpeed = 0.12f; // ~8 seconds full crossfade
-
-    if (mHoldTimer >= holdDuration)
-    {
-      // Flip target
-      mBlendTarget = (mBlendTarget < 0.5f) ? 1.0f : 0.0f;
-      mHoldTimer = 0.0f;
-    }
-
-    // Ramp toward target
-    if (mBlend < mBlendTarget)
-    {
-      mBlend += GRAPHICS_REFRESH_PERIOD * rampSpeed;
-      if (mBlend > mBlendTarget) mBlend = mBlendTarget;
-    }
-    else if (mBlend > mBlendTarget)
-    {
-      mBlend -= GRAPHICS_REFRESH_PERIOD * rampSpeed;
-      if (mBlend < mBlendTarget) mBlend = mBlendTarget;
-    }
 
     // Modulate field characteristics over time
     float baseScale = 0.06f;
     float scaleWarp = sinf(mTime * 0.4f) * 0.01f;
     float noiseScale = baseScale + scaleWarp;
 
-    // Domain warping: single-octave noise for broad, smooth distortion
+    // Domain warping
     float warpStrength = (sinf(mTime * 0.2f) * 0.5f + 0.5f) * 1.5f + 0.5f;
 
-    // Drift direction evolves over time
+    // Drift direction evolves
     float driftX = sinf(mTime * 0.17f) * 0.4f;
     float driftY = cosf(mTime * 0.11f) * 0.4f;
 
-    // Evaluate noise field
+    // Evaluate noise field and warp magnitude
     for (int gy = 0; gy < GRID_H; gy++)
     {
       for (int gx = 0; gx < GRID_W; gx++)
@@ -262,11 +126,149 @@ namespace od
         if (ival < 0) ival = 0;
         if (ival > 255) ival = 255;
         mField[gy * GRID_W + gx] = (uint8_t)ival;
+
+        // Warp magnitude: how deformed this cell is (0-255)
+        float wm = sqrtf(wx * wx + wy * wy) / (warpStrength * 1.2f);
+        if (wm > 1.0f) wm = 1.0f;
+        mWarpMag[gy * GRID_W + gx] = (uint8_t)(wm * 255.0f);
       }
     }
 
-    // Main display: crossfade between fill and contour
-    drawMain(m, mBlend);
+    // Continuous absorption oscillator: slow sine sweeps 0→1→0
+    // This is the "tide line" — cells with warp above it absorb into contour
+    float sweep = sinf(mTime * 0.4f) * 0.5f + 0.5f; // 0-1, ~40s full cycle
+
+    float absorbSpeed = GRAPHICS_REFRESH_PERIOD * 0.2f;
+
+    for (int i = 0; i < GRID_W * GRID_H; i++)
+    {
+      float priority = (float)mWarpMag[i] / 255.0f;
+
+      // Cell absorbs when its warp priority exceeds the sweep threshold
+      // High-warp cells cross first as sweep rises, release last as it falls
+      float cellTarget = (priority > (1.0f - sweep)) ? 1.0f : 0.0f;
+
+      // Smooth ramp — warp-proportional speed for organic wavefront
+      if (mAbsorption[i] < cellTarget)
+      {
+        mAbsorption[i] += absorbSpeed * (1.0f + priority * 2.0f);
+        if (mAbsorption[i] > 1.0f) mAbsorption[i] = 1.0f;
+      }
+      else if (mAbsorption[i] > cellTarget)
+      {
+        mAbsorption[i] -= absorbSpeed * (1.0f + (1.0f - priority) * 2.0f);
+        if (mAbsorption[i] < 0.0f) mAbsorption[i] = 0.0f;
+      }
+    }
+
+    // --- Main display ---
+    // Fill pass: brightness reduced by local absorption
+    for (int y = 0; y < 64; y++)
+    {
+      int gy = y / 2;
+      if (gy >= GRID_H) gy = GRID_H - 1;
+      for (int x = 0; x < 256; x++)
+      {
+        int gx = x / 2;
+        if (gx >= GRID_W) gx = GRID_W - 1;
+        int idx = gy * GRID_W + gx;
+        float ab = mAbsorption[idx];
+        int val = mField[idx];
+        int color = (int)((float)(val / 17) * (1.0f - ab));
+        if (color > 0)
+          m.pixel(color, x, y);
+      }
+    }
+
+    // Contour pass: line brightness scaled by local absorption
+    static const int segTable[16][4] = {
+        {-1, -1, -1, -1}, {0, 3, -1, -1}, {0, 1, -1, -1}, {1, 3, -1, -1},
+        {2, 3, -1, -1}, {0, 1, 2, 3}, {0, 2, -1, -1}, {1, 2, -1, -1},
+        {1, 2, -1, -1}, {0, 2, -1, -1}, {0, 3, 1, 2}, {1, 2, -1, -1},
+        {1, 3, -1, -1}, {0, 1, -1, -1}, {0, 3, -1, -1}, {-1, -1, -1, -1}};
+
+    for (int level = 0; level < CONTOUR_LEVELS; level++)
+    {
+      int thresh = contourThresholds[level];
+      int baseColor = GRAY3 + level * 2;
+      if (baseColor > WHITE) baseColor = WHITE;
+
+      for (int cy = 0; cy < GRID_H - 1; cy++)
+      {
+        for (int cx = 0; cx < GRID_W - 1; cx++)
+        {
+          // Local absorption at this cell (average of corners)
+          float ab = (mAbsorption[cy * GRID_W + cx] +
+                      mAbsorption[cy * GRID_W + cx + 1] +
+                      mAbsorption[(cy + 1) * GRID_W + cx] +
+                      mAbsorption[(cy + 1) * GRID_W + cx + 1]) *
+                     0.25f;
+
+          int color = (int)((float)baseColor * ab);
+          if (color < 1) continue;
+
+          int v00 = mField[cy * GRID_W + cx];
+          int v10 = mField[cy * GRID_W + cx + 1];
+          int v01 = mField[(cy + 1) * GRID_W + cx];
+          int v11 = mField[(cy + 1) * GRID_W + cx + 1];
+
+          int config = 0;
+          if (v00 >= thresh) config |= 1;
+          if (v10 >= thresh) config |= 2;
+          if (v01 >= thresh) config |= 4;
+          if (v11 >= thresh) config |= 8;
+
+          if (config == 0 || config == 15) continue;
+
+          float ex[4], ey[4];
+          bool eActive[4] = {false, false, false, false};
+
+          if ((v00 >= thresh) != (v10 >= thresh))
+          {
+            float t = (float)(thresh - v00) / (float)(v10 - v00);
+            ex[0] = (float)cx + t;
+            ey[0] = (float)cy;
+            eActive[0] = true;
+          }
+          if ((v10 >= thresh) != (v11 >= thresh))
+          {
+            float t = (float)(thresh - v10) / (float)(v11 - v10);
+            ex[1] = (float)(cx + 1);
+            ey[1] = (float)cy + t;
+            eActive[1] = true;
+          }
+          if ((v01 >= thresh) != (v11 >= thresh))
+          {
+            float t = (float)(thresh - v01) / (float)(v11 - v01);
+            ex[2] = (float)cx + t;
+            ey[2] = (float)(cy + 1);
+            eActive[2] = true;
+          }
+          if ((v00 >= thresh) != (v01 >= thresh))
+          {
+            float t = (float)(thresh - v00) / (float)(v01 - v00);
+            ex[3] = (float)cx;
+            ey[3] = (float)cy + t;
+            eActive[3] = true;
+          }
+
+          const int *segs = segTable[config];
+
+          for (int si = 0; si < 4; si += 2)
+          {
+            if (segs[si] < 0 || segs[si + 1] < 0) continue;
+            if (!eActive[segs[si]] || !eActive[segs[si + 1]]) continue;
+
+            int px0 = (int)(ex[segs[si]] * 2.0f + 0.5f);
+            int py0 = (int)(ey[segs[si]] * 2.0f + 0.5f);
+            int px1 = (int)(ex[segs[si + 1]] * 2.0f + 0.5f);
+            int py1 = (int)(ey[segs[si + 1]] * 2.0f + 0.5f);
+
+            m.line(color, px0, py0, px1, py1);
+          }
+        }
+      }
+    }
 
     // Sub display (128x64): stippled density
     for (int y = 0; y < 64; y++)
