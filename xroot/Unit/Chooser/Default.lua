@@ -173,6 +173,21 @@ function Chooser:refresh()
   self:clear()
 
   if ordering == "category" then
+    local Settings = require "Settings"
+    if Settings.get("showFavorites") ~= false and #Chooser.favorites > 0 then
+      self:addCategory("Favorites:")
+      local sorted = self:getSortedFavorites()
+      for _, u in ipairs(sorted) do
+        if u.channelCount then
+          if ring.chain and ring.chain.channelCount == u.channelCount then
+            self:addUnit(u)
+          end
+        else
+          self:addUnit(u)
+        end
+      end
+    end
+
     if #Chooser.recent > 0 then
       self:addCategory("Recent:")
       for _, u in ipairs(Chooser.recent) do
@@ -186,21 +201,6 @@ function Chooser:refresh()
       end
       if Clipboard.hasData(1) then
         self:addClipboard()
-      end
-    end
-
-    local Settings = require "Settings"
-    if Settings.get("showFavorites") ~= false and #Chooser.favorites > 0 then
-      self:addCategory("Favorites:")
-      local sorted = self:getSortedFavorites()
-      for _, u in ipairs(sorted) do
-        if u.channelCount then
-          if ring.chain and ring.chain.channelCount == u.channelCount then
-            self:addUnit(u)
-          end
-        else
-          self:addUnit(u)
-        end
       end
     end
 
