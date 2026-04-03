@@ -82,6 +82,7 @@ local defaults = {
       "forest",
       "snow",
       "rain",
+      "perlin",
       "cycle"
     },
     onSet = function(value)
