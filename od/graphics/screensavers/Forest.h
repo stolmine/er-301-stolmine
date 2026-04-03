@@ -139,6 +139,7 @@ namespace od
     float treeHoldTimer[MAX_TREES];
     float treeHoldDuration[MAX_TREES];
     float treeSpawnDelay[MAX_TREES];
+    float treeWindPhase[MAX_TREES];
 
     float t;
     float stepAccum;

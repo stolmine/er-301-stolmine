@@ -97,6 +97,7 @@ namespace od
     treeFade[idx] = 0.0f;
     treeHoldTimer[idx] = 0.0f;
     treeHoldDuration[idx] = Random::generateFloat(16.0f, 40.0f);
+    treeWindPhase[idx] = Random::generateFloat(0.0f, 6.28f);
   }
 
   void Forest::initRays()
@@ -282,6 +283,10 @@ namespace od
   {
     int zBright = layerBrightness[z];
 
+    // Global wind: layered sines for organic, non-repeating gusts
+    float wind = sinf(t * 0.3f) * 0.5f + sinf(t * 0.13f) * 0.3f + sinf(t * 0.07f) * 0.2f;
+    float zSway = layerScale[z]; // foreground sways more
+
     for (int i = 0; i < segmentCount; i++)
     {
       Segment &seg = segments[i];
@@ -292,16 +297,26 @@ namespace od
       int color = fadeColor(seg.color + zBright, fade);
       if (color < BLACK) color = BLACK;
 
+      // Wind displacement per endpoint, proportional to height²
+      float treeSway = wind * sinf(t * 0.5f + treeWindPhase[seg.treeIndex]) * zSway * 3.0f;
+      float h0 = (float)(seg.y0 - GROUND_Y) / 60.0f;
+      float h1 = (float)(seg.y1 - GROUND_Y) / 60.0f;
+      int dx0 = (int)(treeSway * h0 * h0);
+      int dx1 = (int)(treeSway * h1 * h1);
+
+      int sx0 = seg.x0 + dx0, sy0 = seg.y0;
+      int sx1 = seg.x1 + dx1, sy1 = seg.y1;
+
       if (color > BLACK)
       {
-        m.line(color, seg.x0, seg.y0, seg.x1, seg.y1);
+        m.line(color, sx0, sy0, sx1, sy1);
         if (seg.depth <= 1)
-          m.line(color, seg.x0 + 1, seg.y0, seg.x1 + 1, seg.y1);
+          m.line(color, sx0 + 1, sy0, sx1 + 1, sy1);
       }
 
       int subColor = fadeColor(WHITE, fade);
       if (subColor > BLACK)
-        s.line(subColor, seg.x0 / 2, seg.y0, seg.x1 / 2, seg.y1);
+        s.line(subColor, sx0 / 2, sy0, sx1 / 2, sy1);
     }
 
     for (int i = 0; i < leafCount; i++)
@@ -314,27 +329,40 @@ namespace od
       int color = fadeColor(lf.color + zBright, fade);
       if (color < BLACK) color = BLACK;
 
+      // Wind displacement for leaf
+      float treeSway = wind * sinf(t * 0.5f + treeWindPhase[lf.treeIndex]) * zSway * 3.0f;
+      float hf = (float)(lf.y - GROUND_Y) / 60.0f;
+      int dx = (int)(treeSway * hf * hf);
+      int lx = lf.x + dx;
+
       if (color > BLACK)
       {
         // Check for backlight from rays in previous layers
-        int bg = m.readPixel(lf.x, lf.y);
-        m.fillCircle(color, lf.x, lf.y, lf.size);
-
-        // Rim light: bright edge on upper-right if backlit
-        if (bg > GRAY3)
+        if (lx >= 0 && lx < 256 && lf.y >= 0 && lf.y < 64)
         {
-          int rimColor = color + bg / 2;
-          if (rimColor > WHITE) rimColor = WHITE;
-          int rx = lf.x + lf.size;
-          int ry = lf.y + 1;
-          if (rx >= 0 && rx < 256 && ry >= 0 && ry < 64)
-            m.pixel(rimColor, rx, ry);
+          int bg = m.readPixel(lx, lf.y);
+          m.fillCircle(color, lx, lf.y, lf.size);
+
+          // Rim light: bright edge on upper-right if backlit
+          if (bg > GRAY3)
+          {
+            int rimColor = color + bg / 2;
+            if (rimColor > WHITE) rimColor = WHITE;
+            int rx = lx + lf.size;
+            int ry = lf.y + 1;
+            if (rx >= 0 && rx < 256 && ry >= 0 && ry < 64)
+              m.pixel(rimColor, rx, ry);
+          }
         }
       }
 
       int subColor = fadeColor(WHITE, fade);
       if (subColor > BLACK)
-        s.pixel(subColor, lf.x / 2, lf.y);
+      {
+        int slx = lx / 2;
+        if (slx >= 0 && slx < 128)
+          s.pixel(subColor, slx, lf.y);
+      }
     }
   }
 
@@ -449,6 +477,7 @@ namespace od
           treeFade[i] = 0.0f;
           treeHoldTimer[i] = 0.0f;
           treeHoldDuration[i] = Random::generateFloat(16.0f, 40.0f);
+          treeWindPhase[i] = Random::generateFloat(0.0f, 6.28f);
         }
         break;
       }
@@ -698,9 +727,21 @@ namespace od
     // Update particle positions
     updateAndDrawParticles(m, s);
 
-    // Growth tips
-    for (int i = 0; i < growTop; i++)
-      m.pixel(WHITE, (int)growStack[i].x, (int)growStack[i].y);
+    // Growth tips (with wind displacement)
+    {
+      float wind = sinf(t * 0.3f) * 0.5f + sinf(t * 0.13f) * 0.3f + sinf(t * 0.07f) * 0.2f;
+      for (int i = 0; i < growTop; i++)
+      {
+        int ti = growStack[i].treeIndex;
+        float zs = layerScale[treeZ[ti]];
+        float ts = wind * sinf(t * 0.5f + treeWindPhase[ti]) * zs * 3.0f;
+        float hf = (growStack[i].y - GROUND_Y) / 60.0f;
+        int gx = (int)growStack[i].x + (int)(ts * hf * hf);
+        int gy = (int)growStack[i].y;
+        if (gx >= 0 && gx < 256 && gy >= 0 && gy < 64)
+          m.pixel(WHITE, gx, gy);
+      }
+    }
   }
 
 } /* namespace od */
