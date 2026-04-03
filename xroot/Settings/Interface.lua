@@ -72,6 +72,10 @@ menuItems[#menuItems + 1] = {
   "containerUnitNameGen"
 }
 menuItems[#menuItems + 1] = {
+  "addVariable",
+  "showFavorites"
+}
+menuItems[#menuItems + 1] = {
   "addCategory",
   "QuickSaves"
 }
@@ -146,6 +150,10 @@ menuItems[#menuItems + 1] = {
 menuItems[#menuItems + 1] = {
   "addVariable",
   "confirmSampleEdit"
+}
+menuItems[#menuItems + 1] = {
+  "addVariable",
+  "confirmClearFavorites"
 }
 menuItems[#menuItems + 1] = {
   "addCategory",

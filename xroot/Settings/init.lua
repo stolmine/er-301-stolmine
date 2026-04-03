@@ -167,6 +167,11 @@ local defaults = {
       "off"
     }
   },
+  showFavorites = {
+    category = "Units",
+    description = "Show favorites in unit browser?",
+    value = true
+  },
   fileRecorderChannelCount = {
     category = "Multitrack Recorder",
     description = "Channel Count:",
@@ -282,6 +287,11 @@ local defaults = {
       "yes",
       "no"
     }
+  },
+  confirmClearFavorites = {
+    category = "Confirmations",
+    description = "When clearing all favorites...",
+    value = true
   },
   samplePreviewStop = {
     category = "File Browser",

@@ -62,6 +62,7 @@ function Chooser:init(opts)
   self.help3 = label
 
   self.menuGraphic = graphic
+  self.favoritesEditMode = false
 
   local Settings = require "Settings"
   local defaultChooser = Settings.get("unitBrowserDefault")
@@ -123,12 +124,17 @@ function Chooser:show(context)
 end
 
 function Chooser:hide()
+  self:exitFavoritesEditMode()
   self.current:hide()
 end
 
 function Chooser:subReleased(i, shifted)
   if shifted then
     return false
+  end
+  if self.favoritesEditMode then
+    self:handleFavoritesAction(i)
+    return true
   end
   if i == self.index then
     return
@@ -137,7 +143,68 @@ function Chooser:subReleased(i, shifted)
   return true
 end
 
+function Chooser:toggleFavoritesEditMode()
+  self.favoritesEditMode = not self.favoritesEditMode
+  if self.favoritesEditMode then
+    self.panels[1]:setText("")
+    self.panels[2]:setText("Clear All")
+    self.panels[3]:setText("Sort")
+    self.panels[1]:deselect()
+    self.panels[2]:deselect()
+    self.panels[3]:deselect()
+    self.help1:setText("Tap M1-M6 to tag.")
+    self.help2:setText("SHIFT to exit.")
+  else
+    self.panels[1]:setText("Category")
+    self.panels[2]:setText("A-to-Z")
+    self.panels[3]:setText("Presets")
+    self.panels[1]:deselect()
+    self.panels[2]:deselect()
+    self.panels[3]:deselect()
+    self.panels[self.index]:select()
+    self.help1:setText("Choose a unit.")
+    self.help2:setText("M1-M6 to select.")
+  end
+end
+
+function Chooser:exitFavoritesEditMode()
+  if self.favoritesEditMode then
+    self:toggleFavoritesEditMode()
+  end
+end
+
+function Chooser:handleFavoritesAction(i)
+  local ChooserDefault = require "Unit.Chooser.Default"
+  if i == 2 then
+    local Settings = require "Settings"
+    if Settings.get("confirmClearFavorites") then
+      local Verification = require "Verification"
+      local dlg = Verification.Sub("Clear all favorites?", "")
+      dlg:subscribe("done", function(ans)
+        if ans then
+          ChooserDefault:clearFavorites()
+          if self.categoric then self.categoric:refresh() end
+          if self.alphabetic then self.alphabetic:refresh() end
+          local Overlay = require "Overlay"
+          Overlay.flashMainMessage("Favorites cleared.")
+        end
+      end)
+      dlg:show()
+    else
+      ChooserDefault:clearFavorites()
+      if self.categoric then self.categoric:refresh() end
+      if self.alphabetic then self.alphabetic:refresh() end
+      local Overlay = require "Overlay"
+      Overlay.flashMainMessage("Favorites cleared.")
+    end
+  elseif i == 3 then
+    ChooserDefault:cycleFavoriteSortOrder()
+    if self.categoric then self.categoric:refresh() end
+  end
+end
+
 function Chooser:setChooser(i)
+  self:exitFavoritesEditMode()
   local context = self.current and self.current.context
   if self.current then
     self.current:hide()
@@ -308,14 +375,22 @@ end
 
 function Chooser:cancelReleased(shifted)
   if not shifted then
-    self.current:hide()
+    if self.favoritesEditMode then
+      self:exitFavoritesEditMode()
+    else
+      self.current:hide()
+    end
   end
   return true
 end
 
 function Chooser:upReleased(shifted)
   if not shifted then
-    self.current:hide()
+    if self.favoritesEditMode then
+      self:exitFavoritesEditMode()
+    else
+      self.current:hide()
+    end
   end
   return true
 end

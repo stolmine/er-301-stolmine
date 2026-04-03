@@ -7,7 +7,9 @@ local Factory = require "Unit.Factory"
 local Overlay = require "Overlay"
 local Clipboard = require "Chain.Clipboard"
 local Utils = require "Utils"
+local Persist = require "Persist"
 local ply = app.SECTION_PLY
+local favoritesFile = app.roots.rear .. "/favorites.lua"
 
 local topCategories = {
   "Essentials",
@@ -28,6 +30,8 @@ local topCategories = {
 local bottomCategories = {
   "Experimental"
 }
+
+local Chooser -- forward declaration for ChooserItem access
 
 local function isStandardUnit(loadInfo)
   return loadInfo.libraryName == "builtins" or loadInfo.libraryName == "core"
@@ -66,6 +70,9 @@ function ChooserItem:init(loadInfo, suppressLibraryName)
     graphic = app.FittedTextBox(x .. ": " .. loadInfo.title)
     graphic:setCornerRadius(0, 5, 5, 0)
   end
+  if Chooser.favoriteHash[loadInfo.title] then
+    graphic:setBorderColor(app.WHITE)
+  end
   self:setControlGraphic(graphic)
   self.loadInfo = loadInfo
 end
@@ -76,10 +83,39 @@ end
 
 ------
 
-local Chooser = Class {
-  recent = {}
+Chooser = Class {
+  recent = {},
+  favorites = {},
+  favoriteHash = {},
+  favoriteSortOrder = "recents"
 }
 Chooser:include(MondrianMenu)
+
+local function saveFavorites()
+  local t = {
+    favorites = Utils.deepCopy(Chooser.favorites),
+    favoriteSortOrder = Chooser.favoriteSortOrder
+  }
+  Persist.writeTable(favoritesFile, t)
+end
+
+local function loadFavorites()
+  local t = Persist.readTable(favoritesFile)
+  if t and t.favorites then
+    Chooser.favorites = t.favorites
+    Chooser.favoriteHash = {}
+    for _, f in ipairs(Chooser.favorites) do
+      if f.title then
+        Chooser.favoriteHash[f.title] = true
+      end
+    end
+  end
+  if t and t.favoriteSortOrder then
+    Chooser.favoriteSortOrder = t.favoriteSortOrder
+  end
+end
+
+loadFavorites()
 
 local function allFromSameExternalLibrary(units)
   local name
@@ -150,6 +186,21 @@ function Chooser:refresh()
       end
       if Clipboard.hasData(1) then
         self:addClipboard()
+      end
+    end
+
+    local Settings = require "Settings"
+    if Settings.get("showFavorites") ~= false and #Chooser.favorites > 0 then
+      self:addCategory("Favorites:")
+      local sorted = self:getSortedFavorites()
+      for _, u in ipairs(sorted) do
+        if u.channelCount then
+          if ring.chain and ring.chain.channelCount == u.channelCount then
+            self:addUnit(u)
+          end
+        else
+          self:addUnit(u)
+        end
       end
     end
 
@@ -241,7 +292,81 @@ function Chooser:updateRecent(loadInfo)
   Chooser.recent = t
 end
 
+function Chooser:isFavorite(title)
+  return Chooser.favoriteHash[title] or false
+end
+
+function Chooser:toggleFavorite(loadInfo)
+  if loadInfo.title == nil then
+    return
+  end
+  if Chooser.favoriteHash[loadInfo.title] then
+    Chooser.favoriteHash[loadInfo.title] = nil
+    for i, u in ipairs(Chooser.favorites) do
+      if u.title == loadInfo.title then
+        table.remove(Chooser.favorites, i)
+        break
+      end
+    end
+    Overlay.flashMainMessage("Removed: %s", loadInfo.title)
+  else
+    Chooser.favoriteHash[loadInfo.title] = true
+    table.insert(Chooser.favorites, 1, loadInfo)
+    Overlay.flashMainMessage("Favorited: %s", loadInfo.title)
+  end
+  saveFavorites()
+end
+
+function Chooser:clearFavorites()
+  Chooser.favorites = {}
+  Chooser.favoriteHash = {}
+  saveFavorites()
+end
+
+function Chooser:cycleFavoriteSortOrder()
+  local order = Chooser.favoriteSortOrder
+  if order == "recents" then
+    Chooser.favoriteSortOrder = "alphabetical"
+  elseif order == "alphabetical" then
+    Chooser.favoriteSortOrder = "category"
+  else
+    Chooser.favoriteSortOrder = "recents"
+  end
+  saveFavorites()
+  Overlay.flashMainMessage("Favorites sort: %s", Chooser.favoriteSortOrder)
+end
+
+function Chooser:getSortedFavorites()
+  local sorted = {}
+  for _, u in ipairs(Chooser.favorites) do
+    sorted[#sorted + 1] = u
+  end
+  local order = Chooser.favoriteSortOrder
+  if order == "alphabetical" then
+    table.sort(sorted, function(a, b)
+      return a.title:upper() < b.title:upper()
+    end)
+  elseif order == "category" then
+    table.sort(sorted, function(a, b)
+      local ca = a.category or ""
+      local cb = b.category or ""
+      if ca ~= cb then
+        return ca < cb
+      end
+      return a.title:upper() < b.title:upper()
+    end)
+  end
+  return sorted
+end
+
 function Chooser:choose(loadInfo)
+  if self.ring.favoritesEditMode then
+    if loadInfo ~= "paste" then
+      self:toggleFavorite(loadInfo)
+      self:refresh()
+    end
+    return
+  end
   if loadInfo == "paste" then
     self.ring:loadClipboard()
   else
@@ -280,6 +405,11 @@ end
 
 function Chooser:subReleased(i, shifted)
   return self.ring:subReleased(i, shifted)
+end
+
+function Chooser:shiftReleased()
+  self.ring:toggleFavoritesEditMode()
+  return true
 end
 
 function Chooser:cancelReleased(shifted)
