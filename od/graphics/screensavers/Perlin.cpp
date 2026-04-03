@@ -270,7 +270,8 @@ namespace od
       }
     }
 
-    // Sub display (128x64): stippled density
+    // Sub display (128x64): stipple where fill, contour where absorbed
+    // Stipple pass: density scaled by (1 - absorption)
     for (int y = 0; y < 64; y++)
     {
       int gy = y / 2;
@@ -279,11 +280,99 @@ namespace od
       {
         int gx = x;
         if (gx >= GRID_W) gx = GRID_W - 1;
-        int val = mField[gy * GRID_W + gx];
+        int idx = gy * GRID_W + gx;
+        float ab = mAbsorption[idx];
+        int val = (int)((float)mField[idx] * (1.0f - ab));
 
         int threshold = mPerm[(mPerm[x & 255] + y) & 255];
         if (val > threshold)
           s.pixel(WHITE, x, y);
+      }
+    }
+
+    // Sub contour pass: low-res marching squares (step by 4 in grid space)
+    static const int subStep = 4;
+    static const int SUB_CONTOUR_LEVELS = 4;
+    static const int subThresholds[SUB_CONTOUR_LEVELS] = {50, 100, 155, 205};
+
+    for (int level = 0; level < SUB_CONTOUR_LEVELS; level++)
+    {
+      int thresh = subThresholds[level];
+
+      for (int cy = 0; cy < GRID_H - subStep; cy += subStep)
+      {
+        for (int cx = 0; cx < GRID_W - subStep; cx += subStep)
+        {
+          // Average absorption across this coarse cell
+          float ab = (mAbsorption[cy * GRID_W + cx] +
+                      mAbsorption[cy * GRID_W + cx + subStep] +
+                      mAbsorption[(cy + subStep) * GRID_W + cx] +
+                      mAbsorption[(cy + subStep) * GRID_W + cx + subStep]) *
+                     0.25f;
+          if (ab < 0.01f) continue;
+
+          int v00 = mField[cy * GRID_W + cx];
+          int v10 = mField[cy * GRID_W + cx + subStep];
+          int v01 = mField[(cy + subStep) * GRID_W + cx];
+          int v11 = mField[(cy + subStep) * GRID_W + cx + subStep];
+
+          int config = 0;
+          if (v00 >= thresh) config |= 1;
+          if (v10 >= thresh) config |= 2;
+          if (v01 >= thresh) config |= 4;
+          if (v11 >= thresh) config |= 8;
+
+          if (config == 0 || config == 15) continue;
+
+          float ex[4], ey[4];
+          bool eActive[4] = {false, false, false, false};
+
+          if ((v00 >= thresh) != (v10 >= thresh))
+          {
+            float t = (float)(thresh - v00) / (float)(v10 - v00);
+            ex[0] = (float)cx + t * subStep;
+            ey[0] = (float)cy;
+            eActive[0] = true;
+          }
+          if ((v10 >= thresh) != (v11 >= thresh))
+          {
+            float t = (float)(thresh - v10) / (float)(v11 - v10);
+            ex[1] = (float)(cx + subStep);
+            ey[1] = (float)cy + t * subStep;
+            eActive[1] = true;
+          }
+          if ((v01 >= thresh) != (v11 >= thresh))
+          {
+            float t = (float)(thresh - v01) / (float)(v11 - v01);
+            ex[2] = (float)cx + t * subStep;
+            ey[2] = (float)(cy + subStep);
+            eActive[2] = true;
+          }
+          if ((v00 >= thresh) != (v01 >= thresh))
+          {
+            float t = (float)(thresh - v00) / (float)(v01 - v00);
+            ex[3] = (float)cx;
+            ey[3] = (float)cy + t * subStep;
+            eActive[3] = true;
+          }
+
+          // Sub display: grid coords map 1:1 horizontally, 2x vertically
+          for (int si = 0; si < 4; si += 2)
+          {
+            if (segTable[config][si] < 0 || segTable[config][si + 1] < 0) continue;
+            int a = segTable[config][si], b = segTable[config][si + 1];
+            if (!eActive[a] || !eActive[b]) continue;
+
+            int px0 = (int)(ex[a] + 0.5f);
+            int py0 = (int)(ey[a] * 2.0f + 0.5f);
+            int px1 = (int)(ex[b] + 0.5f);
+            int py1 = (int)(ey[b] * 2.0f + 0.5f);
+
+            if (px0 >= 0 && px0 < 128 && px1 >= 0 && px1 < 128 &&
+                py0 >= 0 && py0 < 64 && py1 >= 0 && py1 < 64)
+              s.line(WHITE, px0, py0, px1, py1);
+          }
+        }
       }
     }
   }
