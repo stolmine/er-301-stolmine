@@ -51,6 +51,10 @@ namespace od
       uint8_t height;
       float phase;
       float speed;
+      float fade;       // 0=full brightness, 1=invisible
+      float holdTimer;
+      float holdDuration;
+      enum { FADING_IN, HOLDING, FADING_OUT } state;
     };
 
     struct FallingParticle
@@ -72,7 +76,7 @@ namespace od
     static const int GODRAY_COUNT = 6;
     static const int BIRD_COUNT = 3;
     static const int PARTICLE_COUNT = 24;
-    static const int GROUND_Y = 1;
+    static const int GROUND_Y = 0;
     static const int Z_LAYERS = 3;
 
     struct GodRay

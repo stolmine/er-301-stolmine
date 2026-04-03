@@ -34,6 +34,20 @@ namespace od
       grass[i].height = 2 + Random::generateInteger(0, 3);
       grass[i].phase = Random::generateFloat(0.0f, 6.28f);
       grass[i].speed = Random::generateFloat(1.0f, 2.5f);
+      grass[i].fade = 0.0f;
+      grass[i].holdTimer = 0.0f;
+      grass[i].holdDuration = Random::generateFloat(10.0f, 30.0f);
+      // Stagger: some start holding, some fading in
+      if (Random::generateFloat(0.0f, 1.0f) < 0.7f)
+      {
+        grass[i].state = GrassBlade::HOLDING;
+        grass[i].holdTimer = Random::generateFloat(0.0f, grass[i].holdDuration);
+      }
+      else
+      {
+        grass[i].state = GrassBlade::FADING_IN;
+        grass[i].fade = Random::generateFloat(0.3f, 1.0f);
+      }
     }
   }
 
@@ -555,14 +569,46 @@ namespace od
 
     // --- Render ---
 
-    // Ground line
-    m.hline(GRAY4, 0, 255, GROUND_Y);
-    s.hline(WHITE, 0, 127, GROUND_Y);
+    // No ground line — grass grows from bottom edge
 
-    // Swaying grass
+    // Swaying grass with lifecycle
     for (int i = 0; i < GRASS_COUNT; i++)
     {
       GrassBlade &g = grass[i];
+
+      // Update lifecycle
+      switch (g.state)
+      {
+      case GrassBlade::FADING_IN:
+        g.fade -= GRAPHICS_REFRESH_PERIOD / 3.0f;
+        if (g.fade <= 0.0f)
+        {
+          g.fade = 0.0f;
+          g.state = GrassBlade::HOLDING;
+          g.holdTimer = 0.0f;
+        }
+        break;
+      case GrassBlade::HOLDING:
+        g.holdTimer += GRAPHICS_REFRESH_PERIOD;
+        if (g.holdTimer >= g.holdDuration)
+          g.state = GrassBlade::FADING_OUT;
+        break;
+      case GrassBlade::FADING_OUT:
+        g.fade += GRAPHICS_REFRESH_PERIOD / 3.0f;
+        if (g.fade >= 1.0f)
+        {
+          // Respawn at new location
+          g.x = (int16_t)Random::generateFloat(0.0f, 255.0f);
+          g.height = 2 + Random::generateInteger(0, 3);
+          g.phase = Random::generateFloat(0.0f, 6.28f);
+          g.speed = Random::generateFloat(1.0f, 2.5f);
+          g.fade = 1.0f;
+          g.holdDuration = Random::generateFloat(10.0f, 30.0f);
+          g.state = GrassBlade::FADING_IN;
+        }
+        break;
+      }
+
       float sway = sinf(t * g.speed + g.phase) * 1.5f;
       int bx = g.x;
 
@@ -575,15 +621,18 @@ namespace od
         if (px >= 0 && px < 256)
         {
           int c = (h == g.height - 1) ? GRAY3 : GRAY4;
-          m.pixel(c, px, py);
+          c = fadeColor(c, g.fade);
+          if (c > BLACK)
+            m.pixel(c, px, py);
         }
       }
 
+      int subColor = fadeColor(WHITE, g.fade);
       int sx = bx / 2;
-      if (sx >= 0 && sx < 128)
+      if (sx >= 0 && sx < 128 && subColor > BLACK)
       {
-        s.pixel(WHITE, sx, GROUND_Y + 1);
-        if (g.height > 2) s.pixel(WHITE, sx, GROUND_Y + 2);
+        s.pixel(subColor, sx, GROUND_Y + 1);
+        if (g.height > 2) s.pixel(subColor, sx, GROUND_Y + 2);
       }
     }
 
