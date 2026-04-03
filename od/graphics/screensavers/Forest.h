@@ -23,7 +23,7 @@ namespace od
       uint8_t depth;
       uint8_t color;
       uint8_t treeIndex;
-      uint8_t zLayer; // 0=back, 1=mid, 2=front
+      uint8_t zLayer;
     };
 
     struct GrowTask
@@ -53,14 +53,26 @@ namespace od
       float speed;
     };
 
-    static const int MAX_SEGMENTS = 2400;
-    static const int MAX_GROW_STACK = 192;
-    static const int MAX_LEAVES = 800;
+    struct FallingParticle
+    {
+      float x, y;
+      float speedY;
+      float driftX;
+      uint8_t color;
+      uint8_t size;
+      uint8_t zLayer;
+      bool active;
+    };
+
+    static const int MAX_SEGMENTS = 4800;
+    static const int MAX_GROW_STACK = 256;
+    static const int MAX_LEAVES = 1600;
     static const int MAX_TREES = 16;
     static const int GRASS_COUNT = 80;
     static const int GODRAY_COUNT = 6;
     static const int BIRD_COUNT = 3;
-    static const int GROUND_Y = 5;
+    static const int PARTICLE_COUNT = 24;
+    static const int GROUND_Y = 1;
     static const int Z_LAYERS = 3;
 
     struct GodRay
@@ -76,11 +88,13 @@ namespace od
       bool active;
     };
 
-    enum Phase
+    // Per-tree lifecycle state
+    enum TreeState
     {
-      GROWING,
-      HOLDING,
-      FADING
+      TREE_GROWING,
+      TREE_HOLDING,
+      TREE_FADING,
+      TREE_DEAD
     };
 
     Segment segments[MAX_SEGMENTS];
@@ -98,33 +112,42 @@ namespace od
       float speed;
       float wingPhase;
       float wingSpeed;
+      uint8_t zLayer;
       bool active;
     };
 
     GrassBlade grass[GRASS_COUNT];
     GodRay rays[GODRAY_COUNT];
     Bird birds[BIRD_COUNT];
+    FallingParticle particles[PARTICLE_COUNT];
     float raySpawnTimer;
     float birdSpawnTimer;
+    float particleSpawnTimer;
+
+    // Z-based brightness offset
+    static constexpr int layerBrightness[Z_LAYERS] = {-3, 0, 2};
+    static constexpr float layerScale[Z_LAYERS] = {0.7f, 1.0f, 1.2f};
 
     int treeCount;
     uint8_t treeZ[MAX_TREES];
+    TreeState treeState[MAX_TREES];
     float treeFade[MAX_TREES];
-    bool treeFading[MAX_TREES];
-    int treesFaded;
+    float treeHoldTimer[MAX_TREES];
+    float treeHoldDuration[MAX_TREES];
+    float treeSpawnDelay[MAX_TREES];
 
-    Phase phase;
     float t;
     float stepAccum;
-    float holdTimer;
     float nextTreeTimer;
-    bool allTreesSpawned;
 
     void spawnTree();
+    bool isTreeGrowing(int idx);
     void initGrass();
     void initRays();
     void spawnRay(int i);
     void initBirds();
+    void initParticles();
+    void updateAndDrawParticles(FrameBuffer &m, FrameBuffer &s);
     void drawLayer(FrameBuffer &m, FrameBuffer &s, int z);
     void drawRaysForLayer(FrameBuffer &m, FrameBuffer &s, int z);
     void updateRays();
