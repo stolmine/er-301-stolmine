@@ -52,7 +52,9 @@ namespace od
     void encoder(int change, bool shifted, bool fine);
     void setTextBelow(float value, const std::string &text);
     void setTextAbove(float value, const std::string &text);
+#ifndef SWIGLUA
     void setNameTable(const std::vector<std::string> &names);
+#endif
     void addName(const std::string &name);
     void clearNames();
     void useSoftSet();
@@ -97,8 +99,10 @@ namespace od
     float mMaxTextThreshold = std::numeric_limits<float>::max();
     std::string mMaxText;
 
+#ifndef SWIGLUA
     std::vector<std::string> mNameTable;
     bool mUseNameTable = false;
+#endif
 
     bool mUseHardSet = false;
 
