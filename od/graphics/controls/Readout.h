@@ -52,6 +52,7 @@ namespace od
     void encoder(int change, bool shifted, bool fine);
     void setTextBelow(float value, const std::string &text);
     void setTextAbove(float value, const std::string &text);
+    void setNameTable(const std::vector<std::string> &names);
     void useSoftSet();
     void useHardSet();
 
@@ -93,6 +94,9 @@ namespace od
     std::string mMinText;
     float mMaxTextThreshold = std::numeric_limits<float>::max();
     std::string mMaxText;
+
+    std::vector<std::string> mNameTable;
+    bool mUseNameTable = false;
 
     bool mUseHardSet = false;
 

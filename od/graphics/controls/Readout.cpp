@@ -188,6 +188,13 @@ namespace od
     mMaxTextThreshold = value;
   }
 
+  void Readout::setNameTable(const std::vector<std::string> &names)
+  {
+    mNameTable = names;
+    mUseNameTable = !names.empty();
+    mLastValue = std::numeric_limits<float>::max();
+  }
+
   void Readout::commitChanges(bool force)
   {
     // has the parameter target changed?
@@ -205,7 +212,15 @@ namespace od
     {
       mLastValue = value;
       mDisplayValue = convertToUnits(value);
-      if (mDisplayValue < mMinTextThreshold)
+      if (mUseNameTable)
+      {
+        int idx = (int)(mDisplayValue + 0.5f);
+        if (idx >= 0 && idx < (int)mNameTable.size())
+          mText = mNameTable[idx];
+        else
+          mText = "??";
+      }
+      else if (mDisplayValue < mMinTextThreshold)
       {
         mText = mMinText;
       }
