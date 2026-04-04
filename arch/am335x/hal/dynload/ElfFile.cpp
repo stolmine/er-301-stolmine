@@ -9,6 +9,8 @@
 #include <hal/constants.h>
 #include <vector>
 #include <string.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include "elf.h"
 #include "armv7a.h"
 #include "reflect.h"
@@ -20,6 +22,17 @@
 
 namespace od
 {
+
+  // Helper to format error strings
+  static std::string formatError(const char *fmt, ...)
+  {
+    char buf[512];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+    return std::string(buf);
+  }
 
   ElfFile::ElfFile()
   {
@@ -46,7 +59,8 @@ namespace od
       }
       else
       {
-        logError("%s: Failed to allocate %d bytes of text/code memory.", mFilename.c_str(), bytes);
+        mLastError = formatError("%s: Failed to allocate %d bytes of text/code memory.", mFilename.c_str(), bytes);
+        logError("%s", mLastError.c_str());
         return false;
       }
     }
@@ -68,7 +82,8 @@ namespace od
       }
       else
       {
-        logError("%s: Failed to allocate %d bytes of data memory.", mFilename.c_str(), bytes);
+        mLastError = formatError("%s: Failed to allocate %d bytes of data memory.", mFilename.c_str(), bytes);
+        logError("%s", mLastError.c_str());
         return false;
       }
     }
@@ -99,10 +114,12 @@ namespace od
 
   bool ElfFile::load(const std::string &filename)
   {
+    mLastError.clear();
     FileReader reader;
     if (!reader.open(filename))
     {
-      logError("Failed to open %s.", filename.c_str());
+      mLastError = formatError("%s: Failed to open file (%d bytes on disk).", filename.c_str(), 0);
+      logError("%s", mLastError.c_str());
       return false;
     }
     mFilename = filename;
@@ -111,12 +128,15 @@ namespace od
     Elf32_Ehdr elfHeader;
     if (reader.readBytes(&elfHeader, sizeof(Elf32_Ehdr)) != sizeof(Elf32_Ehdr))
     {
-      logError("Could not read header.");
+      mLastError = formatError("%s: Could not read ELF header (file size: %d bytes).", filename.c_str(), reader.getSizeInBytes());
+      logError("%s", mLastError.c_str());
       return false;
     }
     else if (!verifyHeader(&elfHeader))
     {
-      logError("Header verification failed.");
+      mLastError = formatError("%s: ELF header verification failed (type=%d, machine=%d, class=%d).",
+                               filename.c_str(), elfHeader.e_type, elfHeader.e_machine, elfHeader.e_ident[EI_CLASS]);
+      logError("%s", mLastError.c_str());
       return false;
     }
 
@@ -285,13 +305,16 @@ namespace od
     uint32_t init_array_size = 0;
     logDebug(1, "Resolving undefined symbols...");
     int unresolved = 0;
+    std::string unresolvedNames;
+    static const int MAX_UNRESOLVED_TO_REPORT = 5;
     for (Elf32_Sym &sym : symbolTable)
     {
       // Resolve symbol value/address.
       switch (sym.st_shndx)
       {
       case SHN_COMMON:
-        logError("Common symbols are not supported. Re-compile with -fno-common.");
+        mLastError = formatError("%s: Common symbols are not supported. Re-compile with -fno-common.", filename.c_str());
+        logError("%s", mLastError.c_str());
         return false;
       case SHN_ABS:
         // Already has correct value.
@@ -314,12 +337,19 @@ namespace od
           else
           {
             logWarn("Unresolved symbol: %s", symbolName);
+            if (unresolved < MAX_UNRESOLVED_TO_REPORT)
+            {
+              if (!unresolvedNames.empty())
+                unresolvedNames += ", ";
+              unresolvedNames += symbolName;
+            }
             unresolved++;
           }
         }
         else
         {
-          logError("Symbol %d name is not in the string table.", sym.st_name);
+          mLastError = formatError("%s: Symbol %d name is not in the string table.", filename.c_str(), sym.st_name);
+          logError("%s", mLastError.c_str());
           return false;
         }
       default:
@@ -345,7 +375,13 @@ namespace od
 
     if (unresolved > 0)
     {
-      logError("Aborting ELF load due to %d unresolved symbol(s).", unresolved);
+      if (unresolved > MAX_UNRESOLVED_TO_REPORT)
+      {
+        unresolvedNames += ", ...";
+      }
+      mLastError = formatError("%s: %d unresolved symbol(s): [%s]. Check SWIG version match between firmware and package.",
+                               filename.c_str(), unresolved, unresolvedNames.c_str());
+      logError("%s", mLastError.c_str());
       return false;
     }
 
@@ -445,10 +481,13 @@ namespace od
         logDebug(1, "Executing INIT_ARRAY[%d] @ 0x%08x", i, func);
         (*func)();
       }
+      logInfo("%s: ELF loaded successfully (text=%d, data=%d bytes).", filename.c_str(), mTextSize, mDataSize);
       return true;
     }
     else
     {
+      mLastError = formatError("%s: %d relocation(s) failed.", filename.c_str(), failedRelocations);
+      logError("%s", mLastError.c_str());
       return false;
     }
   }

@@ -111,7 +111,8 @@ local function instantiateFromLibrary(library, loadInfo, args)
       end
     end
   else
-    app.logError("Factory.instantiate(%s):require failed", loadInfo.moduleName)
+    app.logError("Factory.instantiate(%s):require failed for module '%s'", loadInfo.moduleName, modulePath)
+    app.logError("  Likely cause: .so failed to load (SWIG mismatch, missing symbols, or corrupt binary)")
     app.logInfo("Traceback of call to 'require(%s)':%s", modulePath, retval)
     if library.external then
       onErrorInExternal(library, loadInfo, loadInfoFound, retval)
@@ -303,6 +304,16 @@ end
 local function registerExternalLibrary(folderName, verbose)
   local libRoot = FS.getRoot("libs")
   local fullPath = Path.join(libRoot, folderName, "toc.lua")
+
+  -- Log .so files present in this library folder for diagnostics
+  local libFolder = Path.join(libRoot, folderName)
+  for filename in dir(libFolder) do
+    if Utils.endsWith(filename, ".so") then
+      local soPath = Path.join(libFolder, filename)
+      app.logInfo("  Found .so: %s/%s", folderName, filename)
+    end
+  end
+
   local f, errorMessage = loadfile(fullPath)
   if f then
     local status, result = xpcall(f, debug.traceback)

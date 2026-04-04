@@ -23,9 +23,14 @@ namespace od
     {
       return mFilename;
     }
+    const std::string &lastError()
+    {
+      return mLastError;
+    }
 
   protected:
     std::string mFilename;
+    std::string mLastError;
     SymbolTable mSymbols;
     uint8_t *mpTextSpace = 0;
     uint8_t *mpDataSpace = 0;

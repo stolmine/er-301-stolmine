@@ -33,8 +33,11 @@ namespace od
 		int getFileCount();
 		std::string getFilename(int index);
 
+		const std::string &lastError() { return mLastError; }
+
 	private:
 		mz_zip_archive mArchive;
+		std::string mLastError;
 		bool mIsOpen = false;
 		bool mIgnorePath = false;
 		bool mCaseSensitive = false;

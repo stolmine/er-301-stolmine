@@ -55,7 +55,12 @@ function Package:getTOC()
 
   local archive = app.ZipArchiveReader()
   if not archive:open(pathToArchive) then
-    app.logError("%s: Failed to open package archive: %s", self, pathToArchive)
+    local detail = archive:lastError()
+    if detail and #detail > 0 then
+      app.logError("%s: Failed to open package archive: %s", self, detail)
+    else
+      app.logError("%s: Failed to open package archive: %s", self, pathToArchive)
+    end
     return
   end
 

@@ -6,16 +6,9 @@
 #include <map>
 #include <string>
 
-enum ErrorCodes
-{
-  NONE = 0,
-  UNSUPPORTED_MODE,
-  ELF_LOAD_FAILED,
-};
-
 struct Local
 {
-  ErrorCodes mLastError = NONE;
+  std::string mLastError;
   std::map<std::string, od::ElfFile *> mLoaded;
 };
 
@@ -35,30 +28,21 @@ int dlclose(void *__handle)
 
 const char *dlerror(void)
 {
-  const char *msg;
-  switch (local.mLastError)
+  if (local.mLastError.empty())
   {
-  case UNSUPPORTED_MODE:
-    msg = "Mode for dlopen() must be RTLD_NOW | RTLD_LOCAL.";
-    break;
-  case ELF_LOAD_FAILED:
-    msg = "Failed to load ELF file.";
-    break;
-  case NONE:
-  default:
-    msg = "No error.";
-    break;
+    return "No error.";
   }
-  local.mLastError = NONE;
-  return msg;
+  // Note: returning c_str() from a persistent string, cleared on next call
+  return local.mLastError.c_str();
 }
 
 void *dlopen(const char *__path, int __mode)
 {
+  local.mLastError.clear();
   logDebug(1, "opening %s", __path);
   if (__mode != (RTLD_NOW | RTLD_LOCAL))
   {
-    local.mLastError = UNSUPPORTED_MODE;
+    local.mLastError = "dlopen: Mode must be RTLD_NOW | RTLD_LOCAL.";
     return NULL;
   }
   auto i = local.mLoaded.find(__path);
@@ -73,7 +57,12 @@ void *dlopen(const char *__path, int __mode)
   od::ElfFile *elf = new od::ElfFile();
   if (!elf->load(__path))
   {
-    local.mLastError = ELF_LOAD_FAILED;
+    local.mLastError = elf->lastError();
+    if (local.mLastError.empty())
+    {
+      local.mLastError = std::string("Failed to load ELF: ") + __path;
+    }
+    logError("dlopen failed: %s", local.mLastError.c_str());
     delete elf;
     return NULL;
   }

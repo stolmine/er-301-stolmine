@@ -255,15 +255,21 @@ local function install(package)
   local archive = app.ZipArchiveReader()
   local pathToArchive = package:getArchivePath()
   if not archive:open(pathToArchive) then
-    local msg = string.format("Failed to open package archive: %s",
-                              pathToArchive)
-    app.logInfo(msg)
+    local detail = archive:lastError()
+    local msg
+    if detail and #detail > 0 then
+      msg = string.format("Failed to open package archive: %s", detail)
+    else
+      msg = string.format("Failed to open package archive: %s", pathToArchive)
+    end
+    app.logError(msg)
     Busy.stop()
     return false, msg
   end
 
   -- Extract files to system library folder
   local n = archive:getFileCount()
+  app.logInfo("Installing %s: %d files to extract from %s", package.id, n, pathToArchive)
   for i = 1, n do
     local filename = archive:getFilename(i - 1)
     local path = Path.join(installFolder, filename)
