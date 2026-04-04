@@ -53,6 +53,8 @@ namespace od
     void setTextBelow(float value, const std::string &text);
     void setTextAbove(float value, const std::string &text);
     void setNameTable(const std::vector<std::string> &names);
+    void addName(const std::string &name);
+    void clearNames();
     void useSoftSet();
     void useHardSet();
 

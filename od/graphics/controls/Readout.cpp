@@ -195,6 +195,20 @@ namespace od
     mLastValue = std::numeric_limits<float>::max();
   }
 
+  void Readout::addName(const std::string &name)
+  {
+    mNameTable.push_back(name);
+    mUseNameTable = true;
+    mLastValue = std::numeric_limits<float>::max();
+  }
+
+  void Readout::clearNames()
+  {
+    mNameTable.clear();
+    mUseNameTable = false;
+    mLastValue = std::numeric_limits<float>::max();
+  }
+
   void Readout::commitChanges(bool force)
   {
     // has the parameter target changed?
