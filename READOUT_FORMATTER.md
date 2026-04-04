@@ -21,7 +21,15 @@ When set, the readout rounds the display value to the nearest integer, uses it a
 
 ### SWIG
 
-No `.i` file changes needed. The public method is auto-included via `%include <od/graphics/controls/Readout.h>` in the existing SWIG interface.
+No `.i` file changes needed. `od/app.i` already has the required directives:
+
+```swig
+%include <std_vector.i>
+%include <std_string.i>
+%template(StringVector) std::vector<std::string>;
+```
+
+This exposes `app.StringVector` in Lua. SWIG does not auto-convert raw Lua tables to `std::vector<std::string>`, so you must construct a `StringVector` explicitly.
 
 ## How to Use (Lua)
 
@@ -30,8 +38,14 @@ local readout = app.Readout(0, 0, ply, 10)
 readout:setParameter(param)
 readout:setAttributes(app.unitNone, map)
 
--- Map integer parameter values 0-4 to display strings
-readout:setNameTable({"1", "2", "4", "8", "16"})
+-- Build a StringVector and pass it to setNameTable
+local names = app.StringVector()
+names:push_back("1")
+names:push_back("2")
+names:push_back("4")
+names:push_back("8")
+names:push_back("16")
+readout:setNameTable(names)
 ```
 
 The name table is indexed from the converted display value (after unit conversion via the readout's `DialMap`), rounded to the nearest integer. So if your parameter stores raw values 0, 1, 2, 3, 4 and the map is linear 1:1, the table entries correspond directly.
@@ -39,7 +53,7 @@ The name table is indexed from the converted display value (after unit conversio
 ### Clearing the Name Table
 
 ```lua
-readout:setNameTable({})  -- reverts to standard numeric display
+readout:setNameTable(app.StringVector())  -- reverts to standard numeric display
 ```
 
 ## Vanilla Firmware Compatibility
@@ -48,7 +62,9 @@ This is a non-breaking, additive change. Habitat units can use a runtime feature
 
 ```lua
 if readout.setNameTable then
-  readout:setNameTable({"1", "2", "4", "8", "16"})
+  local names = app.StringVector()
+  for _, v in ipairs({"1", "2", "4", "8", "16"}) do names:push_back(v) end
+  readout:setNameTable(names)
 end
 ```
 
@@ -71,7 +87,9 @@ Replace with:
 -- NEW: single readout with name table, no label overlay
 self.stackReadout = makeReadout(args.stack, stackMap, 0, app.unitNone, col3)
 if self.stackReadout.setNameTable then
-  self.stackReadout:setNameTable({"1", "2", "4", "8", "16"})
+  local names = app.StringVector()
+  for _, v in ipairs({"1", "2", "4", "8", "16"}) do names:push_back(v) end
+  self.stackReadout:setNameTable(names)
 end
 -- No manual sync needed — readout updates automatically
 ```
