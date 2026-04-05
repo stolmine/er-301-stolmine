@@ -35,6 +35,8 @@ namespace od
     uint8_t mWarpMag[GRID_W * GRID_H];   // warp magnitude 0-255
     float mAbsorption[GRID_W * GRID_H];  // per-cell absorption 0-1
     float mTime;
+    float mDriftX;
+    float mDriftY;
   };
 
 } /* namespace od */

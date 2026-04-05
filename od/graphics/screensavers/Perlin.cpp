@@ -75,6 +75,8 @@ namespace od
   void Perlin::reset()
   {
     mTime = 0.0f;
+    mDriftX = 0.0f;
+    mDriftY = 0.0f;
     memset(mField, 0, sizeof(mField));
     memset(mWarpMag, 0, sizeof(mWarpMag));
     memset(mAbsorption, 0, sizeof(mAbsorption));
@@ -105,17 +107,20 @@ namespace od
     // Domain warping
     float warpStrength = (sinf(mTime * 0.2f) * 0.5f + 0.5f) * 1.5f + 0.5f;
 
-    // Drift direction evolves
-    float driftX = sinf(mTime * 0.17f) * 0.4f;
-    float driftY = cosf(mTime * 0.11f) * 0.4f;
+    // Drift direction evolves — integrate velocity so speed stays constant
+    float dt = GRAPHICS_REFRESH_PERIOD * 0.15f;
+    float driftVX = sinf(mTime * 0.17f) * 0.4f;
+    float driftVY = cosf(mTime * 0.11f) * 0.4f;
+    mDriftX += driftVX * dt;
+    mDriftY += driftVY * dt;
 
     // Evaluate noise field and warp magnitude
     for (int gy = 0; gy < GRID_H; gy++)
     {
       for (int gx = 0; gx < GRID_W; gx++)
       {
-        float nx = (float)gx * noiseScale + mTime * driftX;
-        float ny = (float)gy * noiseScale + mTime * driftY;
+        float nx = (float)gx * noiseScale + mDriftX;
+        float ny = (float)gy * noiseScale + mDriftY;
 
         float wx = noise(nx + 5.2f, ny + 1.3f) * warpStrength;
         float wy = noise(nx + 9.7f, ny + 6.1f) * warpStrength;
