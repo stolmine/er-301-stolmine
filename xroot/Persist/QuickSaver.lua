@@ -131,7 +131,13 @@ function Slot:init(slot)
   local graphic
   if preset then
     if version then
-      graphic = app.TextPanel(string.format("%s v%s", name, version), 1)
+      -- Show fork suffix (e.g. "txo.8.6") if present, else major.minor
+      local short = version:match("%d+%.%d+%.%d+%-(.+)") or version:match("^(%d+%.%d+)") or version
+      -- Trim trailing patch from suffix (txo.8.6.2 -> txo.8.6)
+      if short:match("^%a") then
+        short = short:match("^(.+)%.%d+$") or short
+      end
+      graphic = app.TextPanel(string.format("%s %s", name, short), 1)
     else
       graphic = app.TextPanel(name, 1)
     end
@@ -273,7 +279,7 @@ function QuickSaver:init()
   self:appendSection(section)
   section:addView("default")
   self.slots = {}
-  for i = 1, 24 do
+  for i = 1, 48 do
     local slot = Slot(i)
     section:addControl("default", slot)
     self.slots[i] = slot

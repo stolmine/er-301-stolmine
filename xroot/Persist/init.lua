@@ -23,7 +23,7 @@ local function showMessage(...)
   dialog:show()
 end
 
-local quickSaveMaxSlots = 24
+local quickSaveMaxSlots = 48
 local metaData = {}
 
 local function readBootData()
