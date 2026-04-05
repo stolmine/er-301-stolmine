@@ -307,8 +307,15 @@ namespace od
     }
     if (local->screenSaverTimer > local->screenSaverThreshold)
     {
+      int encBefore = Encoder_getValue();
       local->screenSaver->draw(local->mainFrameBuffer,
                                local->subFrameBuffer);
+      // Poll encoder after draw to avoid input capture on heavy screensavers
+      if (Encoder_getValue() != encBefore)
+      {
+        deactivateScreenSaver();
+        Events_push(EVENT_KNOB);
+      }
     }
     else
     {
