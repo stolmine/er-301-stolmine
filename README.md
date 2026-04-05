@@ -10,8 +10,11 @@ This is a fork of the [ER-301](https://github.com/odevices/er-301) firmware that
 
 * **TXo mod** — interrupt-driven I2C master TX with gain control, V/Oct mode, and simultaneous Teletype slave RX coexistence
 * **Vanilla package compatibility** — SWIG pinned to 4.2.1 with runtime version bridge so community packages compiled against upstream firmware load and share types correctly
-* **Screensavers** — snow, rain, forest, pipes, and maze screensavers in addition to the stock options
+* **Favorites** — shift-toggle edit mode in the unit picker to tag/untag favorites, displayed as their own category above Recents
+* **Screensavers** — snow, rain, forest, pipes, maze, perlin noise, and voronoi screensavers with automatic cycle mode
+* **Readout name table** — mapped display text for Readout widgets via `addName()`/`clearNames()` API
 * **Master output scale** — percentage-based output level control (100/75/50/25/10%) in admin settings
+* **Package diagnostics** — detailed error reporting for archive and ELF load failures (unresolved symbols, corrupt archives, header mismatches)
 * **Bundled mods** — firmware zip includes core, teletype, and txo packages
 
 ## Table of Contents
