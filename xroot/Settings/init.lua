@@ -295,6 +295,15 @@ local defaults = {
     description = "When clearing all favorites...",
     value = true
   },
+  confirmQuickSaveOverwrite = {
+    category = "Confirmations",
+    description = "When saving over an occupied quicksave...",
+    value = "yes",
+    choices = {
+      "yes",
+      "no"
+    }
+  },
   samplePreviewStop = {
     category = "File Browser",
     description = "Stop sample preview when focus changes?",

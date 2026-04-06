@@ -156,6 +156,10 @@ menuItems[#menuItems + 1] = {
   "confirmClearFavorites"
 }
 menuItems[#menuItems + 1] = {
+  "addVariable",
+  "confirmQuickSaveOverwrite"
+}
+menuItems[#menuItems + 1] = {
   "addCategory",
   "USB"
 }

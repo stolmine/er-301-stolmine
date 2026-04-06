@@ -1041,6 +1041,10 @@ return {
   getQuickSavePreset = getQuickSavePreset,
   getQuickSaveName = getQuickSaveName,
   setQuickSaveName = setQuickSaveName,
+  isQuickSaveSlotOccupied = function(slot)
+    return app.pathExists(quickSaveFile(slot, 1))
+        or app.pathExists(quickSaveFileLegacy(slot, 1))
+  end,
   meta = metaData,
   getScreenShotFilename = getScreenShotFilename,
   getSessionNumber = getSessionNumber,

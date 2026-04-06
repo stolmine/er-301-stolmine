@@ -313,9 +313,27 @@ function QuickSaver:load(slot)
 end
 
 function QuickSaver:save(slot)
-  self:hide()
-  self:clear()
-  Persist.quickSaveToSlot(slot, true)
+  local Settings = require "Settings"
+  if Settings.get("confirmQuickSaveOverwrite") == "yes"
+      and Persist.isQuickSaveSlotOccupied(slot) then
+    local name = Persist.getQuickSaveName(slot)
+        or string.format("Slot %d", slot)
+    local Verification = require "Verification"
+    local dialog = Verification.Main(
+        string.format("Overwrite '%s'?", name), "Are you sure?")
+    dialog:subscribe("done", function(ans)
+      if ans then
+        self:hide()
+        self:clear()
+        Persist.quickSaveToSlot(slot, true)
+      end
+    end)
+    dialog:show()
+  else
+    self:hide()
+    self:clear()
+    Persist.quickSaveToSlot(slot, true)
+  end
 end
 
 function QuickSaver:homeReleased()
