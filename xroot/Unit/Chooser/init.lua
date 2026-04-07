@@ -155,6 +155,11 @@ function Chooser:toggleFavoritesEditMode()
     self.help1:setText("Tap M1-M6 to tag.")
     self.help2:setText("SHIFT to exit.")
   else
+    local ChooserDefault = require "Unit.Chooser.Default"
+    ChooserDefault:saveFavoritesIfDirty()
+    -- Rebuild lists to reflect favorites changes
+    if self.categoric then self.categoric:refresh() end
+    if self.alphabetic then self.alphabetic:refresh() end
     self.panels[1]:setText("Category")
     self.panels[2]:setText("A-to-Z")
     self.panels[3]:setText("Presets")

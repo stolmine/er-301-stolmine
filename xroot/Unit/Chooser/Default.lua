@@ -314,7 +314,14 @@ function Chooser:toggleFavorite(loadInfo)
     table.insert(Chooser.favorites, 1, loadInfo)
     Overlay.flashMainMessage("Favorited: %s", loadInfo.title)
   end
-  saveFavorites()
+  Chooser.favoritesDirty = true
+end
+
+function Chooser:saveFavoritesIfDirty()
+  if Chooser.favoritesDirty then
+    saveFavorites()
+    Chooser.favoritesDirty = false
+  end
 end
 
 function Chooser:clearFavorites()
@@ -363,7 +370,14 @@ function Chooser:choose(loadInfo)
   if self.ring.favoritesEditMode then
     if loadInfo ~= "paste" then
       self:toggleFavorite(loadInfo)
-      self:refresh()
+      -- Update border on all instances of this item without rebuilding.
+      local isFav = Chooser.favoriteHash[loadInfo.title]
+      local color = isFav and app.WHITE or app.GRAY7
+      for handle, control in pairs(self.controls) do
+        if control.loadInfo and control.loadInfo.title == loadInfo.title then
+          control.controlGraphic:setBorderColor(color)
+        end
+      end
     end
     return
   end
