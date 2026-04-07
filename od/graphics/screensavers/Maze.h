@@ -50,11 +50,13 @@ namespace od
     float t = 0.0f;
     float stepAccum = 0.0f;
     float holdTimer = 0.0f;
+    int marchOffset = 0;
 
     int cellIndex(int col, int row);
     void cellCoords(int idx, int &col, int &row);
     void computeSolvePath();
     void drawWalls(FrameBuffer &fb, int cellW, int cellH, int color);
+    void drawMarchingBorder(FrameBuffer &fb, int w, int h, int color);
     void drawSolvePath(FrameBuffer &fb, int cellW, int cellH,
                        int color, int count);
   };

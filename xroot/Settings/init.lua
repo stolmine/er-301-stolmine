@@ -77,7 +77,6 @@ local defaults = {
       "2lines",
       "grid",
       "bubbles",
-      "pipes",
       "maze",
       "forest",
       "snow",

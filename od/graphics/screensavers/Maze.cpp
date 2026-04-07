@@ -130,11 +130,42 @@ namespace od
     }
   }
 
+  void Maze::drawMarchingBorder(FrameBuffer &fb, int w, int h, int color)
+  {
+    // Marching ants border — dashed pattern that shifts each frame
+    static const int DASH = 4;
+    int perimeter = 2 * (w + h);
+    for (int i = 0; i < perimeter; i++)
+    {
+      if (((i + marchOffset) / DASH) & 1)
+        continue;
+      int x, y;
+      if (i < w)
+      {
+        x = i;
+        y = 0; // bottom edge
+      }
+      else if (i < w + h)
+      {
+        x = w - 1;
+        y = i - w; // right edge
+      }
+      else if (i < 2 * w + h)
+      {
+        x = w - 1 - (i - w - h);
+        y = h - 1; // top edge
+      }
+      else
+      {
+        x = 0;
+        y = h - 1 - (i - 2 * w - h); // left edge
+      }
+      fb.pixel(color, x, y);
+    }
+  }
+
   void Maze::drawWalls(FrameBuffer &fb, int cellW, int cellH, int color)
   {
-    // Outer border
-    fb.box(color, 0, 0, COLS * cellW - 1, ROWS * cellH - 1);
-
     for (int r = 0; r < ROWS; r++)
     {
       for (int c = 0; c < COLS; c++)
@@ -282,8 +313,16 @@ namespace od
     }
     }
 
-    // Render walls
+    // Advance marching ants
+    marchOffset++;
+    int perim = 2 * (COLS * CELL_PX + ROWS * CELL_PX);
+    if (marchOffset >= perim)
+      marchOffset = 0;
+
+    // Render walls and marching border
+    drawMarchingBorder(m, COLS * CELL_PX, ROWS * CELL_PX, GRAY7);
     drawWalls(m, CELL_PX, CELL_PX, GRAY7);
+    drawMarchingBorder(s, COLS * 2, ROWS * 4, WHITE);
     drawWalls(s, 2, 4, WHITE);
 
     // Render generation frontier

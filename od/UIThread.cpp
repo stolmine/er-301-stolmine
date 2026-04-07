@@ -4,7 +4,6 @@
 #include <od/graphics/screensavers/Blank.h>
 #include <od/graphics/screensavers/Lines.h>
 #include <od/graphics/screensavers/Bubbles.h>
-#include <od/graphics/screensavers/Pipes.h>
 #include <od/graphics/screensavers/Maze.h>
 #include <od/graphics/screensavers/Forest.h>
 #include <od/graphics/screensavers/Snow.h>
@@ -114,7 +113,7 @@ namespace od
   }
 
   static const char *cycleList[] = {
-      "2lines", "grid", "bubbles", "pipes", "maze", "forest", "snow", "rain", "perlin", "voronoi"};
+      "2lines", "grid", "bubbles", "maze", "forest", "snow", "rain", "perlin", "voronoi"};
   static const int cycleListSize = sizeof(cycleList) / sizeof(cycleList[0]);
 
   void UIThread::setScreenSaver(const char *name)
@@ -133,10 +132,6 @@ namespace od
     else if (tmp == "grid")
     {
       local->screenSaver = new Lines(true);
-    }
-    else if (tmp == "pipes")
-    {
-      local->screenSaver = new Pipes();
     }
     else if (tmp == "maze")
     {

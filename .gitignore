@@ -46,3 +46,6 @@ tmp/
 
 # OSX
 .DS_Store
+
+# Notes
+PLATFORM_PORT_NOTES.md
