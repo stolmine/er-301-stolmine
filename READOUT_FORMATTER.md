@@ -78,3 +78,52 @@ end
 ```
 
 This restores the cursor highlight, removes the boilerplate, and works on both stolmine and vanilla firmware.
+
+## Threshold Labels (Float Range Mapping)
+
+For float controls where you want to map value ranges to descriptive labels (rather than integer indices), use `addThresholdLabel`:
+
+```lua
+readout:addThresholdLabel(threshold, label)  -- add a labelled range
+readout:clearThresholdLabels()               -- clear all (reverts to numeric)
+```
+
+Each threshold defines the **lower bound** of a range. The readout displays the label whose threshold is the highest one not exceeding the current display value.
+
+### Example
+
+```lua
+readout:addThresholdLabel(0.0, "LP")
+readout:addThresholdLabel(0.33, "BP")
+readout:addThresholdLabel(0.66, "HP")
+```
+
+| Value range | Display |
+|-------------|---------|
+| [0.0, 0.33) | LP |
+| [0.33, 0.66) | BP |
+| [0.66, ...) | HP |
+
+Thresholds are matched against the converted display value (after unit conversion), same as the name table. Labels can be added in any order — they are kept sorted internally.
+
+### Display Priority
+
+When multiple display modes are configured, they are evaluated in this order:
+
+1. **Name table** (`addName`) — integer-indexed lookup
+2. **Threshold labels** (`addThresholdLabel`) — float range mapping
+3. **Boundary text** (`setTextBelow`/`setTextAbove`) — single min/max labels
+4. **Numeric formatting** — standard value with units
+
+Only the first matching tier is used.
+
+### Vanilla Compatibility
+
+```lua
+if readout.addThresholdLabel then
+  readout:addThresholdLabel(0.0, "Clean")
+  readout:addThresholdLabel(0.25, "Warm")
+  readout:addThresholdLabel(0.6, "Saturated")
+  readout:addThresholdLabel(0.85, "Crushed")
+end
+```

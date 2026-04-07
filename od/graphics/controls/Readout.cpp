@@ -209,6 +209,24 @@ namespace od
     mLastValue = std::numeric_limits<float>::max();
   }
 
+  void Readout::addThresholdLabel(float threshold, const std::string &label)
+  {
+    // Insert in sorted order by threshold
+    auto it = mThresholdLabels.begin();
+    while (it != mThresholdLabels.end() && it->first < threshold)
+      ++it;
+    mThresholdLabels.insert(it, {threshold, label});
+    mUseThresholdLabels = true;
+    mLastValue = std::numeric_limits<float>::max();
+  }
+
+  void Readout::clearThresholdLabels()
+  {
+    mThresholdLabels.clear();
+    mUseThresholdLabels = false;
+    mLastValue = std::numeric_limits<float>::max();
+  }
+
   void Readout::commitChanges(bool force)
   {
     // has the parameter target changed?
@@ -233,6 +251,17 @@ namespace od
           mText = mNameTable[idx];
         else
           mText = "??";
+      }
+      else if (mUseThresholdLabels)
+      {
+        mText = mThresholdLabels[0].second;
+        for (auto &entry : mThresholdLabels)
+        {
+          if (mDisplayValue >= entry.first)
+            mText = entry.second;
+          else
+            break;
+        }
       }
       else if (mDisplayValue < mMinTextThreshold)
       {

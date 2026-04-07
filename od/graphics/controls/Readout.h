@@ -57,6 +57,8 @@ namespace od
 #endif
     void addName(const std::string &name);
     void clearNames();
+    void addThresholdLabel(float threshold, const std::string &label);
+    void clearThresholdLabels();
     void useSoftSet();
     void useHardSet();
 
@@ -102,6 +104,8 @@ namespace od
 #ifndef SWIGLUA
     std::vector<std::string> mNameTable;
     bool mUseNameTable = false;
+    std::vector<std::pair<float, std::string>> mThresholdLabels;
+    bool mUseThresholdLabels = false;
 #endif
 
     bool mUseHardSet = false;
