@@ -54,10 +54,13 @@
 
 void M_MakeDirectory(char *path)
 {
-#ifdef _WIN32
+#if defined(_WIN32)
     mkdir(path);
-#else
+#elif defined(__linux__) || defined(__APPLE__)
     mkdir(path, 0755);
+#else
+    // Bare-metal / RTOS: no filesystem mkdir support
+    (void)path;
 #endif
 }
 
