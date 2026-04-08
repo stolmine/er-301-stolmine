@@ -10,6 +10,7 @@
 #include <od/graphics/screensavers/Rain.h>
 #include <od/graphics/screensavers/Perlin.h>
 #include <od/graphics/screensavers/Voronoi.h>
+#include <od/graphics/screensavers/Doom.h>
 #include <od/extras/Profiler.h>
 #include <od/ui/ChannelLEDs.h>
 #include <od/AudioThread.h>
@@ -113,7 +114,7 @@ namespace od
   }
 
   static const char *cycleList[] = {
-      "2lines", "grid", "bubbles", "maze", "forest", "snow", "rain", "perlin", "voronoi"};
+      "2lines", "grid", "bubbles", "maze", "forest", "snow", "rain", "perlin", "voronoi", "doom"};
   static const int cycleListSize = sizeof(cycleList) / sizeof(cycleList[0]);
 
   void UIThread::setScreenSaver(const char *name)
@@ -156,6 +157,10 @@ namespace od
     else if (tmp == "voronoi")
     {
       local->screenSaver = new Voronoi();
+    }
+    else if (tmp == "doom")
+    {
+      local->screenSaver = new Doom();
     }
     else
     {

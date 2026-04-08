@@ -5,8 +5,8 @@ program_name := emu
 program_dir := $(program_name)
 out_dir := $(build_dir)/$(program_name)
 
-src_dirs := $(program_dir) $(hal_dir) $(arch_dir)/$(ARCH) $(od_dir) $(ti_dir)
-includes += $(program_dir) $(lua_dir) $(lodepng_dir) $(miniz_dir) $(libs_dir)/SDL_FontCache
+src_dirs := $(program_dir) $(hal_dir) $(arch_dir)/$(ARCH) $(od_dir) $(ti_dir) $(libs_dir)/doomgeneric
+includes += $(program_dir) $(lua_dir) $(lodepng_dir) $(miniz_dir) $(libs_dir)/SDL_FontCache $(libs_dir)/doomgeneric
 includes += emu/od/glue
 
 libraries :=
@@ -48,6 +48,7 @@ endif
 
 CFLAGS += -DFIRMWARE_VERSION=\"$(FIRMWARE_VERSION)\"
 CFLAGS += -DBUILD_PROFILE=\"$(PROFILE)\"
+CFLAGS += -DDOOMGENERIC_RESX=320 -DDOOMGENERIC_RESY=200
 LFLAGS += -lSDL2 -lSDL2_ttf -lfftw3f -lm -ldl -lstdc++ 
 
 all: $(out_dir)/$(program_name).elf

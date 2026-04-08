@@ -10,9 +10,9 @@ cleaned_exports_file := $(out_dir)/exports-clean.sym
 excluded_symbols_file := $(program_dir)/excluded.sym
 extra_symbols_file := $(program_dir)/extra.sym
 
-src_dirs := $(program_dir) $(hal_dir) $(arch_dir)/$(ARCH)/hal $(od_dir) $(ti_dir)
+src_dirs := $(program_dir) $(hal_dir) $(arch_dir)/$(ARCH)/hal $(od_dir) $(ti_dir) $(libs_dir)/doomgeneric
 
-includes += $(lua_dir) $(ne10_dir)/inc $(lodepng_dir) $(miniz_dir)
+includes += $(lua_dir) $(ne10_dir)/inc $(lodepng_dir) $(miniz_dir) $(libs_dir)/doomgeneric
 
 libraries :=
 libraries += $(libs_build_dir)/lib$(lua_name).a
@@ -58,6 +58,7 @@ objects += $(out_dir)/$(program_name)/symtab.o
 CFLAGS += $(sysbios_cflags)
 CFLAGS += -DFIRMWARE_VERSION=\"$(FIRMWARE_VERSION)\"
 CFLAGS += -DBUILD_PROFILE=\"$(PROFILE)\"
+CFLAGS += -DDOOMGENERIC_RESX=320 -DDOOMGENERIC_RESY=200
 LFLAGS = $(sysbios_lflags) -Wl,--gc-sections -lm -lc -lnosys -u _printf_float 
 
 all: $(out_dir)/kernel.bin $(exports)
