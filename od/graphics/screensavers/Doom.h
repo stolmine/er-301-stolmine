@@ -19,7 +19,6 @@ namespace od
     bool mInitialized = false;
     bool mWadMissing = false;
     float mTickAccum = 0.0f;
-    int mStartupTicks = 0;
     float mBorderPhase = 0.0f;
 
     // Viewport: correct aspect ratio centered in 256x64
@@ -35,7 +34,6 @@ namespace od
     void blitFrame(FrameBuffer &fb);
     void drawBorders(FrameBuffer &fb);
     void drawStatus(FrameBuffer &fb);
-    void botTick();
   };
 
 } /* namespace od */

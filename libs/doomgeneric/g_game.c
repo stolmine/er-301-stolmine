@@ -319,21 +319,34 @@ static int G_NextWeapon(int direction)
 // or reads it from the demo buffer. 
 // If recording a demo, write it out 
 // 
-void G_BuildTiccmd (ticcmd_t* cmd, int maketic) 
-{ 
-    int		i; 
+void G_BuildTiccmd (ticcmd_t* cmd, int maketic)
+{
+    int		i;
     boolean	strafe;
-    boolean	bstrafe; 
+    boolean	bstrafe;
     int		speed;
-    int		tspeed; 
+    int		tspeed;
     int		forward;
     int		side;
 
+    // Bot mode: let bot fill the entire ticcmd
+    {
+        extern boolean bot_enabled;
+        if (bot_enabled && gamestate == GS_LEVEL && players[consoleplayer].mo)
+        {
+            extern void Bot_BuildTiccmd(ticcmd_t *cmd);
+            memset(cmd, 0, sizeof(ticcmd_t));
+            cmd->consistancy = consistancy[consoleplayer][maketic%BACKUPTICS];
+            Bot_BuildTiccmd(cmd);
+            return;
+        }
+    }
+
     memset(cmd, 0, sizeof(ticcmd_t));
 
-    cmd->consistancy = 
-	consistancy[consoleplayer][maketic%BACKUPTICS]; 
- 
+    cmd->consistancy =
+	consistancy[consoleplayer][maketic%BACKUPTICS];
+
     strafe = gamekeydown[key_strafe] || mousebuttons[mousebstrafe] 
 	|| joybuttons[joybstrafe]; 
 
