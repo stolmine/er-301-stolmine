@@ -332,7 +332,7 @@ void G_BuildTiccmd (ticcmd_t* cmd, int maketic)
     // Bot mode: let bot fill the entire ticcmd
     {
         extern boolean bot_enabled;
-        if (bot_enabled && gamestate == GS_LEVEL && players[consoleplayer].mo)
+        if (bot_enabled)
         {
             extern void Bot_BuildTiccmd(ticcmd_t *cmd);
             memset(cmd, 0, sizeof(ticcmd_t));

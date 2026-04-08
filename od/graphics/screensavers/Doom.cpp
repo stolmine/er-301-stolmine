@@ -181,13 +181,26 @@ namespace od
     // Tick Doom at 35fps (native rate). Bot runs inside G_BuildTiccmd.
     mTickAccum += GRAPHICS_REFRESH_PERIOD;
     float doomPeriod = 1.0f / 35.0f;
-    while (mTickAccum >= doomPeriod)
+    int maxTicks = 2; // prevent spin-lock during wipe transitions
+    while (mTickAccum >= doomPeriod && maxTicks > 0)
     {
       mTickAccum -= doomPeriod;
+      maxTicks--;
+
+      // If game left the level (death, intermission, finale),
+      // restart immediately to keep the screensaver going
+      if (gamestate != GS_LEVEL && gamestate != GS_DEMOSCREEN)
+      {
+        G_DeferedInitNew((skill_t)2, 1, 1);
+        Bot_Init();
+      }
+
       if (DG_ScreenBuffer)
         memset(DG_ScreenBuffer, 0, DOOMGENERIC_RESX * DOOMGENERIC_RESY * sizeof(pixel_t));
       doomgeneric_Tick();
     }
+    if (mTickAccum > doomPeriod * 4)
+      mTickAccum = 0; // drop frames if we fell too far behind
 
     // Blit the last rendered frame with correct aspect ratio
     mBorderPhase += GRAPHICS_REFRESH_PERIOD;
