@@ -49,6 +49,8 @@ namespace od
     void setPrecision(int p);
     void setTextBelow(float value, const std::string &text);
     void setTextAbove(float value, const std::string &text);
+    void addThresholdLabel(float threshold, const std::string &label);
+    void clearThresholdLabels();
     void save();
     void restore();
     void zero();

@@ -128,16 +128,21 @@ if readout.addThresholdLabel then
 end
 ```
 
-## Gap: Fader Label Support
+## Fader Support
 
-`addName` and `addThresholdLabel` only work on `app.Readout` (the sub-display numeric readout). The `app.Fader` graphic used by GainBias ViewControls has no equivalent. `Fader:setLabel()` exists but only sets a static string (used by ModeSelector for integer modes).
+`app.Fader` also exposes `addThresholdLabel` and `clearThresholdLabels`, delegating to its internal Readout. This means threshold labels work on both standalone Readouts and Fader-based GainBias ViewControls.
 
-This means threshold labels work on:
-- Standalone Readout instances (shift sub-displays, custom controls)
-- NOT on GainBias fader views in expansion/focus views
+```lua
+fader:addThresholdLabel(0.0, "LP")
+fader:addThresholdLabel(0.33, "BP")
+fader:addThresholdLabel(0.66, "HP")
+```
 
-To fully support labelled float faders (e.g., filter morph showing "LP"/"BP"/"HP" on the fader itself), the firmware would need:
-- `Fader:addThresholdLabel(threshold, label)` mirroring the Readout API
-- Or: expose the GainBias ViewControl's internal Readout so Lua can call `addThresholdLabel` on it after construction
-
-Current workaround: use a custom ViewControl that creates its own Readout with threshold labels (like RauschenCutoffControl's shift sub-display), or accept numeric display on expansion faders.
+Vanilla compatibility:
+```lua
+if fader.addThresholdLabel then
+  fader:addThresholdLabel(0.0, "LP")
+  fader:addThresholdLabel(0.33, "BP")
+  fader:addThresholdLabel(0.66, "HP")
+end
+```

@@ -367,6 +367,16 @@ namespace od
     mReadout.setTextAbove(value, text);
   }
 
+  void Fader::addThresholdLabel(float threshold, const std::string &label)
+  {
+    mReadout.addThresholdLabel(threshold, label);
+  }
+
+  void Fader::clearThresholdLabels()
+  {
+    mReadout.clearThresholdLabels();
+  }
+
   void Fader::save()
   {
     mReadout.save();
