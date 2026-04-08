@@ -161,6 +161,14 @@ menuItems[#menuItems + 1] = {
 }
 menuItems[#menuItems + 1] = {
   "addCategory",
+  "Interface"
+}
+menuItems[#menuItems + 1] = {
+  "addVariable",
+  "textInputMethod"
+}
+menuItems[#menuItems + 1] = {
+  "addCategory",
   "USB"
 }
 menuItems[#menuItems + 1] = {

@@ -4,6 +4,7 @@ local Window = require "Base.Window"
 local Env = require "Env"
 local Utils = require "Utils"
 local Message = require "Message"
+local Persist = require "Persist"
 local threshold = Env.EncoderThreshold.SlidingList
 
 local function defaultValidator(text)
@@ -14,15 +15,16 @@ local function defaultValidator(text)
   end
 end
 
--- Keyboard
+-- Slot Machine Keyboard
 local Keyboard = Class {}
 Keyboard:include(Window)
 
-function Keyboard:init(msg, initial, extended)
+function Keyboard:init(msg, initial, extended, history)
   Window.init(self)
-  self:setClassName("Keyboard")
+  self:setClassName("Keyboard.Slot")
   self.suppressQuickSave = true
   self.validate = defaultValidator
+  self.heldColumn = nil
 
   local b1 = app.BUTTON1_CENTER
   local b2 = app.BUTTON2_CENTER
@@ -50,6 +52,19 @@ function Keyboard:init(msg, initial, extended)
     self.mainGraphic:addChild(col)
     col:setJustification(app.justifyCenter)
     col:setTextSize(12)
+  end
+
+  -- History entries in column 1
+  if history then
+    local historyDB = Persist.getRearCardValue("Keyboard", history) or {}
+    for _, text in ipairs(historyDB) do
+      cols[1]:add(text)
+    end
+    if #historyDB > 0 then
+      cols[1]:add("---")
+    end
+    self.history = history
+    self.historyDB = historyDB
   end
 
   -- row 1
@@ -133,6 +148,12 @@ function Keyboard:init(msg, initial, extended)
   end
   self.cols = cols
 
+  -- Skip past history separator to first character entry
+  if history and self.historyDB and #self.historyDB > 0 then
+    local skipCount = #self.historyDB + 1 -- entries + separator
+    cols[1]:select(skipCount)
+  end
+
   -- sub display
   local editor = app.TextEditor(0, app.GRID4_LINE2 - 4, 128, 16, 12)
   editor:setText(initial or "")
@@ -150,7 +171,6 @@ function Keyboard:init(msg, initial, extended)
   self.subGraphic:addChild(app.SubButton("space", 3))
 end
 
--- See defaultValidator() for an example.
 function Keyboard:setValidator(func)
   self.validate = func or defaultValidator
 end
@@ -161,17 +181,42 @@ function Keyboard:learnDirection()
   end
 end
 
-function Keyboard:mainPressed(i, shifted)
-  local pressed = self.cols[i]:selectedText()
-  if pressed:len() == 2 then
+local function extractChar(text, shifted)
+  if text == "---" then
+    return nil
+  end
+  if text:len() == 2 then
     if shifted then
-      pressed = pressed:sub(1, 1)
+      return text:sub(1, 1)
     else
-      pressed = pressed:sub(2, 2)
+      return text:sub(2, 2)
     end
   end
-  self.textEditor:insertTextAtCaret(pressed)
-  self:learnDirection()
+  return text
+end
+
+function Keyboard:mainPressed(i, shifted)
+  self.heldColumn = i
+  self.cols[i]:setBorderColor(app.WHITE)
+  return true
+end
+
+function Keyboard:mainReleased(i, shifted)
+  if self.heldColumn == i then
+    local selected = self.cols[i]:selectedText()
+    local ch = extractChar(selected, shifted)
+    if ch then
+      -- History entries are full strings (len > 2 and not a symbol row)
+      if selected:len() > 2 and selected ~= "---" then
+        self.textEditor:setText(selected)
+      else
+        self.textEditor:insertTextAtCaret(ch)
+      end
+    end
+    self.cols[i]:setBorderColor(app.GRAY7)
+    self.heldColumn = nil
+    self:learnDirection()
+  end
   return true
 end
 
@@ -185,12 +230,22 @@ function Keyboard:subPressed(i, shifted)
     self.caretFocused = true
     self:setSubCursorController(self.textEditor)
   elseif i == 3 then
-    -- SPC
     self.textEditor:insertTextAtCaret(" ")
   end
   self:learnDirection()
   return true
+end
 
+function Keyboard:subRepeated(i, shifted)
+  if shifted then
+    return false
+  end
+  if i == 1 then
+    self.textEditor:doBackspace()
+  elseif i == 3 then
+    self.textEditor:insertTextAtCaret(" ")
+  end
+  return true
 end
 
 function Keyboard:subReleased(i, shifted)
@@ -207,6 +262,8 @@ end
 function Keyboard:encoder(change, shifted)
   if self.caretFocused then
     self.textEditor:encoder(change, shifted, threshold)
+  elseif self.heldColumn then
+    self.cols[self.heldColumn]:encoder(change, shifted, threshold)
   else
     for _, col in ipairs(self.cols) do
       col:encoder(change, shifted, threshold)
@@ -241,6 +298,22 @@ function Keyboard:enterReleased()
     self:learnDirection()
   else
     self:hide()
+    if self.history then
+      local db = self.historyDB
+      local tmp = {}
+      local start = 1
+      if #db > 100 then
+        start = #db - 100
+      end
+      for i = start, #db do
+        local text2 = db[i]
+        if text2 ~= text then
+          tmp[#tmp + 1] = text2
+        end
+      end
+      tmp[#tmp + 1] = text
+      Persist.setRearCardValue("Keyboard", self.history, tmp)
+    end
     self:emitSignal("done", text)
   end
   return true

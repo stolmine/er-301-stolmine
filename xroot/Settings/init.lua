@@ -303,6 +303,15 @@ local defaults = {
       "no"
     }
   },
+  textInputMethod = {
+    category = "Interface",
+    description = "Text input method:",
+    value = "grid",
+    choices = {
+      "grid",
+      "slot"
+    }
+  },
   samplePreviewStop = {
     category = "File Browser",
     description = "Stop sample preview when focus changes?",
