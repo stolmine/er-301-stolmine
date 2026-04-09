@@ -40,34 +40,6 @@ extern "C"
   // Internal: called from I2C2 ISR to handle master TX interrupts
   void I2c_masterISRHandler(uint32_t rawStatus);
 
-  // Internal: called from slave ISR after message reception to opportunistically
-  // kick a queued master TX while the bus is known to be free.
-  void I2c_masterKickIfIdle(void);
-
-  // Slave diagnostic counters
-  typedef struct
-  {
-    uint32_t aasCount;     // address-as-slave matched
-    uint32_t rrdyCount;    // bytes received
-    uint32_t ardyCount;    // access ready (message boundary)
-    uint32_t msgCount;     // complete messages enqueued
-    uint32_t overrunCount; // receive overruns
-    uint32_t dropCount;    // messages dropped (queue full or ARDY gated)
-  } I2cSlaveDiag;
-
-  void I2c_getSlaveDiag(I2cSlaveDiag *diag);
-
-  // Master diagnostic counters
-  typedef struct
-  {
-    uint32_t sendCount;      // messages sent successfully (ARDY)
-    uint32_t nackCount;      // NACKs received
-    uint32_t arbLostCount;   // arbitration lost events
-    uint32_t busyCount;      // transfers skipped (bus busy)
-  } I2cMasterDiag;
-
-  void I2c_getMasterDiag(I2cMasterDiag *diag);
-
 #ifdef __cplusplus
 }
 #endif

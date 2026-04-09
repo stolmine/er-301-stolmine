@@ -18,8 +18,8 @@
 #define I2C_QUEUE_SIZE (64)
 
 #define USE_SBLOCK 0
-#define USE_BUS_RATE_100KHZ 0
-#define USE_BUS_RATE_400KHZ 1
+#define USE_BUS_RATE_100KHZ 1
+#define USE_BUS_RATE_400KHZ 0
 
 #define SLAVE_RX_INTFLAGS (I2C_INT_ADRR_READY_ACESS | \
                            I2C_INT_RECV_READY | \
@@ -38,7 +38,6 @@ typedef struct
 } Local;
 
 static Local self;
-static I2cSlaveDiag slaveDiag;
 
 //// WeakRB bounded FIFO queue
 // Ref: Correct and Efficient Bounded FIFO Queues
@@ -150,53 +149,24 @@ static void hwiOnInterrupt(UArg arg)
     }
 #endif
 
-    if ((rawStat & I2C_INT_ADRR_SLAVE) != 0)
-      slaveDiag.aasCount++;
-
     if ((rawStat & I2C_INT_RECV_READY) != 0U)
     {
-      slaveDiag.rrdyCount++;
       appendByte(I2CSlaveDataGet(I2C_BASE_ADDRESS));
     }
 
-    // ARDY as slave message boundary
-    // Guard on master-busy only when master is actually open (TXo active)
-    if ((rawStat & I2C_INT_ADRR_READY_ACESS) != 0)
+    // ARDY as slave message boundary — only when master is not mid-transfer
+    if ((rawStat & I2C_INT_ADRR_READY_ACESS) != 0 && !I2c_isMasterBusy())
     {
-      slaveDiag.ardyCount++;
-      if (!I2c_isMasterOpen() || !I2c_isMasterBusy())
-      {
-        if (self.workingMessage.length > 0)
-          slaveDiag.msgCount++;
-        else
-          slaveDiag.dropCount++;
-        endMessage();
+      endMessage();
 #if USE_SBLOCK
-        I2CClockBlockingControl(I2C_BASE_ADDRESS, 1, 0, 0, 0);
+      I2CClockBlockingControl(I2C_BASE_ADDRESS, 1, 0, 0, 0);
 #endif
-        // Bus is free right now — kick a queued master TX immediately
-        // rather than waiting for the next audio frame.
-        I2c_masterKickIfIdle();
-      }
-      else
-      {
-        slaveDiag.dropCount++;
-      }
     }
-
-    if ((rawStat & I2C_INT_RECV_OVER_RUN) != 0)
-      slaveDiag.overrunCount++;
 
     logAssert((rawStat & I2C_INT_RECV_OVER_RUN) == 0);
 
-    // Clear interrupt flags: when master is not open, clear ALL flags
-    // (vanilla behavior) to prevent stale non-slave flags from blocking
-    // the ISR. When master IS open, only clear slave flags to avoid
-    // clobbering master TX state.
-    if (I2c_isMasterOpen())
-      I2CSlaveIntClearEx(I2C_BASE_ADDRESS, SLAVE_RX_INTFLAGS);
-    else
-      I2CSlaveIntClearEx(I2C_BASE_ADDRESS, I2C_INT_ALL);
+    // Clear all slave-handled status bits
+    I2CSlaveIntClearEx(I2C_BASE_ADDRESS, SLAVE_RX_INTFLAGS);
   }
 }
 
@@ -332,9 +302,4 @@ void I2c_closeSlave()
       I2CMasterDisable(I2C_BASE_ADDRESS);
     }
   }
-}
-
-void I2c_getSlaveDiag(I2cSlaveDiag *diag)
-{
-  *diag = slaveDiag;
 }

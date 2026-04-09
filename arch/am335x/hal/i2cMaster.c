@@ -20,6 +20,9 @@
 // TX queue (lock-free SPSC FIFO, same pattern as slave RX queue)
 #define TX_QUEUE_SIZE (64)
 
+// Max messages the ISR will chain before going idle.
+#define MAX_ISR_CHAIN (4)
+
 typedef struct
 {
   uint32_t slaveAddress;
@@ -47,10 +50,10 @@ typedef struct
   volatile MasterState state;
   TxEntry current;
   uint8_t byteIndex;
+  uint8_t chainCount;
 } MasterLocal;
 
 static MasterLocal master;
-static I2cMasterDiag masterDiag;
 
 //// WeakRB bounded FIFO queue
 // Ref: Correct and Efficient Bounded FIFO Queues
@@ -107,18 +110,21 @@ static void restoreSlaveMode(void)
   }
 }
 
-// Pop one message from queue and initiate I2C transfer.
-// Called from audio thread only (with HWI disabled).
-// Only one transfer per call — after completion the ISR restores slave
-// mode, leaving a full audio frame of slave listening before the next
-// drainMasterQueue call. This mirrors Crow's one-transfer-per-poll
-// pattern and prevents master TX from starving slave address matching.
-static void startNextTransfer(void)
+// Pop next message from queue and initiate I2C transfer.
+// Called from audio thread (with HWI disabled) and from ISR (on ARDY).
+static void startNextTransfer(bool fromISR)
 {
+  if (fromISR && master.chainCount >= MAX_ISR_CHAIN)
+  {
+    master.state = MASTER_IDLE;
+    master.chainCount = 0;
+    restoreSlaveMode();
+    return;
+  }
+
   // Don't start a master transfer while bus is busy (e.g., slave receiving)
   if (I2CMasterBusBusy(I2C_BASE_ADDRESS))
   {
-    masterDiag.busyCount++;
     master.state = MASTER_IDLE;
     restoreSlaveMode();
     return;
@@ -128,6 +134,7 @@ static void startNextTransfer(void)
   if (!popTxQ(&entry))
   {
     master.state = MASTER_IDLE;
+    master.chainCount = 0;
     restoreSlaveMode();
     return;
   }
@@ -135,6 +142,14 @@ static void startNextTransfer(void)
   master.current = entry;
   master.byteIndex = 0;
   master.state = MASTER_SENDING;
+  if (fromISR)
+  {
+    master.chainCount++;
+  }
+  else
+  {
+    master.chainCount = 0;
+  }
 
   I2CMasterSlaveAddrSet(I2C_BASE_ADDRESS, entry.slaveAddress);
   I2CSetDataCount(I2C_BASE_ADDRESS, entry.length);
@@ -159,23 +174,20 @@ void I2c_masterISRHandler(uint32_t stat)
     return;
   }
 
-  // NACK: slave didn't acknowledge — go idle, restore slave mode
+  // NACK: slave didn't acknowledge
   if (stat & I2C_INT_NO_ACK)
   {
-    masterDiag.nackCount++;
     I2CMasterIntDisableEx(I2C_BASE_ADDRESS, MASTER_TX_INTFLAGS);
     I2CMasterStop(I2C_BASE_ADDRESS);
     I2CMasterIntClearEx(I2C_BASE_ADDRESS,
                         I2C_INT_NO_ACK | I2C_INT_ADRR_READY_ACESS);
-    master.state = MASTER_IDLE;
-    restoreSlaveMode();
+    startNextTransfer(true);
     return;
   }
 
   // Arbitration lost
   if (stat & I2C_INT_ARBITRATION_LOST)
   {
-    masterDiag.arbLostCount++;
     I2CMasterIntDisableEx(I2C_BASE_ADDRESS, MASTER_TX_INTFLAGS);
     I2CMasterIntClearEx(I2C_BASE_ADDRESS, I2C_INT_ARBITRATION_LOST);
     master.state = MASTER_IDLE;
@@ -201,15 +213,12 @@ void I2c_masterISRHandler(uint32_t stat)
     I2CMasterIntClearEx(I2C_BASE_ADDRESS, I2C_INT_TRANSMIT_READY);
   }
 
-  // ARDY: transfer complete — go idle, restore slave mode.
-  // Next transfer will be kicked by drainMasterQueue on the next audio frame.
+  // ARDY: transfer complete
   if (stat & I2C_INT_ADRR_READY_ACESS)
   {
-    masterDiag.sendCount++;
     I2CMasterIntDisableEx(I2C_BASE_ADDRESS, MASTER_TX_INTFLAGS);
     I2CMasterIntClearEx(I2C_BASE_ADDRESS, I2C_INT_ADRR_READY_ACESS);
-    master.state = MASTER_IDLE;
-    restoreSlaveMode();
+    startNextTransfer(true);
   }
 }
 
@@ -221,7 +230,6 @@ bool I2c_openMaster()
   }
 
   memset(&master, 0, sizeof(master));
-  memset(&masterDiag, 0, sizeof(masterDiag));
   initTxQ();
   master.state = MASTER_IDLE;
 
@@ -297,10 +305,7 @@ bool I2c_sendMessage(uint32_t slaveAddress, const uint8_t *data,
   return pushTxQ(&entry);
 }
 
-// Called from the audio thread to send one queued message.
-// Sends at most one message per call, then returns to slave mode.
-// The next call happens on the next audio frame (~2.67ms later),
-// guaranteeing a slave listening window between transfers.
+// Called from the audio thread to kick the ISR if idle.
 void I2c_drainMasterQueue(int maxCount)
 {
   (void)maxCount;
@@ -312,23 +317,7 @@ void I2c_drainMasterQueue(int maxCount)
   uint32_t key = Hwi_disable();
   if (master.state == MASTER_IDLE)
   {
-    startNextTransfer();
+    startNextTransfer(false);
   }
   Hwi_restore(key);
-}
-
-// Called from the slave ISR after receiving a complete message.
-// The bus is known to be free at this point — opportunistically
-// start a queued master TX without waiting for the next audio frame.
-void I2c_masterKickIfIdle(void)
-{
-  if (master.isOpen && master.state == MASTER_IDLE)
-  {
-    startNextTransfer();
-  }
-}
-
-void I2c_getMasterDiag(I2cMasterDiag *diag)
-{
-  *diag = masterDiag;
 }
