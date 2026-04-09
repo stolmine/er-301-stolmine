@@ -76,43 +76,6 @@ namespace teletype
     }
   }
 
-  int Dispatcher::getDiagAAS()
-  {
-    I2cSlaveDiag d;
-    I2c_getSlaveDiag(&d);
-    return d.aasCount;
-  }
-  int Dispatcher::getDiagRRDY()
-  {
-    I2cSlaveDiag d;
-    I2c_getSlaveDiag(&d);
-    return d.rrdyCount;
-  }
-  int Dispatcher::getDiagARDY()
-  {
-    I2cSlaveDiag d;
-    I2c_getSlaveDiag(&d);
-    return d.ardyCount;
-  }
-  int Dispatcher::getDiagMsg()
-  {
-    I2cSlaveDiag d;
-    I2c_getSlaveDiag(&d);
-    return d.msgCount;
-  }
-  int Dispatcher::getDiagOverrun()
-  {
-    I2cSlaveDiag d;
-    I2c_getSlaveDiag(&d);
-    return d.overrunCount;
-  }
-  int Dispatcher::getDiagDrop()
-  {
-    I2cSlaveDiag d;
-    I2c_getSlaveDiag(&d);
-    return d.dropCount;
-  }
-
   void Dispatcher::commandTRSet(int delay, int port, int level)
   {
     mTRLevel0[port] = mTRLevel1[port];

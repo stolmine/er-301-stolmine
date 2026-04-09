@@ -71,11 +71,14 @@ function Teletype:onShowMenu()
 
   local diagText = "I2C is " .. (self.enabled and "enabled" or "disabled") .. "."
   if self.enabled then
-    local d = self.dispatcher
     diagText = string.format(
         "AAS:%d RX:%d ARDY:%d MSG:%d OVR:%d DRP:%d",
-        d:getDiagAAS(), d:getDiagRRDY(), d:getDiagARDY(),
-        d:getDiagMsg(), d:getDiagOverrun(), d:getDiagDrop())
+        libteletype.I2cSlave_getDiagAAS(),
+        libteletype.I2cSlave_getDiagRRDY(),
+        libteletype.I2cSlave_getDiagARDY(),
+        libteletype.I2cSlave_getDiagMsg(),
+        libteletype.I2cSlave_getDiagOverrun(),
+        libteletype.I2cSlave_getDiagDrop())
   end
 
   controls.header = Header {

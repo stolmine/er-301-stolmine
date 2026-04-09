@@ -13,7 +13,11 @@
 
 #include <teletype/CV.h>
 #include <teletype/TR.h>
-	
+
+// diagnostics
+
+#include <teletype/i2c_diag.h>
+
 #define SWIGLUA
 
 %}
@@ -26,3 +30,7 @@
 
 %include <teletype/CV.h>
 %include <teletype/TR.h>
+
+// diagnostics (free functions, not class methods)
+
+%include <teletype/i2c_diag.h>
