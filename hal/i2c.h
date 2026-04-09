@@ -40,6 +40,10 @@ extern "C"
   // Internal: called from I2C2 ISR to handle master TX interrupts
   void I2c_masterISRHandler(uint32_t rawStatus);
 
+  // Internal: called from slave ISR after message reception to opportunistically
+  // kick a queued master TX while the bus is known to be free.
+  void I2c_masterKickIfIdle(void);
+
   // Slave diagnostic counters
   typedef struct
   {

@@ -317,6 +317,17 @@ void I2c_drainMasterQueue(int maxCount)
   Hwi_restore(key);
 }
 
+// Called from the slave ISR after receiving a complete message.
+// The bus is known to be free at this point — opportunistically
+// start a queued master TX without waiting for the next audio frame.
+void I2c_masterKickIfIdle(void)
+{
+  if (master.isOpen && master.state == MASTER_IDLE)
+  {
+    startNextTransfer();
+  }
+}
+
 void I2c_getMasterDiag(I2cMasterDiag *diag)
 {
   *diag = masterDiag;

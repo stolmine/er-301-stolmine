@@ -174,6 +174,9 @@ static void hwiOnInterrupt(UArg arg)
 #if USE_SBLOCK
         I2CClockBlockingControl(I2C_BASE_ADDRESS, 1, 0, 0, 0);
 #endif
+        // Bus is free right now — kick a queued master TX immediately
+        // rather than waiting for the next audio frame.
+        I2c_masterKickIfIdle();
       }
       else
       {
