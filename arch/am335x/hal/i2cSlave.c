@@ -154,8 +154,10 @@ static void hwiOnInterrupt(UArg arg)
       appendByte(I2CSlaveDataGet(I2C_BASE_ADDRESS));
     }
 
-    // ARDY as slave message boundary — only when master is not mid-transfer
-    if ((rawStat & I2C_INT_ADRR_READY_ACESS) != 0 && !I2c_isMasterBusy())
+    // ARDY as slave message boundary
+    // Guard on master-busy only when master is actually open (TXo active)
+    if ((rawStat & I2C_INT_ADRR_READY_ACESS) != 0
+        && (!I2c_isMasterOpen() || !I2c_isMasterBusy()))
     {
       endMessage();
 #if USE_SBLOCK
@@ -165,8 +167,14 @@ static void hwiOnInterrupt(UArg arg)
 
     logAssert((rawStat & I2C_INT_RECV_OVER_RUN) == 0);
 
-    // Clear all slave-handled status bits
-    I2CSlaveIntClearEx(I2C_BASE_ADDRESS, SLAVE_RX_INTFLAGS);
+    // Clear interrupt flags: when master is not open, clear ALL flags
+    // (vanilla behavior) to prevent stale non-slave flags from blocking
+    // the ISR. When master IS open, only clear slave flags to avoid
+    // clobbering master TX state.
+    if (I2c_isMasterOpen())
+      I2CSlaveIntClearEx(I2C_BASE_ADDRESS, SLAVE_RX_INTFLAGS);
+    else
+      I2CSlaveIntClearEx(I2C_BASE_ADDRESS, I2C_INT_ALL);
   }
 }
 
