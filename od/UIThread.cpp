@@ -114,7 +114,7 @@ namespace od
   }
 
   static const char *cycleList[] = {
-      "2lines", "grid", "bubbles", "maze", "forest", "snow", "rain", "perlin", "voronoi", "doom"};
+      "2lines", "grid", "bubbles", "maze", "forest", "snow", "rain", "perlin", "voronoi"};
   static const int cycleListSize = sizeof(cycleList) / sizeof(cycleList[0]);
 
   void UIThread::setScreenSaver(const char *name)

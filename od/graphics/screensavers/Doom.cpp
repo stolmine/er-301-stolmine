@@ -187,12 +187,38 @@ namespace od
       mTickAccum -= doomPeriod;
       maxTicks--;
 
-      // If game left the level (death, intermission, finale),
-      // restart immediately to keep the screensaver going
-      if (gamestate != GS_LEVEL && gamestate != GS_DEMOSCREEN)
+      // Detect death or non-level state and restart
       {
-        G_DeferedInitNew((skill_t)2, 1, 1);
-        Bot_Init();
+        boolean dead = false;
+        if (gamestate == GS_LEVEL)
+        {
+          // Dead: playerstate is DEAD, or mo is NULL (removed after death)
+          if (!players[0].mo || players[0].playerstate == PST_DEAD
+              || players[0].health <= 0)
+            dead = true;
+        }
+
+        if (dead)
+        {
+          mDeathTimer++;
+          if (mDeathTimer > 70) // ~2 sec death animation
+          {
+            G_DeferedInitNew((skill_t)2, 1, 1);
+            Bot_Init();
+            mDeathTimer = 0;
+          }
+        }
+        else if (gamestate != GS_LEVEL)
+        {
+          // Intermission, finale, demo screen — restart now
+          G_DeferedInitNew((skill_t)2, 1, 1);
+          Bot_Init();
+          mDeathTimer = 0;
+        }
+        else
+        {
+          mDeathTimer = 0;
+        }
       }
 
       if (DG_ScreenBuffer)

@@ -19,6 +19,7 @@ namespace od
     bool mInitialized = false;
     bool mWadMissing = false;
     float mTickAccum = 0.0f;
+    int mDeathTimer = 0;
     float mBorderPhase = 0.0f;
 
     // Viewport: correct aspect ratio centered in 256x64
