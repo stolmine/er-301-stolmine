@@ -18,8 +18,8 @@
 #define I2C_QUEUE_SIZE (64)
 
 #define USE_SBLOCK 0
-#define USE_BUS_RATE_100KHZ 1
-#define USE_BUS_RATE_400KHZ 0
+#define USE_BUS_RATE_100KHZ 0
+#define USE_BUS_RATE_400KHZ 1
 
 #define SLAVE_RX_INTFLAGS (I2C_INT_ADRR_READY_ACESS | \
                            I2C_INT_RECV_READY | \

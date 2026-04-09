@@ -93,9 +93,9 @@ function TXo:onShowMenu()
     end,
     choices = {
       "0x60",
+      "0x61",
       "0x62",
-      "0x64",
-      "0x66"
+      "0x63"
     },
     current = self:getConfiguration("address")
   }
