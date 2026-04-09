@@ -20,6 +20,14 @@ namespace teletype
     // preserves settings like pulse time and polarity
     void softReset();
 
+    // Slave I2C diagnostics
+    int getDiagAAS();
+    int getDiagRRDY();
+    int getDiagARDY();
+    int getDiagMsg();
+    int getDiagOverrun();
+    int getDiagDrop();
+
 #ifndef SWIGLUA
     void process(float *inputs, float *outputs);
 

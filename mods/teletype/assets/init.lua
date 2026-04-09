@@ -62,15 +62,31 @@ end
 function Teletype:onShowMenu()
   local order = {
     "header",
+    "diag",
     "manualEnable",
     "autoEnable",
     "address"
   }
   local controls = {}
 
+  local diagText = "I2C is " .. (self.enabled and "enabled" or "disabled") .. "."
+  if self.enabled then
+    local d = self.dispatcher
+    diagText = string.format(
+        "AAS:%d RX:%d ARDY:%d MSG:%d OVR:%d DRP:%d",
+        d:getDiagAAS(), d:getDiagRRDY(), d:getDiagARDY(),
+        d:getDiagMsg(), d:getDiagOverrun(), d:getDiagDrop())
+  end
+
   controls.header = Header {
-    description = string.format("I2C is %s.",
-                                self.enabled and "enabled" or "disabled")
+    description = diagText
+  }
+
+  controls.diag = Task {
+    description = "Refresh Diag",
+    task = function()
+      -- Force menu rebuild to refresh counters
+    end
   }
 
   controls.autoEnable = Choices {

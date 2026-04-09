@@ -38,6 +38,7 @@ typedef struct
 } Local;
 
 static Local self;
+static I2cSlaveDiag slaveDiag;
 
 //// WeakRB bounded FIFO queue
 // Ref: Correct and Efficient Bounded FIFO Queues
@@ -149,21 +150,39 @@ static void hwiOnInterrupt(UArg arg)
     }
 #endif
 
+    if ((rawStat & I2C_INT_ADRR_SLAVE) != 0)
+      slaveDiag.aasCount++;
+
     if ((rawStat & I2C_INT_RECV_READY) != 0U)
     {
+      slaveDiag.rrdyCount++;
       appendByte(I2CSlaveDataGet(I2C_BASE_ADDRESS));
     }
 
     // ARDY as slave message boundary
     // Guard on master-busy only when master is actually open (TXo active)
-    if ((rawStat & I2C_INT_ADRR_READY_ACESS) != 0
-        && (!I2c_isMasterOpen() || !I2c_isMasterBusy()))
+    if ((rawStat & I2C_INT_ADRR_READY_ACESS) != 0)
     {
-      endMessage();
+      slaveDiag.ardyCount++;
+      if (!I2c_isMasterOpen() || !I2c_isMasterBusy())
+      {
+        if (self.workingMessage.length > 0)
+          slaveDiag.msgCount++;
+        else
+          slaveDiag.dropCount++;
+        endMessage();
 #if USE_SBLOCK
-      I2CClockBlockingControl(I2C_BASE_ADDRESS, 1, 0, 0, 0);
+        I2CClockBlockingControl(I2C_BASE_ADDRESS, 1, 0, 0, 0);
 #endif
+      }
+      else
+      {
+        slaveDiag.dropCount++;
+      }
     }
+
+    if ((rawStat & I2C_INT_RECV_OVER_RUN) != 0)
+      slaveDiag.overrunCount++;
 
     logAssert((rawStat & I2C_INT_RECV_OVER_RUN) == 0);
 
@@ -310,4 +329,9 @@ void I2c_closeSlave()
       I2CMasterDisable(I2C_BASE_ADDRESS);
     }
   }
+}
+
+void I2c_getSlaveDiag(I2cSlaveDiag *diag)
+{
+  *diag = slaveDiag;
 }

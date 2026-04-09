@@ -183,3 +183,8 @@ bool I2c_isSlaveOpen(void)
 {
   return slaveOpen;
 }
+
+void I2c_getSlaveDiag(I2cSlaveDiag *diag)
+{
+  memset(diag, 0, sizeof(*diag));
+}
