@@ -14,6 +14,10 @@
 #include <txo/TXoCV.h>
 #include <txo/TXoTR.h>
 
+// diagnostics
+
+#include <txo/i2c_master_diag.h>
+
 #define SWIGLUA
 
 %}
@@ -26,3 +30,7 @@
 
 %include <txo/TXoCV.h>
 %include <txo/TXoTR.h>
+
+// diagnostics
+
+%include <txo/i2c_master_diag.h>

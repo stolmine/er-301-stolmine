@@ -15,7 +15,7 @@ function TXo:init(args)
   self.enabled = false
   self.defaults["autoEnable"] = "no"
   self.defaults["address"] = "0x60"
-  self.defaults["updateRate"] = "1000"
+  self.defaults["updateRate"] = "250"
 end
 
 function TXo:enable()
@@ -60,9 +60,20 @@ function TXo:onShowMenu()
   }
   local controls = {}
 
+  local headerText
+  if self.enabled then
+    headerText = string.format(
+        "TX:%d NACK:%d ARB:%d BUSY:%d",
+        libtxo.I2cMaster_getDiagSend(),
+        libtxo.I2cMaster_getDiagNack(),
+        libtxo.I2cMaster_getDiagArbLost(),
+        libtxo.I2cMaster_getDiagBusy())
+  else
+    headerText = "I2C master is disabled."
+  end
+
   controls.header = Header {
-    description = string.format("I2C master is %s.",
-                                self.enabled and "enabled" or "disabled")
+    description = headerText
   }
 
   controls.autoEnable = Choices {

@@ -53,6 +53,17 @@ extern "C"
 
   void I2c_getSlaveDiag(I2cSlaveDiag *diag);
 
+  // Master diagnostic counters
+  typedef struct
+  {
+    uint32_t sendCount;      // messages sent successfully (ARDY)
+    uint32_t nackCount;      // NACKs received
+    uint32_t arbLostCount;   // arbitration lost events
+    uint32_t busyCount;      // transfers skipped (bus busy)
+  } I2cMasterDiag;
+
+  void I2c_getMasterDiag(I2cMasterDiag *diag);
+
 #ifdef __cplusplus
 }
 #endif
