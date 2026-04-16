@@ -1,5 +1,22 @@
 # Habitat Tomograph overview viz regression (2026-04-13)
 
+> **RESOLVED 2026-04-16 — root cause: `sinf`/`cosf` from a package `.so` miscompute on am335x.**
+> A perfect circle drawn from `cosf(a)*r, sinf(a)*r` came out with a distended bottom lobe
+> and extra line-like artifacts. Replacing the runtime calls with precomputed
+> `static const float kLutCos[72]`/`kLutSin[72]` (at `a = 2*pi*i/N - pi/2`) rendered the
+> expected geometry. Firmware-side `sinf`/`cosf` (e.g. ScaleQuantizer's PitchCircle in
+> `app.bin`) are unaffected — the bug is specific to the package → firmware call
+> boundary. SWIG version, habitat source, dev host, vtable layout, and primitives were
+> all ruled out during diagnosis. Fix reference: `FilterResponseGraphic.h` at top of
+> file (`kLutCos`/`kLutSin`/`lutCos`/`lutSin`). Root cause (package→libm symbol
+> resolution drift, or FPU ABI mismatch on dlopen'd `.so`) not pinned down; the LUT
+> workaround is robust regardless. Apply the same pattern to any future package-side
+> circular/rotational graphic. See stolmine memory `project_package_trig_bug.md` and
+> habitat memory `feedback_package_trig_lut.md` for the standing guidance.
+
+---
+
+
 Tracking a hardware-only visual regression in the Tomograph / Filterbank unit
 shipped in the habitat `spreadsheet` package (unit module `Filterbank`,
 display name `Tomograph`). Filed here because the habitat code is unchanged
