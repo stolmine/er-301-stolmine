@@ -272,7 +272,18 @@ end
 
 function LocalChooser:onShow()
   if self.refreshNeeded then
-    self:refresh()
+    local Channels = require "Channels"
+    local selectedChannel = Channels.selected()
+    if selectedChannel and selectedChannel ~= self.channel then
+      local newChain = Channels.getChain(selectedChannel)
+      if newChain then
+        self:reseed(newChain, selectedChannel)
+      else
+        self:refresh()
+      end
+    else
+      self:refresh()
+    end
     self.refreshNeeded = false
   end
   Encoder.set(self.encoderState)

@@ -76,12 +76,12 @@ local mode = Mode("Admin")
 
 function mode:enter()
   Mode.enter(self)
-  local Application = require "Application"
-  Application.setVisibleContext(context)
   app.ChannelLEDs_off(0)
   app.ChannelLEDs_off(1)
   app.ChannelLEDs_off(2)
   app.ChannelLEDs_off(3)
+  local Application = require "Application"
+  Application.setVisibleContext(context)
 end
 
 return mode
