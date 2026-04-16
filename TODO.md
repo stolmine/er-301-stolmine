@@ -30,3 +30,13 @@ Advantages over single-cursor keyboard: up to 6 characters visible and selectabl
 
 ## Intro Video
 Produce a short video introducing stolmine firmware. See [video.md](video.md) for script outline.
+
+## Chain-Reference Invalidation on Stereo Link/Unlink (pre-v9.1.0)
+Stereo link/unlink in user mode destroys and recreates chain objects, but only
+`UserMode` subscribes to `channelsModified`. `LocalChooser` (and its wrapper
+`Source/Chooser`) hold chain references that can dangle across a link/unlink.
+Main channel view + `OUTX: No units` readout are fine — those rebuild via
+`Channels.show()`. Fix: apply the stock `Signal.weakRegister` pattern
+(as in `Source/Chooser.lua:41`, `GlobalChains/Interface.lua:315-317`, etc.) to
+`LocalChooser` and `Source/Chooser`, with reseed-or-dismiss semantics.
+See [docs/planning/chain_invalidation_on_link_unlink.md](docs/planning/chain_invalidation_on_link_unlink.md).
