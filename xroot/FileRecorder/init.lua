@@ -530,7 +530,9 @@ function FileRecorder:enterReleased()
         self:setSelection(track, viewName, spotHandle)
       elseif action == "assign" then
         local channel = spot:getControl()
-        local chooser = SourceChooser()
+        local Channels = require "Channels"
+        local chain = Channels.getChain(Channels.selected())
+        local chooser = chain and SourceChooser(chain) or SourceChooser()
         local task = function(src)
           self:setInputSource(channel.track.index, channel.index, src)
         end

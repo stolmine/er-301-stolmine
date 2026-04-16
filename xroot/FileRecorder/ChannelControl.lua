@@ -74,7 +74,9 @@ function ChannelControl:spotReleased(i, shifted)
     return
   end
   if self:queryUp("state") == "setup" then
-    local chooser = SourceChooser()
+    local Channels = require "Channels"
+    local chain = Channels.getChain(Channels.selected())
+    local chooser = chain and SourceChooser(chain) or SourceChooser()
     local window = self:getWindow()
     if window then
       local task = function(src)

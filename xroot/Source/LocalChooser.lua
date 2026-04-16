@@ -183,7 +183,27 @@ function LocalChooser:dialPressed(shifted)
   return true
 end
 
+function LocalChooser:reseed(chain)
+  chain = chain:getRootChain()
+  self.chain = chain
+  self.nodes = {}
+  self.ptr:clear()
+  self:loadChainHelper(chain)
+  self.ptr:rebuild()
+  local xpath = chain:getXPathToSelection()
+  self.ptr:select(xpath)
+  self:onSelectionChanged()
+end
+
 function LocalChooser:selectReleased(i, shifted)
+  if not shifted then
+    local Channels = require "Channels"
+    local newChain = Channels.getChain(i)
+    if newChain and newChain:getRootChain() ~= self.chain then
+      self:reseed(newChain)
+      return true
+    end
+  end
   self:onSelectionChanged()
   return true
 end
