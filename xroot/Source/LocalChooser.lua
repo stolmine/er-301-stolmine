@@ -12,6 +12,16 @@ local function createNode(o, type)
   }
 end
 
+local function lightChannel(i)
+  app.ChannelLEDs_off(0)
+  app.ChannelLEDs_off(1)
+  app.ChannelLEDs_off(2)
+  app.ChannelLEDs_off(3)
+  if i then
+    app.ChannelLEDs_on(i - 1)
+  end
+end
+
 local LocalChooser = Class {}
 LocalChooser:include(Window)
 
@@ -19,6 +29,8 @@ function LocalChooser:init(ring, chain, currentSource)
   Window.init(self)
   self:setClassName("Source.LocalChooser")
   self.ring = ring
+  local Channels = require "Channels"
+  self.channel = Channels.selected()
   chain = chain:getRootChain()
   self.chain = chain
   self.nodes = {}
@@ -36,6 +48,7 @@ function LocalChooser:init(ring, chain, currentSource)
   self.scope:showStatus(true)
   self:addMainGraphic(self.scope)
   self:loadChainHelper(self.chain)
+  overview:setEmptyString(self.chain.title .. ": No units.")
   overview:rebuild()
   if currentSource and currentSource.type == "local" then
     local id = self:findLocalSource(currentSource)
@@ -183,12 +196,14 @@ function LocalChooser:dialPressed(shifted)
   return true
 end
 
-function LocalChooser:reseed(chain)
+function LocalChooser:reseed(chain, channel)
   chain = chain:getRootChain()
   self.chain = chain
+  self.channel = channel
   self.nodes = {}
   self.ptr:clear()
   self:loadChainHelper(chain)
+  self.ptr:setEmptyString(chain.title .. ": No units.")
   self.ptr:rebuild()
   local xpath = chain:getXPathToSelection()
   self.ptr:select(xpath)
@@ -199,8 +214,15 @@ function LocalChooser:selectReleased(i, shifted)
   if not shifted then
     local Channels = require "Channels"
     local newChain = Channels.getChain(i)
-    if newChain and newChain:getRootChain() ~= self.chain then
-      self:reseed(newChain)
+    if newChain then
+      Channels.select(i)
+      lightChannel(i)
+      if newChain:getRootChain() ~= self.chain then
+        self:reseed(newChain, i)
+      else
+        self.channel = i
+        self:onSelectionChanged()
+      end
       return true
     end
   end
@@ -239,10 +261,12 @@ end
 
 function LocalChooser:onShow()
   Encoder.set(self.encoderState)
+  lightChannel(self.channel)
 end
 
 function LocalChooser:onHide()
   Encoder.set(Encoder.Neutral)
+  lightChannel(nil)
 end
 
 function LocalChooser:choose(src)
