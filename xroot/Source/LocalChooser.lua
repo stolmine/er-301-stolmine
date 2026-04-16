@@ -196,6 +196,17 @@ function LocalChooser:dialPressed(shifted)
   return true
 end
 
+function LocalChooser:refresh()
+  local xpath = self:getXPath()
+  self.nodes = {}
+  self.ptr:clear()
+  self:loadChainHelper(self.chain)
+  self.ptr:setEmptyString(self.chain.title .. ": No units.")
+  self.ptr:rebuild()
+  self.ptr:select(xpath)
+  self:onSelectionChanged()
+end
+
 function LocalChooser:reseed(chain, channel)
   chain = chain:getRootChain()
   self.chain = chain
@@ -260,11 +271,16 @@ function LocalChooser:mainReleased(i, shifted)
 end
 
 function LocalChooser:onShow()
+  if self.refreshNeeded then
+    self:refresh()
+    self.refreshNeeded = false
+  end
   Encoder.set(self.encoderState)
   lightChannel(self.channel)
 end
 
 function LocalChooser:onHide()
+  self.refreshNeeded = true
   Encoder.set(Encoder.Neutral)
   lightChannel(nil)
 end
