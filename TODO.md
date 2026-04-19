@@ -31,6 +31,16 @@ Advantages over single-cursor keyboard: up to 6 characters visible and selectabl
 ## Intro Video
 Produce a short video introducing stolmine firmware. See [video.md](video.md) for script outline.
 
+## Crash Report: sc.cv insert at end of chain
+Investigate crash with the following repro characteristics:
+- Latest firmware release version
+- Chain containing mutable units from habitats package
+- TXo and Teletype packages enabled
+- Crash triggered when inserting an `sc.cv` unit at the end of the chain
+
+Collect: crashdump from device, exact unit list + order, whether link/unlink
+state matters, whether removing TXo or Teletype changes reproducibility.
+
 ## Chain-Reference Invalidation on Stereo Link/Unlink (pre-v9.1.0)
 Stereo link/unlink in user mode destroys and recreates chain objects, but only
 `UserMode` subscribes to `channelsModified`. `LocalChooser` (and its wrapper
