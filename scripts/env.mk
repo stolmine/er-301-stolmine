@@ -37,7 +37,13 @@ describe_target = $(yellowON)$@$(yellowOFF)
 describe_env = $(blueON)[$(scriptname) $(ARCH) $(PROFILE)]$(blueOFF)
 
 # Frequently used paths
-build_dir = $(PROFILE)/$(ARCH)
+# For ARCH=linux, append host machine arch so x86_64 and aarch64 outputs
+# can coexist (e.g. dev workstation + RPi sharing the source tree via sshfs).
+ifeq ($(ARCH),linux)
+  build_dir = $(PROFILE)/$(ARCH)-$(shell uname -m)
+else
+  build_dir = $(PROFILE)/$(ARCH)
+endif
 libs_build_dir = $(build_dir)/libs
 arch_dir = arch
 mods_dir = mods
@@ -101,7 +107,19 @@ include scripts/linux.mk
 
 # symbols += BUILDOPT_LUA_USE_REALLOC
 includes += emu
-CFLAGS.linux = -Wno-deprecated-declarations -msse4 -fPIC
+
+# Host SIMD flag: SSE4 on x86_64, NEON on ARM (mandatory on aarch64).
+LINUX_HOST_ARCH := $(shell uname -m)
+ifeq ($(LINUX_HOST_ARCH),x86_64)
+  LINUX_SIMD_FLAGS = -msse4
+else ifeq ($(LINUX_HOST_ARCH),aarch64)
+  LINUX_SIMD_FLAGS =
+else ifeq ($(LINUX_HOST_ARCH),armv7l)
+  LINUX_SIMD_FLAGS = -mfpu=neon
+else
+  LINUX_SIMD_FLAGS =
+endif
+CFLAGS.linux = -Wno-deprecated-declarations $(LINUX_SIMD_FLAGS) -fPIC
 
 endif
 
