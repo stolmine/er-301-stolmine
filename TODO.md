@@ -50,3 +50,29 @@ Main channel view + `OUTX: No units` readout are fine — those rebuild via
 (as in `Source/Chooser.lua:41`, `GlobalChains/Interface.lua:315-317`, etc.) to
 `LocalChooser` and `Source/Chooser`, with reseed-or-dismiss semantics.
 See [docs/planning/chain_invalidation_on_link_unlink.md](docs/planning/chain_invalidation_on_link_unlink.md).
+
+## Multi-Output Unit Framework — Follow-Ups
+Framework shipped 2026-04-21 (commits `7d99be1` framework + `a9cc47d` multiout
+package). Validated end-to-end on stolmine emu, stolmine hardware, and vanilla
+firmware (graceful fallback to primary). Author guide in
+`er-301-habitat/docs/multi-output-units-author-guide.md`.
+
+Outstanding items, none blocking:
+
+- **Stolmine→vanilla preset rewriter (optional).** Today, a stolmine preset
+  wiring sub-out ≥3 of a multi-out unit drops that connection silently when
+  loaded on vanilla. A stolmine-side save-time rewriter could snap any sub-out
+  index >2 to 1 (primary) so cross-firmware presets degrade losslessly to
+  stereo on vanilla. Only worth building if cross-firmware presets become a
+  real workflow.
+- **Discoverability glyph in unit picker.** When scrolling unit *types* before
+  insertion, show a small fan-out count next to multi-out units. Pure Lua
+  addition under `xroot/Unit/Chooser/`. Not blocking; the local-picker edge
+  indicator already handles post-insertion discoverability.
+- **Sub-out topology surfacing in unit's focused view.** When the user has the
+  multi-out unit selected as the focused chain unit (not as a source), surface
+  the sub-out list somewhere. Mechanism not committed; not blocking v1.
+- **Hardware sinf/cosf LUT audit.** QuadLFO ships with scalar `sinf`. User
+  reports it works correctly on hardware despite the known package trig bug,
+  but a LUT swap is the documented mitigation for any future multi-out unit
+  whose audio path shows the symptom.

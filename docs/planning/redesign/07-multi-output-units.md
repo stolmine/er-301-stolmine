@@ -1,6 +1,6 @@
 # Multi-Output Units
 
-**Status:** principles and UI grammar specified. Implementation **deferred** — no v1 unit requires it. Picker grammar revised April 2026 — Rolodex stack dropped in favor of context-sensitive ply layout + S3 sub-out cycler (see Local picker section). Discoverability glyph still open in detail; sub-view motion deferred (no v1 unit needs a separate drill).
+**Status:** **shipped 2026-04-21** in stolmine (commits `7d99be1` framework, `a9cc47d` multiout package). Validated end-to-end: stolmine emu, stolmine hardware, vanilla firmware (graceful fallback to primary). Picker grammar revised April 2026 — Rolodex stack dropped in favor of edge-indicator overlay on the existing 1-ply scope + M6 sub-out cycler (see Local picker section). Author guide for downstream package authors lives in `er-301-habitat/docs/multi-output-units-author-guide.md`. Open follow-ups (none blocking): unit-picker fan-out glyph, unit-focused-view sub-out topology, optional stolmine→vanilla preset rewriter — see TODO.md.
 
 ## The problem
 
@@ -38,32 +38,29 @@ The main chain view looks identical for single-output and multi-output units. No
 
 Sub-outs are reached **only** via deliberate subscription in the local input picker (scope view). To wire a sub-out somewhere downstream, the user opens the local picker on the consuming chain and finds the sub-out there.
 
-### Local picker — context-sensitive ply layout
+### Local picker — edge indicator overlay
 
-The local picker keeps its existing main-display layout (chain overview + miniscope on the right), but reallocates space when a multi-out unit is focused:
+The local picker keeps its **vanilla layout intact**: chain overview occupies the leftmost ~5 plies, miniscope occupies the rightmost 1 ply. When a multi-out unit is focused, two small Labels (sub-out label on top, `X/Y` position on bottom) are overlaid on top of the scope's waveform. They're hidden when the focused source is single-out — vanilla scope layout is fully preserved for the common case.
 
-- **Default (single-out focused):** miniscope occupies **3 plies** (126px) on the right edge of the main display. Chain overview takes the remaining ~130px on the left.
-- **Multi-out focused:** miniscope shrinks to **2 plies** (84px). The freed rightmost ply (42px) shows a `[X/Y: label]` indicator for the currently selected sub-out — for example `[2/4: aux]` or `[3/4: cv]`. Chain overview width is unchanged between the two states; only the right-edge ply allocation toggles.
+### M6 — sub-out cycler
 
-The transition is driven by the focused source's metadata — single decision point, two affordances (ply allocation + S3 binding visibility, see below).
+When a multi-out unit is focused, **M6 cycles through the unit's sub-outs** in author-declared order. M6 sits under the scope ply and was unbound in the picker, so this is free real estate with no muscle-memory collision. The indicator updates in step; the scope re-targets to whichever sub-out is currently selected so audition follows the cycle. The currently focused sub-out is what `enter` selects.
 
-### S3 — sub-out cycler
-
-When a multi-out unit is focused, **S3 cycles through the unit's sub-outs** in author-declared order. The `[X/Y: label]` indicator updates in step. The currently focused sub-out is what `enter` selects.
-
-When the focused source is single-out, S3 is unbound (current behavior preserved). No collision with main-chain muscle memory because S3 is currently free real estate in the picker.
+When the focused source is single-out, M6 is a no-op (matches vanilla picker behavior).
 
 ### Author labels
 
-Sub-outs require **meaningful author labels**. Generic "out 1 / out 2" is not acceptable — the rightmost-edge indicator shows the label in-place, and "out 1" is uninformative there. Labels are declared by the unit author as Lua-side metadata on the unit (e.g. `self.subOutLabels = {"main", "aux", "cv", "gate"}`).
+Sub-outs require **meaningful author labels**. Generic "out 1 / out 2" is not acceptable — the indicator overlay shows the label in-place, and "out 1" is uninformative there. Labels are declared by the unit author as `args.subOutLabels` passed into `Unit.init` (e.g. `args.subOutLabels = {"main", "aux", "cv", "gate"}`). Vanilla firmware ignores this field as an unknown args key — harmless.
+
+Keep labels short (≤6 chars renders cleanly in the 42px ply at 10pt).
 
 ### Why not Rolodex?
 
 An earlier iteration of this spec called for a Rolodex stack with edge-peek. Rejected for two reasons:
 1. **Space.** The picker has limited real estate, especially in deeply nested chains. A 4–6 card stack would be too large for the available cell budget and not legibly different from a flat list.
-2. **Display vs. selection conflated.** The Rolodex tried to do both discoverability and selection in one mechanism. Edge-indicator + S3 separates them: the indicator always shows the current state, S3 is the dedicated cycle action.
+2. **Display vs. selection conflated.** The Rolodex tried to do both discoverability and selection in one mechanism. Edge-indicator + M6 separates them: the indicator always shows the current state, M6 is the dedicated cycle action.
 
-The "current sub-out only" approach is intentionally lossy in the surface (you can't see all sub-outs at once) — but progressive disclosure via S3 is fast and zero-clutter, and the discoverability glyph (below) communicates fan-out count without showing every label.
+The "current sub-out only" approach is intentionally lossy in the surface (you can't see all sub-outs at once) — but progressive disclosure via M6 is fast and zero-clutter.
 
 ### Controls
 
@@ -71,20 +68,22 @@ A multi-out unit's controls live **only at the top level**, macro-style — they
 
 ## Sub-view motion grammar
 
-The local-picker grammar above (S3 cycle + edge indicator) handles sub-out *selection* without entering a separate navigational space. No sub-view "drill" is required for the picker case.
+The local-picker grammar above (M6 cycle + edge indicator overlay) handles sub-out *selection* without entering a separate navigational space. No sub-view "drill" is required for the picker case.
 
 For the unit's own focused view (when the user is editing the multi-out unit, not picking it as a source elsewhere), surfacing sub-out topology is still desirable — see Discoverability below. Mechanism not committed; not blocking v1.
 
 ## Discoverability
 
-The picker's edge indicator (`[X/Y: label]`) is the discoverability mechanism in the local picker — the moment the user focuses a unit, the indicator either appears (multi-out, with `X/Y` showing fan-out count and label naming the current sub-out) or doesn't (single-out, miniscope keeps the full 3-ply). This conveys both *that* the unit is multi-out and *how many* sub-outs it has, without requiring a separate badge.
+The picker's edge indicator overlay is the discoverability mechanism in the local picker — the moment the user focuses a unit, the overlay either appears (multi-out, with `X/Y` showing fan-out count and label naming the current sub-out) or doesn't (single-out, scope renders normally). This conveys both *that* the unit is multi-out and *how many* sub-outs it has, without requiring a separate badge.
 
-For unit-picker-time discoverability (when scrolling unit *types* before insertion), no glyph is currently planned — the picker is rich enough that adding fan-out badges to type listings would clutter without much benefit.
+For unit-picker-time discoverability (when scrolling unit *types* before insertion), no glyph is currently shipped — the post-insertion edge overlay handles the common case. A small fan-out badge in the unit picker is a possible follow-on (TODO.md).
 
 Surfacing sub-out topology in the unit's own focused view (when the user is editing the multi-out unit, not picking it as a source elsewhere) is still desirable but not committed; not blocking v1.
 
 ## Scope decision for v1
 
-The sub-view mechanism probably **does not need implementation for any currently-shipping 301 unit** — the v1 audio library decomposes cleanly to parallel chains. The framework is a hook for control-domain expansion (Just Friends, quadrature LFO, multi-phase utilities).
+The sub-view mechanism does **not** need implementation for any currently-shipping 301 unit — the v1 audio library decomposes cleanly to parallel chains. The framework is a hook for control-domain expansion (Just Friends, quadrature LFO, multi-phase utilities).
 
-**Specify the UI grammar now so it's ready. Do not build the implementation until a unit needs it. Not a v1 blocker.**
+**Original guidance (April 2026):** specify the UI grammar now so it's ready; do not build the implementation until a unit needs it; not a v1 blocker.
+
+**Update (2026-04-21):** built ahead of demand to validate the design and lock the vanilla-compat story. Quad LFO ships in stolmine's `mods/multiout` package as the proving fixture. The v1 audio library is unaffected — multi-out is opt-in per unit, vanilla packages keep working unchanged.
