@@ -69,7 +69,16 @@ txo-install:
 txo-clean:
 	+$(MAKE) -f scripts/txo.mk clean
 
-install-all: core-install teletype-install txo-install
+multiout:
+	+$(MAKE) -f scripts/multiout.mk
+
+multiout-install:
+	+$(MAKE) -f scripts/multiout.mk install
+
+multiout-clean:
+	+$(MAKE) -f scripts/multiout.mk clean
+
+install-all: core-install teletype-install txo-install multiout-install
 
 sbl: 
 	+$(MAKE) -f scripts/sbl.mk
