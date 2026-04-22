@@ -77,12 +77,11 @@ For the unit's own focused view (when the user is editing the multi-out unit, no
 
 ## Discoverability
 
-Hiding sub-out details on the picker's edge indicator means the user can see *which* sub-out is currently selected but not at-a-glance how many a unit has, or what they all are. Two complementary affordances:
+The picker's edge indicator (`[X/Y: label]`) is the discoverability mechanism in the local picker — the moment the user focuses a unit, the indicator either appears (multi-out, with `X/Y` showing fan-out count and label naming the current sub-out) or doesn't (single-out, miniscope keeps the full 3-ply). This conveys both *that* the unit is multi-out and *how many* sub-outs it has, without requiring a separate badge.
 
-1. **Micro-indicator glyph** on multi-out units in the chain overview, showing fan-out count (e.g. small badge "×4"). Peripheral-readable, no interaction required. Visible always — distinct from the picker's `[X/Y: label]` which only appears when focused.
-2. **Surface sub-out topology in the unit's focused view** (not the chain view), consistent with sub-chain detail depth.
+For unit-picker-time discoverability (when scrolling unit *types* before insertion), no glyph is currently planned — the picker is rich enough that adding fan-out badges to type listings would clutter without much benefit.
 
-Both are cheap. Probably ship both. The chain-overview glyph is the more important of the two — it's the cue that S3 will do something when you focus this unit in the picker.
+Surfacing sub-out topology in the unit's own focused view (when the user is editing the multi-out unit, not picking it as a source elsewhere) is still desirable but not committed; not blocking v1.
 
 ## Scope decision for v1
 

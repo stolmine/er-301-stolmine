@@ -40,11 +40,22 @@ function Unit:init(args)
   self.branches = {}
   self.objects = {}
 
+  -- Optional sub-output labels for multi-output units (channelCount > 2 with
+  -- semantically distinct outputs, e.g. quadrature LFO phases). When set, the
+  -- local picker exposes each output as an addressable sub-out via S3 cycling.
+  -- Vanilla firmware ignores this field — it just sees a unit with N output
+  -- channels and exposes only outputs 1 and 2 via its stereo-only wrapper.
+  self.subOutLabels = args.subOutLabels
+
   local Source = require "Source.Internal"
-  self.leftOutputSource = Source("local", self, 1)
-  if channelCount > 1 then
-    self.rightOutputSource = Source("local", self, 2)
+  self.outputs = {}
+  for i = 1, channelCount do
+    self.outputs[i] = Source("local", self, i)
   end
+  -- Backwards-compat aliases referenced elsewhere in this file (setTitle,
+  -- onRemove) and in xroot/Chain/Branch.lua. Equivalent to outputs[1] / [2].
+  self.leftOutputSource = self.outputs[1]
+  self.rightOutputSource = self.outputs[2]
 
   self.aliases = args.aliases or {}
   self.pUnit = args.pUnit or app.Unit(title, channelCount)
@@ -140,14 +151,24 @@ function Unit:findByInstanceKey(key)
 end
 
 function Unit:getOutputSource(i)
-  if i == 1 or i == nil or self.channelCount == 1 then
-    return self.leftOutputSource
-  elseif i == 2 then
-    return self.rightOutputSource
+  i = i or 1
+  if self.outputs[i] then
+    return self.outputs[i]
+  end
+  -- Out-of-range request but primary exists: fall back so a stolmine preset
+  -- referencing a sub-out that has since gone away (unit version downgrade,
+  -- author dropped the sub-out) doesn't silently lose the connection.
+  if i > 1 and self.outputs[1] then
+    app.logInfo("%s:getOutputSource(%d) out of range (have %d); falling back to primary.",
+                self, i, #self.outputs)
+    return self.outputs[1]
   end
 end
 
 function Unit:getOutputDisplayName(channel)
+  if self.subOutLabels and channel and self.subOutLabels[channel] then
+    return self.title .. " " .. self.subOutLabels[channel]
+  end
   return self.title
 end
 
@@ -157,11 +178,8 @@ function Unit:setTitle(title)
   for name, branch in pairs(self.branches) do
     branch:setTitle(title)
   end
-  if self.leftOutputSource then
-    self.leftOutputSource:onRename()
-  end
-  if self.rightOutputSource then
-    self.rightOutputSource:onRename()
+  for _, source in ipairs(self.outputs) do
+    source:onRename()
   end
 end
 
@@ -338,10 +356,14 @@ function Unit:getOutput(ch)
   if self.pUnit == nil then
     app.logError("Unit.getOutput: pUnit is nil.")
   end
-  if self.channelCount == 1 or ch == nil or ch == 1 then
+  ch = ch or 1
+  if ch >= 1 and ch <= self.channelCount then
+    return self.pUnit:getOutput(ch - 1)
+  end
+  -- Out of range: fall back to primary so callers like the picker's scope
+  -- watcher don't crash when a multi-out unit is queried with a bad index.
+  if self.channelCount >= 1 then
     return self.pUnit:getOutput(0)
-  elseif ch == 2 then
-    return self.pUnit:getOutput(1)
   end
 end
 
@@ -661,11 +683,8 @@ function Unit:onGenerateTitle()
 end
 
 function Unit:onRemove()
-  if self.leftOutputSource then
-    self.leftOutputSource:onDelete()
-  end
-  if self.rightOutputSource then
-    self.rightOutputSource:onDelete()
+  for _, source in ipairs(self.outputs) do
+    source:onDelete()
   end
 
   self.pUnit:disable()
