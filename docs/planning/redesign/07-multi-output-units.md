@@ -1,6 +1,6 @@
 # Multi-Output Units
 
-**Status:** principles and UI grammar specified. Implementation **deferred** — no v1 unit requires it. Open items on discoverability and exact motion control.
+**Status:** principles and UI grammar specified. Implementation **deferred** — no v1 unit requires it. Picker grammar revised April 2026 — Rolodex stack dropped in favor of context-sensitive ply layout + S3 sub-out cycler (see Local picker section). Discoverability glyph still open in detail; sub-view motion deferred (no v1 unit needs a separate drill).
 
 ## The problem
 
@@ -38,14 +38,32 @@ The main chain view looks identical for single-output and multi-output units. No
 
 Sub-outs are reached **only** via deliberate subscription in the local input picker (scope view). To wire a sub-out somewhere downstream, the user opens the local picker on the consuming chain and finds the sub-out there.
 
-### Local picker — Rolodex stack
+### Local picker — context-sensitive ply layout
 
-The local picker uses a **Rolodex stack with offset visual** — a 2–3px peek of adjacent cards leaks at the edge, signalling depth without clutter (Tufte edge-peek). Two stack behaviors live in the same picker:
+The local picker keeps its existing main-display layout (chain overview + miniscope on the right), but reallocates space when a multi-out unit is focused:
 
-- **Unit-level stack** (top): orders by **LRU / recency**. Most recently used units near the top.
-- **Within-unit sub-out stack** (when a multi-out unit is focused): orders by **author-declared order**, *not* recency. Phase 0°/90°/180°/270° is a semantic sibling relationship — recency-ordering it would scramble that meaning.
+- **Default (single-out focused):** miniscope occupies **3 plies** (126px) on the right edge of the main display. Chain overview takes the remaining ~130px on the left.
+- **Multi-out focused:** miniscope shrinks to **2 plies** (84px). The freed rightmost ply (42px) shows a `[X/Y: label]` indicator for the currently selected sub-out — for example `[2/4: aux]` or `[3/4: cv]`. Chain overview width is unchanged between the two states; only the right-edge ply allocation toggles.
 
-Sub-outs require **meaningful author labels**. Generic "out 1 / out 2" is not acceptable — the Rolodex stack makes the label the only disambiguator.
+The transition is driven by the focused source's metadata — single decision point, two affordances (ply allocation + S3 binding visibility, see below).
+
+### S3 — sub-out cycler
+
+When a multi-out unit is focused, **S3 cycles through the unit's sub-outs** in author-declared order. The `[X/Y: label]` indicator updates in step. The currently focused sub-out is what `enter` selects.
+
+When the focused source is single-out, S3 is unbound (current behavior preserved). No collision with main-chain muscle memory because S3 is currently free real estate in the picker.
+
+### Author labels
+
+Sub-outs require **meaningful author labels**. Generic "out 1 / out 2" is not acceptable — the rightmost-edge indicator shows the label in-place, and "out 1" is uninformative there. Labels are declared by the unit author as Lua-side metadata on the unit (e.g. `self.subOutLabels = {"main", "aux", "cv", "gate"}`).
+
+### Why not Rolodex?
+
+An earlier iteration of this spec called for a Rolodex stack with edge-peek. Rejected for two reasons:
+1. **Space.** The picker has limited real estate, especially in deeply nested chains. A 4–6 card stack would be too large for the available cell budget and not legibly different from a flat list.
+2. **Display vs. selection conflated.** The Rolodex tried to do both discoverability and selection in one mechanism. Edge-indicator + S3 separates them: the indicator always shows the current state, S3 is the dedicated cycle action.
+
+The "current sub-out only" approach is intentionally lossy in the surface (you can't see all sub-outs at once) — but progressive disclosure via S3 is fast and zero-clutter, and the discoverability glyph (below) communicates fan-out count without showing every label.
 
 ### Controls
 
@@ -53,22 +71,18 @@ A multi-out unit's controls live **only at the top level**, macro-style — they
 
 ## Sub-view motion grammar
 
-**Open — direction set, exact mechanics TBD:**
+The local-picker grammar above (S3 cycle + edge indicator) handles sub-out *selection* without entering a separate navigational space. No sub-view "drill" is required for the picker case.
 
-- **Axis-distinct motion:** main chain navigation is horizontal; sub-view enters with a different axis (lift/drop) and different easing. Different kinesthetic trains peripheral awareness — the user can feel which space they're in without looking.
-- **Entry/exit ritual:** long-press, or a dedicated soft key, with a visible commit. Breadcrumb appears: `[unit] · sub 2/3`.
-- **Critical:** the sub-nav control must be *mechanically distinct* from main-chain nav. If they share a control, muscle memory fails mid-set — the worst possible failure mode for this audience.
-
-Exact control assignment is not yet committed.
+For the unit's own focused view (when the user is editing the multi-out unit, not picking it as a source elsewhere), surfacing sub-out topology is still desirable — see Discoverability below. Mechanism not committed; not blocking v1.
 
 ## Discoverability
 
-**Open.** Hiding sub-outs in the local picker creates a discoverability cost — the user must already know a unit has them. Current lean:
+Hiding sub-out details on the picker's edge indicator means the user can see *which* sub-out is currently selected but not at-a-glance how many a unit has, or what they all are. Two complementary affordances:
 
-1. **Micro-indicator glyph** on multi-out units in chain view, showing fan-out count. Peripheral-readable, no interaction required.
+1. **Micro-indicator glyph** on multi-out units in the chain overview, showing fan-out count (e.g. small badge "×4"). Peripheral-readable, no interaction required. Visible always — distinct from the picker's `[X/Y: label]` which only appears when focused.
 2. **Surface sub-out topology in the unit's focused view** (not the chain view), consistent with sub-chain detail depth.
 
-Both are cheap. Probably ship both. Not yet committed.
+Both are cheap. Probably ship both. The chain-overview glyph is the more important of the two — it's the cue that S3 will do something when you focus this unit in the picker.
 
 ## Scope decision for v1
 
