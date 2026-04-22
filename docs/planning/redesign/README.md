@@ -18,6 +18,7 @@ Snapshot of current conclusions across each design endeavor for the standalone E
 | 09 | `09-form-factor-and-panel.md` | Dimensions locked; layout pending scan/trace prep |
 | 10 | `10-controller-section.md` | Fader spec locked; knob count/layout/prefix open |
 | 11 | `11-bom-and-cost.md` | Working estimate, April 2026 |
+| 12 | `12-latency-test-jig.md` | Proposed — RP2040 measurement rig for bring-up phase |
 
 ## Open items at a glance
 
