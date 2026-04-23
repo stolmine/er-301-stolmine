@@ -128,3 +128,51 @@ Open questions (resolve before coding):
 
 Dependencies: multi-output framework is shipped (7d99be1). No C++ ABI work
 expected — all fan-out affordances already live in Lua + LocalChooser.
+
+## Encoder Capture Under UI Saturation
+In certain states the system reaches CPU saturation and encoder input becomes
+effectively unresponsive — encoder movement is still *queued*, but so far
+behind the event loop's schedule that the device is practically
+uninteractable. The user either waits for the backlog to drain (seconds of
+ghost motion) or power-cycles. Worst offenders tend to be complex Lua views,
+heavy redraw paths, and interactions during transitions.
+
+**Root cause observation:** only the audio thread's CPU is tracked. The UI
+thread has no budget accounting, no watchdog, no degradation path. When UI
+work exceeds its frame budget, events pile up unbounded while the render
+loop continues servicing a stale backlog at full fidelity.
+
+**Design investigation required** — this is not a spot fix. Candidate
+approaches, any or all:
+
+- **UI-thread budget instrumentation.** Analogous to `od::extras::Profiler`
+  on the audio side: measure per-frame UI time, expose a readout, and surface
+  saturation events in the log. Can't fix what isn't measured.
+- **Input event aging / coalescing.** If an encoder event is older than some
+  threshold (e.g. 100 ms), drop it or coalesce rapid successive events into
+  one accumulated delta. User gets responsiveness back at the cost of
+  fidelity during overload. Coalescing is probably always-on; aging kicks in
+  under saturation.
+- **Render-skip / frame-drop circuit breaker.** When the UI frame budget is
+  blown for N consecutive frames, degrade: skip non-essential redraws, pause
+  animations, render only the focused region. Restore full fidelity once
+  budget is healthy again. Analogous to how game engines drop graphics
+  fidelity under load to preserve input responsiveness.
+- **Input fast-path that bypasses render.** Sample the encoder and apply its
+  effect to parameter state on a tighter loop than the full UI render. The
+  screen catches up when it can, but the underlying value change lands
+  immediately. Requires careful separation of "what the value is" from "what
+  the screen shows" — currently the two are often coupled in Lua view code.
+- **Priority inversion on event drain.** When the event queue is over a
+  threshold, drain it before rendering anything at all. Prevents the
+  encoder-lag spiral where rendering the stale state delays reading the
+  next event, which delays the render after that, compounding.
+
+The architectural goal is: **under UI saturation, encoder should feel
+sluggish but trackable — not captured.** Movement should always reach the
+underlying parameter value within hundreds of milliseconds even if the
+display is a frame or two behind.
+
+First step before any fix: instrument the UI thread so we can characterize
+*which* states cause saturation and how badly. Without that we're guessing
+about what the circuit breaker should trigger on.

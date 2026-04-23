@@ -20,6 +20,7 @@ Snapshot of current conclusions across each design endeavor for the standalone E
 | 11 | `11-bom-and-cost.md` | Working estimate, April 2026 |
 | 12 | `12-latency-test-jig.md` | Proposed — RP2040 measurement rig for bring-up phase |
 | 13 | `13-stolmine-core-package.md` | Audit — retrofit tiers + new-unit candidates + v1 scope |
+| 14 | `14-multi-output-cpu-cost.md` | CPU cost model — framework overhead, DSP categories, opt-in compute convention |
 
 ## Open items at a glance
 
