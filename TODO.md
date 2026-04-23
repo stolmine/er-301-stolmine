@@ -76,3 +76,55 @@ Outstanding items, none blocking:
   reports it works correctly on hardware despite the known package trig bug,
   but a LUT swap is the documented mitigation for any future multi-out unit
   whose audio path shows the symptom.
+
+## Stolmine Core Package (Multi-Output Core Units)
+Ship a stolmine-branded Core package that replaces vanilla Core as the
+default install on stolmine firmware, and bundle vanilla Core alongside
+(built into the firmware zip but not auto-installed). Users who want the
+original Core behavior or a lower CPU baseline can install vanilla Core
+manually from the package manager. Purpose: bring multi-output capability
+to core units that would naturally benefit from it (filters with
+simultaneous LP/BP/HP outs, envelopes with EOC/inverted companions, clocks
+with pre-divided taps, ladder filters in multi-mode, stereo samplers exposing
+L/R/sum, LFOs as quad-phase, etc.).
+
+Design goals:
+
+- **Stolmine Core installs by default; vanilla Core ships but does not.**
+  The firmware build produces both packages. Stolmine Core is the one the
+  firmware installer activates on a fresh install or upgrade; vanilla Core
+  lives in the package staging area (same place third-party packages do) so
+  the user can opt into it via the package manager if they prefer. Decide
+  the collision story: running both simultaneously means identical unit
+  type IDs exist in both, so stolmine Core probably needs a distinct package
+  ID / namespace (`core2.*` or similar) to let both load without the picker
+  showing duplicates. Alternative: stolmine Core reuses `core.*` IDs and is
+  mutually exclusive with vanilla Core — installer enforces that only one
+  is enabled at a time. Pick one before implementation.
+- **Multi-out where it earns its keep, not everywhere.** Audit candidate
+  units individually — some gain real composability from fan-out (ladder,
+  SVF, env, LFO, clock divider), others don't (gain, sum, mixer). Ship the
+  fan-out on the subset that justifies it.
+- **Opt-in sub-out compute.** CPU inflation is the key tradeoff. Where sub-
+  outs compute into buffers that downstream chains may not read, wire up a
+  connected-check so inactive sub-outs short-circuit. Stay deterministic —
+  no dynamic allocation during audio — but skip the math when the outlet has
+  no consumer. Matches the vanilla pattern for `Outlet::connected()`.
+- **Author convention:** each stolmine-core unit declares `subOutLabels` and
+  respects out-of-range-to-primary fallback so its preset files degrade on
+  vanilla Core if a user swaps packages.
+- **Preset portability:** document whether presets built on one core pack
+  migrate to the other. At minimum, sub-out indices ≥2 snap to primary on
+  vanilla-core load (same story as the existing multi-out framework).
+
+Open questions (resolve before coding):
+
+- Namespace strategy (package ID vs category tag vs suffix-in-name).
+- Which core units get the fan-out treatment in v1 vs later.
+- Whether to fork `mods/core/` in-tree or start fresh under `mods/stolmine-
+  core/` importing the DSP objects by reference.
+- Installer UX — is this default-installed alongside vanilla, or a toggle in
+  the package manager?
+
+Dependencies: multi-output framework is shipped (7d99be1). No C++ ABI work
+expected — all fan-out affordances already live in Lua + LocalChooser.

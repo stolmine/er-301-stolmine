@@ -19,6 +19,7 @@ Snapshot of current conclusions across each design endeavor for the standalone E
 | 10 | `10-controller-section.md` | Fader spec locked; knob count/layout/prefix open |
 | 11 | `11-bom-and-cost.md` | Working estimate, April 2026 |
 | 12 | `12-latency-test-jig.md` | Proposed — RP2040 measurement rig for bring-up phase |
+| 13 | `13-stolmine-core-package.md` | Audit — retrofit tiers + new-unit candidates + v1 scope |
 
 ## Open items at a glance
 
@@ -26,3 +27,4 @@ Snapshot of current conclusions across each design endeavor for the standalone E
 - **Multi-output units:** non-blocking follow-ups in TODO.md — unit-picker fan-out glyph, unit-focused-view sub-out topology, optional stolmine→vanilla preset rewriter (file 07)
 - **Controller:** knob count (4 vs 8), knob layout (1×4 vs 2×4), source-unit prefix (`lc.*` vs `pc.*`), encoder-with-LED-ring decision (file 10)
 - **Panel layout:** awaiting the scan/trace of the original 301 to establish the underlying grid (file 09)
+- **Stolmine Core package:** coexistence namespace vs mutual-exclusion installer, in-tree fork vs reference strategy, opt-in compute scope (file 13)
