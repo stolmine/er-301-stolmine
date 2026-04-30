@@ -24,7 +24,12 @@ local unitOutputNames = {
   ["Out1"] = 0,
   ["Out2"] = 1,
   ["Out3"] = 2,
-  ["Out4"] = 3
+  ["Out4"] = 3,
+  ["Out5"] = 4,
+  ["Out6"] = 5,
+  ["Out7"] = 6,
+  ["Out8"] = 7,
+  ["Out9"] = 8
 }
 
 local function connectUnitOutput(fromObject, fromPortName, pUnit, outputName)
