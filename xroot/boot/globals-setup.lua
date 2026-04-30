@@ -20,17 +20,14 @@ local function connectUnitInput(pUnit, inputName, toObject, toPortName)
   end
 end
 
-local unitOutputNames = {
-  ["Out1"] = 0,
-  ["Out2"] = 1,
-  ["Out3"] = 2,
-  ["Out4"] = 3,
-  ["Out5"] = 4,
-  ["Out6"] = 5,
-  ["Out7"] = 6,
-  ["Out8"] = 7,
-  ["Out9"] = 8
-}
+-- Generated at module load. Architectural ceiling is 99 — that's the
+-- limit of the multi-output picker's X/Y indicator readout (renders
+-- N/M with two digits per side). Any unit declaring more sub-outs
+-- than that won't be navigable in the UI.
+local unitOutputNames = {}
+for i = 1, 99 do
+  unitOutputNames["Out" .. i] = i - 1
+end
 
 local function connectUnitOutput(fromObject, fromPortName, pUnit, outputName)
   local channel = unitOutputNames[outputName]
