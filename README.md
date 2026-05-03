@@ -1,17 +1,19 @@
 # ER-301 Sound Computer (stolmine fork)
 
-This is a fork of the [ER-301](https://github.com/odevices/er-301) firmware that adds a **TXo I2C master output** mod, enabling the ER-301 to send CV and gate data over I2C to Monome TXo expanders while maintaining simultaneous Teletype slave communication.
+This is a fork of the [ER-301](https://github.com/odevices/er-301) firmware that adds a **TXo I2C master output** mod, enabling the ER-301 to send CV and gate data over I2C to TXo output expanders. This work would not be possible without the generous open-sourcing of the original firmware by Orthogonal Devices. Thank you, Brian!
 
 ## Important: I2C hardware requirement
 
 > **This firmware does not allow running the ER-301 and TXo in isolation.** You will need a leader (Teletype, Crow, Michigan Synthworks Faderbank), or a "dumb" module with pull-up resistors included: TXb, or tt-busboard-jr.
+
+> **You must choose between leading and following on i2c, attempting to do both at once has been shown to cause issues, including crashes.**
 
 ## What's different from upstream
 
 * **TXo mod** — interrupt-driven I2C master TX with gain control, V/Oct mode, and simultaneous Teletype slave RX coexistence
 * **Vanilla package compatibility** — SWIG pinned to 4.2.1 with runtime version bridge so community packages compiled against upstream firmware load and share types correctly
 * **Favorites** — shift-toggle edit mode in the unit picker to tag/untag favorites, displayed as their own category above Recents
-* **Screensavers** — snow, rain, forest, pipes, maze, perlin noise, and voronoi screensavers with automatic cycle mode
+* **Screensavers** — snow, rain, forest, maze, perlin noise, and voronoi screensavers with automatic cycle mode
 * **Readout name table** — mapped display text for Readout widgets via `addName()`/`clearNames()` API
 * **Master output scale** — percentage-based output level control (100/75/50/25/10%) in admin settings
 * **Package diagnostics** — detailed error reporting for archive and ELF load failures (unresolved symbols, corrupt archives, header mismatches)
