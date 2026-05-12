@@ -44,9 +44,11 @@ function ChannelGroup:init(left, right)
   self.chain = chain
   self.editContext = Context(chain.title .. " edit", chain)
   self.scopeContext = Context(chain.title .. " scope", chain.scopeView)
+  self.sequencerContext = Context(chain.title .. " sequencer", chain.sequencerView)
   self.holdContext = Context(chain.title .. " hold", chain.pinView)
   self.activeContext = self.editContext
   self.mode = "unknown"
+  self.scopeSubView = "scope"   -- "scope" | "sequencer" (sub-views of scope mode)
   self.left = left
   self.right = right
 
@@ -88,12 +90,34 @@ function ChannelGroup:setMode(mode)
     self:setActiveContext(self.editContext)
   elseif mode == "scope" then
     self.chain:enterScopeView()
-    self:setActiveContext(self.scopeContext)
+    -- Honor current scope sub-view: scope (default) or sequencer.
+    if self.scopeSubView == "sequencer" then
+      self:setActiveContext(self.sequencerContext)
+    else
+      self:setActiveContext(self.scopeContext)
+    end
   elseif mode == "hold" then
     self.chain:enterHoldMode()
     self:setActiveContext(self.holdContext)
   end
   self.mode = mode
+end
+
+-- Toggle between the scope and sequencer sub-views inside scope mode.
+-- Called from ScopeView and Sequencer.GridView on shift+ENTER.
+-- No-op when not currently in scope mode (callers shouldn't reach here
+-- otherwise, since both views only exist as children of scope contexts).
+function ChannelGroup:toggleSequencerSubView()
+  if self.mode ~= "scope" then
+    return
+  end
+  if self.scopeSubView == "sequencer" then
+    self.scopeSubView = "scope"
+    self:setActiveContext(self.scopeContext)
+  else
+    self.scopeSubView = "sequencer"
+    self:setActiveContext(self.sequencerContext)
+  end
 end
 
 function ChannelGroup:mute()
@@ -145,6 +169,7 @@ function ChannelGroup:destroy()
   self.chain:releaseResources()
   self.editContext:destroy()
   self.scopeContext:destroy()
+  self.sequencerContext:destroy()
   self.holdContext:destroy()
 end
 

@@ -2,6 +2,7 @@ local Class = require "Base.Class"
 local Chain = require "Chain"
 local ScopeView = require "Chain.ScopeView"
 local PinView = require "PinView"
+local SequencerView = require "Sequencer.GridView"
 
 local Root = Class {}
 Root:include(Chain)
@@ -12,6 +13,7 @@ function Root:init(args)
   self.isRoot = true
   self.scopeView = ScopeView(self)
   self.pinView = PinView(self)
+  self.sequencerView = SequencerView(self)
 end
 
 function Root:getRootChain()

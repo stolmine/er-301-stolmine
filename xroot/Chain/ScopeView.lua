@@ -127,7 +127,14 @@ function ScopeView:mainReleased(i, shifted)
   return true
 end
 
-function ScopeView:enterReleased()
+function ScopeView:enterReleased(shifted)
+  if shifted then
+    -- shift+ENTER enters the sequencer sub-view per locked decision in
+    -- docs/planning/sequencer-implementation-plan.md ("Access paths").
+    local Channels = require "Channels"
+    Channels.toggleSequencerSubView()
+    return true
+  end
   if self.ptr:down() then
     self:onSelectionChanged()
   end
