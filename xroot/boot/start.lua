@@ -46,6 +46,8 @@ end
 local function start()
   dofile(app.roots.x .. "/boot/globals-setup.lua")
   dofile(app.roots.x .. "/boot/app-setup.lua")
+  -- Step-1 sequencer bench harness (TODO: remove once Step 1 ships)
+  dofile(app.roots.x .. "/sandbox/sequencer_bench.lua")
   -- local Debug = require "Debug"
   -- Debug.traceRequires()
   app.logInfo("Entering Application")

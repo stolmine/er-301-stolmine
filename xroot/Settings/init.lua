@@ -357,6 +357,21 @@ local defaults = {
       "0.3s",
       "0.5s"
     }
+  },
+  bpm = {
+    category = "Sequencer",
+    description = "Global BPM:",
+    value = "120",
+    choices = {
+      "60", "70", "80", "90", "100", "110", "120",
+      "130", "140", "150", "160", "180", "200"
+    },
+    onSet = function(value)
+      local n = tonumber(value)
+      if n then
+        app.AudioThread.getSequencerTask():setBpm(n)
+      end
+    end
   }
 }
 

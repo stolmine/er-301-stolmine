@@ -20,6 +20,7 @@ namespace od
     TaskScheduler tasks;
     InputTask *inputTask = 0;
     OutputTask *outputTask = 0;
+    SequencerTask *sequencerTask = 0;
 
     ConnectionQueue *conQ = 0;
 
@@ -45,6 +46,11 @@ namespace od
     // higher priority numbers are processed first
     local->inputTask = new InputTask();
     addTask(local->inputTask, INT_MAX - 1);
+
+    // Sequencer runs after InputTask, before any channel chains, so its
+    // 24 source buffers (seq1..4 x cv/gate/step) are populated when chains read them.
+    local->sequencerTask = new SequencerTask();
+    addTask(local->sequencerTask, INT_MAX - 2);
 
     local->outputTask = new OutputTask();
     addTask(local->outputTask, INT_MIN + 2);
@@ -88,6 +94,11 @@ namespace od
   OutputTask *AudioThread::getOutputTask()
   {
     return local->outputTask;
+  }
+
+  SequencerTask *AudioThread::getSequencerTask()
+  {
+    return local->sequencerTask;
   }
 
   FifoProbe *AudioThread::getFifoProbe()
