@@ -10,6 +10,15 @@ listed as "deferred to implementation phase" are now resolved; see the **Locked
 decisions** section below. New ambiguities surfaced during the lock-in pass are
 captured in **Deferred ambiguities** (intentionally not blocking engine work).
 
+**Progress (as of 2026-05-12):** Steps 1, 2, 4, 8 done. Step 5 partially shipped
+(L1 inline edit; L2 modal still pending). Steps 3, 6, 7, 9 not yet started.
+Branch `feature/sequencer` carries the work; commits run from `ba75ad7` (engine)
+through `ede9963` (cursor box + L1 edit). The sequencer is **user-authorable
+end-to-end on the device for L1 patterns**: wire any `seqN.*` source into a
+chain, `shift+ENTER` from scope, navigate to a cell, ENTER to edit, encoder to
+nudge, S1 to start. L2 grammar authoring + persistence + selection still live
+behind their respective step numbers below.
+
 ---
 
 ## Architectural shift from the spec — sequencer is *not* a chain unit
@@ -422,20 +431,21 @@ Cell content as compact `pred:action` notation (e.g., `%4:B+1`, `?60:B!`, `>0.5:
 
 ## Effort estimate
 
-**~8.3 weeks** of focused development for v1, broken down:
+**~8.3 weeks** of focused development for v1. Status snapshot 2026-05-12
+(approximately ~4 of 8.3 weeks shipped):
 
-| Piece | Estimate |
-|---|---|
-| C++ engine | 2 weeks |
-| Picker integration | 0.5 |
-| Patch persistence | 0.5 |
-| Grid view | 1.5 |
-| Cell editor modal | 1.5 |
-| Sub-display routing | 0.5 |
-| Selection + clipboard | 1.0 |
-| Access path (scope-mode shift+ENTER only) | 0.3 |
-| Polish + bench | 1.0 |
-| **Total** | **~8.3** |
+| Piece | Estimate | Status |
+|---|---|---|
+| C++ engine | 2 weeks | ✅ shipped (`ba75ad7`) |
+| Picker integration | 0.5 | ✅ shipped (`ba75ad7`) |
+| Patch persistence | 0.5 | ⏳ pending |
+| Grid view | 1.5 | ✅ shipped (`f8be7a7` … `ede9963`) |
+| Cell editor modal | 1.5 | 🟡 L1 inline done (`ede9963`); L2 modal remaining (~1.0 week) |
+| Sub-display routing | 0.5 | ⏳ pending |
+| Selection + clipboard | 1.0 | ⏳ pending |
+| Access path (scope-mode shift+ENTER only) | 0.3 | ✅ shipped (`ade1f44`) |
+| Polish + bench | 1.0 | ⏳ pending |
+| **Total** | **~8.3** | **~4.3 shipped, ~4.0 remaining** |
 
 This is **focused**-time. Calendar time depends on context-switching with other
 work; realistic delivery is **3-4 months**.
@@ -523,34 +533,54 @@ implementation phase (step 5).
 
 ## Implementation sequence (concrete order)
 
-1. **Engine first, no UI** — write the C++ slot data structure, predicate eval,
-   action applier, tick scheduler, source-buffer emission. Test via direct
-   register-poke from emu shell (Lua test harness). Prove the audio output is
-   correct in a chain context. **2 weeks.**
+1. ✅ **Engine first, no UI** — C++ slot data structure, predicate eval, action
+   applier, tick scheduler, source-buffer emission. Verified via Lua bench
+   harness (`xroot/sandbox/sequencer_bench.lua`): static-16-step-cv,
+   polymetric-5-and-7, l2-destructive-mod2-add1 all PASS on every boot.
+   Shipped in `ba75ad7`. **Step 1 done.**
 
-2. **External source registration + picker integration** — surface `seq*.*` in
-   the input picker. Verify they route to chain destinations. **0.5 week.**
+2. ✅ **External source registration + picker integration** — 24 `seq*` sources
+   (4 slots × 6 outputs) registered via `xroot/boot/app-setup.lua` and grouped
+   in `xroot/Source/ExternalChooser/init.lua` as `seq1`..`seq4`. Wireable
+   from any chain's input picker. Shipped in `ba75ad7`. **Step 2 done.**
 
-3. **Patch persistence** — round-trip the slot state in quicksave. Catch any
-   serialization edge cases early. **0.5 week.**
+3. ⏳ **Patch persistence** — round-trip the slot state in quicksave. Catch any
+   serialization edge cases early. **0.5 week.** _Not started._
 
-4. **Read-only grid view** — render L1 + L2 with playhead but no editing. Iterate
-   the visual until it reads cleanly on the 256×64 main. **1 week.**
+4. ✅ **Read-only grid view** — `xroot/Sequencer/GridView.lua`. Six column
+   headers ("name:NN" with live playhead row counter), 6-row × 6-column cell
+   grid (font 9, 9 px pitch), 2-digit row ruler at the right edge.
+   Brightness-encoded state (out-of-loop / in-loop / focus / playhead /
+   focus+playhead modelled on teletype's pattern_mode.c). Cursor box outlines
+   `(focusHeadRow, columnCursor)`. Scope-mode `shift+ENTER` is the single
+   access path. Encoder threshold matches `Env.EncoderThreshold.Default`.
+   Shipped across `f8be7a7` → `ede9963`. **Step 4 done.**
 
-5. **Cell editor modal** — the meat of the UI work. 6-slot Keyboard.Slot fork.
-   Paper-mockup the type-aware operand display first; then code. **2 weeks.**
+5. ⏳ **Cell editor — partial.** L1 inline edit shipped in `ede9963`: ENTER
+   toggles an "editingL1" state, encoder nudges the cell value at
+   `(focusHeadRow, columnCursor)` by per-column step, dial button cycles
+   fine/coarse, shift selects the super variant, shift+HOME zeros the cell,
+   ENTER while editing commits + auto-advances (Habitat-fluid). **L2 modal
+   not yet built** (the 6-slot Keyboard.Slot fork for predicate:action
+   authoring per the spec). Budget remaining: ~1.5 weeks for L2 modal.
 
-6. **Sub-display state machines + mark-start/end** — wire up the 3-ply layout
-   logic and per-column loop-marking cycle. **0.5 week.**
+6. ⏳ **Sub-display state machines + mark-start/end** — wire up the 3-ply layout
+   logic and per-column loop-marking cycle. **0.5 week.** _Not started._
 
-7. **Selection + clipboard** — shift+scroll selection, COPY/CUT/CLEAR ops,
-   paste at focus head. **1 week.**
+7. ⏳ **Selection + clipboard** — shift+scroll selection, COPY/CUT/CLEAR ops,
+   paste at focus head. **1 week.** _Not started._ shift+encoder in the grid
+   view is currently a no-op stub waiting for this step.
 
-8. **Access path** — `shift+ENTER` toggle in scope mode, single path only.
-   **0.3 week.**
+8. ✅ **Access path** — `shift+ENTER` toggle in scope mode, single path.
+   Routed via `Channels.toggleSequencerSubView` from
+   `xroot/Chain/ScopeView.lua::commitReleased` (shift+ENTER dispatches as
+   commitReleased per `xroot/Application.lua:300-305`). Shipped in `ade1f44`.
+   **Step 8 done.**
 
-9. **Polish + listen test** — under-load consistency, tempo sync, RNG reproducibility,
-   patch quicksave round-trips. **1 week.**
+9. ⏳ **Polish + listen test** — under-load consistency, tempo sync, RNG
+   reproducibility, patch quicksave round-trips. **1 week.** _Not started._
+   Sample-accurate tick scheduling, gate-row source disambiguation, and the
+   gate-len/gate-amp/step-len output semantics also belong here.
 
 ---
 
