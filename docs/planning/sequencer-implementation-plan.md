@@ -5,9 +5,10 @@ implementation-level decisions and UI refinements made on top of the spec. Where
 doc and the PDF disagree, this doc supersedes — the PDF is a snapshot; this is the
 working plan.
 
-**Branch policy:** sequencer feature is firmware-universal but **prototyped on
-`rpidev`**, where dev-rig + portable variant work lives. Migrates to `develop` once
-the v1 lands and stabilizes.
+**Status:** v1 scope locked 2026-05-12 on `develop`. The 10 questions previously
+listed as "deferred to implementation phase" are now resolved; see the **Locked
+decisions** section below. New ambiguities surfaced during the lock-in pass are
+captured in **Deferred ambiguities** (intentionally not blocking engine work).
 
 ---
 
@@ -113,9 +114,10 @@ state A: no start, no end
 
 state B: start = N, no end (region in-progress)
   ply label = "mark end"
-  press → set end = focus_head_row (must be >= N or wraps), transition to C
+  press → set end = focus_head_row, transition to C
+         loop region is [min(N, end), max(N, end)] — direction-tolerant
 
-state C: start = N, end = M (region active — steady state)
+state C: start = M1, end = M2 (region active — steady state)
   ply label = "mark start"
   press → set new start = focus_head_row, transition to B (end invalidated)
 ```
@@ -123,6 +125,13 @@ state C: start = N, end = M (region active — steady state)
 Mutex per column: only one start, only one end at any time. Pressing "mark
 start" while a region exists redefines the start and reopens loop for re-marking
 the end.
+
+**Direction tolerance:** the loop region always normalizes to
+`[min(marker1, marker2), max(marker1, marker2)]`. The labels "start" and "end"
+become "first marker" and "second marker"; the order in which the user presses
+them does not affect the resulting loop region. 1-step loops
+(`marker1 == marker2`) are valid and cause the sequencer to re-fire the same
+cell on every tick (held-CV / single-step drone behaviors).
 
 ---
 
@@ -232,33 +241,35 @@ Selection mechanic:
 
 ## Access paths
 
-Sequencer takeover is an **alternate view of scope mode**. The 3-position physical
-mode toggle is unchanged in behavior; scope mode internally has two sub-views
-(`view = "scope" | "sequencer"`).
+Sequencer takeover is an **alternate view of scope mode**. The 3-position
+physical mode toggle is unchanged in behavior; scope mode internally has two
+sub-views (`view = "scope" | "sequencer"`). **`shift+ENTER` from scope mode
+is the only access path in v1.**
 
-**Entry / exit:** `shift + ENTER` from scope mode toggles between scope's default
-view and the sequencer takeover. **Exit binding is the same as entry** — single
-gesture to muscle-memorize, reversible.
+**Entry / exit:** `shift + ENTER` from scope mode toggles between scope's
+default view and the sequencer takeover. **Exit binding is the same as entry.**
+Single gesture to muscle-memorize, reversible.
 
 **Persistence across mode-toggle changes:** the takeover survives mode-toggle
-movement. Toggle to edit, work in chain editor, toggle back to scope — sequencer
-takeover is still showing. Only `shift+ENTER` returns scope mode to the scope view.
+movement. Toggle to edit, work in chain editor, toggle back to scope. The
+sequencer takeover is still showing. Only `shift+ENTER` returns scope mode to
+the scope view.
 
-**Cell-editor modal interaction with shift+ENTER:** modal absorbs it. Inside the
-cell editor, `shift+ENTER` commits the cell and exits to the grid view (does NOT
-exit takeover). User must press `shift+ENTER` again from grid view to exit
-takeover entirely. This protects against accidental mid-edit exits.
+**Cell-editor modal interaction with shift+ENTER:** modal absorbs it. Inside
+the cell editor, `shift+ENTER` commits the cell and exits to the grid view
+(does NOT exit takeover). User must press `shift+ENTER` again from grid view
+to exit takeover entirely. This protects against accidental mid-edit exits.
 
-**Other entry paths (secondary):**
-- **Picker click**: clicking a `seq*.cv1` source in the input picker enters that
-  slot's takeover. Contextual — user is already in a wiring context.
-- **PinView pin**: a sequencer slot can be pinned in HoldMode (via PinView's
-  existing pin-set machinery); clicking the pin enters that slot's takeover. Best
-  for live performance.
-- **Admin menu**: fallback. Always works.
+**Excluded from v1 (decided 2026-05-12):**
 
-All entry paths converge to the same takeover state. Exit is `shift+ENTER`
-regardless of how user entered.
+- **Picker click dispatch.** Clicking a `seq*.cv1` source wires it as an input
+  (normal external-source semantics) but does NOT enter the takeover. The
+  sequencer UI is reachable only from scope mode.
+- **PinView seq-pin.** No new `SeqPin.lua` control type. Sequencer slots are
+  not pinnable in HoldMode for v1.
+- **Admin menu entry.** Would confuse the conceptual location: sequencer state
+  is patch-level (lives under user mode > scope, where the takeover renders),
+  while admin scope is reserved for system / patch-independent settings.
 
 ---
 
@@ -333,7 +344,9 @@ Cell content as compact `pred:action` notation (e.g., `%4:B+1`, `?60:B!`, `>0.5:
 
 - `xroot/Source/ExternalChooser/init.lua` — add `addSourceGroup("seq", externals["seq"])`
 - C++ registration of 24 external sources (4 slots × 6 outputs)
-- Picker click dispatch: clicking a `seq*` source enters takeover for that slot
+- `seq*` sources behave as standard external sources — wireable from any chain
+  destination's input picker, no special click dispatch. Takeover is reached
+  via scope-mode `shift+ENTER` (see Access paths).
 
 ### Patch persistence (~0.5 week)
 
@@ -367,13 +380,11 @@ Cell content as compact `pred:action` notation (e.g., `%4:B+1`, `?60:B!`, `>0.5:
 - Single-slot clipboard (in-memory, not persisted)
 - COPY / CUT / CLEAR / PASTE operations with type/layer checks
 
-### Access paths (~1 week total)
+### Access path (~0.3 week)
 
 - `shift+ENTER` toggle in scope mode (`xroot/Channels/Group.lua` scopeContext
-  alt-view router) — primary
-- Picker click dispatch — secondary
-- PinView seq pin (`xroot/PinView/SeqPin.lua` new control type) — tertiary
-- Admin menu entry — fallback
+  alt-view router). Single path; see Access Paths section for the rationale
+  on excluded paths.
 
 ### Polish + bench (~1 week)
 
@@ -387,7 +398,7 @@ Cell content as compact `pred:action` notation (e.g., `%4:B+1`, `?60:B!`, `>0.5:
 
 ## Effort estimate
 
-**~9 weeks** of focused development for v1, broken down:
+**~8.3 weeks** of focused development for v1, broken down:
 
 | Piece | Estimate |
 |---|---|
@@ -398,42 +409,91 @@ Cell content as compact `pred:action` notation (e.g., `%4:B+1`, `?60:B!`, `>0.5:
 | Cell editor modal | 1.5 |
 | Sub-display routing | 0.5 |
 | Selection + clipboard | 1.0 |
-| Access paths (entry + exit) | 1.0 |
+| Access path (scope-mode shift+ENTER only) | 0.3 |
 | Polish + bench | 1.0 |
-| **Total** | **~9.0** |
+| **Total** | **~8.3** |
 
 This is **focused**-time. Calendar time depends on context-switching with other
 work; realistic delivery is **3-4 months**.
 
 ---
 
-## Open questions deferred to implementation phase
+## Locked decisions (2026-05-12)
 
-These don't block starting; they get resolved during paper-mockup and bench
-testing:
+The 10 questions previously listed as "deferred to implementation phase" are
+now settled. Engine and UI code should reference these directly.
 
-1. **Loop minimum size**: is `mark_start = mark_end` (1-step loop) valid? Or
-   minimum 2-step?
-2. **Loop wraparound semantics**: if `start > end`, does the column wrap, or is
-   that rejected?
-3. **L1 fill range bounded by**: column loop bounds, or column total length?
-4. **Tempo control source**: admin menu? MIDI clock? External clock-rate input?
-   Per-slot or global? (Spec says "set elsewhere" — needs a concrete decision.)
-5. **External clock-rate granularity**: master tick = step boundary, but should
-   external clock advance step-by-step or sub-step?
-6. **PinView seq-pin layout**: how much info fits in the pin's allocated real
-   estate? Scrolling per-pin?
-7. **L2 cell rendering when notation overflows ply width**: truncate with `…`?
-   Scroll on cursor? Drop minor info?
-8. **Multi-instance picker disambiguation**: when two units' inlets are wired
-   to `seq1.cv1`, the picker shows the same source. Any visual indication of
-   "in use" status? Probably not needed; same as IN1 shared by multiple
-   destinations.
-9. **Default predicate / action slot values on cell creation**: `%2 : B!` as
-   "every 2 passes, fire column B's gate" is a reasonable starter template.
-   Pick one for first-time-empty-cell-edit experience.
-10. **Tempo display**: surface current tempo somewhere always-visible, or only
-    in admin / cell editor?
+1. **Loop minimum size.** 1-step loops are valid (`marker1 == marker2`). The
+   sequencer re-fires the same cell every tick, supporting held-CV and
+   single-step drone use cases.
+
+2. **Loop direction tolerance.** Loops normalize to
+   `[min(marker1, marker2), max(marker1, marker2)]`. The labels "start" and
+   "end" become "first marker" and "second marker"; press order does not
+   affect the resulting region. See the "Mark-start / mark-end state
+   machine" section.
+
+3. **Selection range.** `shift + encoder` defines a multi-cell selection
+   (not a fill operation). Selection is bounded by column total length and
+   ignores the loop region. All cell ops (COPY, CUT, CLEAR, fill-with-value)
+   act on the selection.
+
+4. **Tempo source.** Single global internal BPM, admin-set, applies to all
+   4 slots. Engine runs at **4 PPQN** (1/16-note base tick). External
+   clock-in is explicitly deferred to v2; v1 keeps slots output-only (no
+   per-slot clock input).
+
+5. **Clock granularity.** N/A for v1 (no external clock). Internal master
+   tick = 1/16 note. Triplets and 1/32 are not supported in v1; would
+   require bumping PPQN.
+
+6. **PinView seq-pin.** Dropped from v1 (see Access paths > Excluded).
+
+7. **L2 cell overflow rendering.** Truncate with `…` in grid view. Full
+   content always visible in the cell-editor modal. Revisit during bench
+   testing if real cells routinely overflow ply width (~42 px).
+
+8. **Multi-instance picker indication.** None. `seq*` sources behave like
+   IN1 / G1 / OUTx (shareable, no per-source "in use" badge).
+
+9. **Default L2 cell template.** Empty. All 6 slots render `—` on cell
+   creation; user picks predicate type first, then operands, then action.
+
+10. **BPM display.** Always-visible header line within the sequencer
+    takeover (small text at top of main display showing current BPM).
+
+---
+
+## Deferred ambiguities (surfaced 2026-05-12)
+
+These were noticed during the v1 lock-in pass. None block engine work
+(implementation sequence step 1). All converge during the cell-editor
+implementation phase (step 5).
+
+- **Predicate-symbol disambiguation.** The M1 predicate list under
+  "Cell editor" contains three `=` entries (bare, `=` value-comp,
+  `=` changed-this-tick). The third is a detector predicate, not a
+  comparator. Cell-editor SlidingList content needs unique symbols per
+  predicate type; reconcile when authoring M1.
+
+- **Action-symbol disambiguation.** The M4 action list contains two `-`
+  entries (subtract vs. mute) and `*` is overloaded between multiply and
+  jump-global (`*n`). Possible resolutions: `M` for mute, `J` or `↺`
+  for jump-global; reconcile when authoring M4.
+
+- **Natural-language cell descriptions.** Sub-display layout for the cell
+  editor shows `NL desc` (e.g. "every 4 passes, add 1 to B"). Source
+  unspecified: hand-authored ~100+ strings (10+ predicates × 11+ actions),
+  or template-generated from a grammar table? Template-generation is the
+  default unless a hand-authored variant proves clearer in mockup.
+
+- **StepListGraphic origin.** Plan cites
+  `er-301-habitat/mods/spreadsheet/StepListGraphic.h` as the visual idiom
+  to fork for the grid view. Habitat is a separate repo. Options: mirror
+  the file into stolmine, build a compatible widget fresh in
+  `xroot/Sequencer/`, or promote StepListGraphic into the firmware proper.
+  Engine work proceeds either way; decide before grid-view work
+  (implementation sequence step 4).
 
 ---
 
@@ -462,8 +522,8 @@ testing:
 7. **Selection + clipboard** — shift+scroll selection, COPY/CUT/CLEAR ops,
    paste at focus head. **1 week.**
 
-8. **Access paths** — `shift+ENTER` in scope, picker click dispatch, PinView pin,
-   admin menu. **1 week.**
+8. **Access path** — `shift+ENTER` toggle in scope mode, single path only.
+   **0.3 week.**
 
 9. **Polish + listen test** — under-load consistency, tempo sync, RNG reproducibility,
    patch quicksave round-trips. **1 week.**
@@ -497,9 +557,13 @@ runtime behavior:
 ## Cross-references
 
 - `sequencer-spec.pdf` — original architectural baseline (v1 spec)
-- `portable-hardware-spec.pdf` — portable variant where this also runs eventually
 - `xroot/Source/ExternalChooser/init.lua` — picker integration target
 - `xroot/Keyboard/Slot.lua` — cell editor pattern to fork
-- `er-301-habitat/mods/spreadsheet/StepListGraphic.h` — visual idiom to fork for grid
+- `er-301-habitat/mods/spreadsheet/StepListGraphic.h` — visual idiom to fork
+  for grid (origin question: see Deferred ambiguities)
 - `xroot/Channels/Group.lua` — scope-mode alt-view integration target
-- `xroot/PinView/` — sequencer pin target (secondary access)
+
+Earlier draft also referenced `portable-hardware-spec.pdf` (portable variant
+hardware) and `xroot/PinView/` (PinView seq-pin). Both are out of v1 scope:
+the portable spec lives on `rpidev` (not pulled to develop), and the PinView
+pin is explicitly excluded per the Access paths section.
