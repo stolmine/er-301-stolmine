@@ -149,14 +149,12 @@ function GridView:subReleased(i, shifted)
   return false
 end
 
--- shift+ENTER: return to the standard scope sub-view.
-function GridView:enterReleased(shifted)
-  if shifted then
-    local Channels = require "Channels"
-    Channels.toggleSequencerSubView()
-    return true
-  end
-  return false
+-- shift+ENTER dispatches as commitReleased via Application.lua. Returns
+-- to the standard scope sub-view.
+function GridView:commitReleased()
+  local Channels = require "Channels"
+  Channels.toggleSequencerSubView()
+  return true
 end
 
 -- Eat upReleased / cancelReleased so they don't escape the takeover.

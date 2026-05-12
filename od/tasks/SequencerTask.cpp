@@ -65,7 +65,7 @@ namespace od {
     sBpm = bpm;
   }
 
-  float SequencerTask::getBpm()
+  float SequencerTask::getBpm() const
   {
     return sBpm;
   }

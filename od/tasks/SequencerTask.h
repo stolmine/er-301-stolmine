@@ -62,8 +62,13 @@ namespace od {
     // decision #4). Set from Lua admin onSet callback; read on audio
     // thread in process(). Worst case is a brief stale read which is
     // musically harmless.
-    static void  setBpm(float bpm);
-    static float getBpm();
+    //
+    // Implemented as instance methods (not static) so SWIG exposes them
+    // on the Lua-side wrapper directly via `seqTask:setBpm(n)` syntax.
+    // Backed by a static field since there's exactly one SequencerTask
+    // anyway.
+    void  setBpm(float bpm);
+    float getBpm() const;
 
     // Bench-harness proxy API. Lua passes integers and floats only;
     // Predicate / Action structs are not SWIG-exposed for v0.1.
