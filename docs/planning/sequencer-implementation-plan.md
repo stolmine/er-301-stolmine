@@ -73,16 +73,22 @@ These are explicitly removed for v1:
 
 ## Two-axis navigation
 
-**Focus-head row** — single, shared across all 6 plies. Plain encoder advances /
-retreats the focus head universally; every ply moves in sync. Visualized as
-**full-row background highlight** across all plies (e.g. `GRAY5` fb.fill).
+**Focus-head row** — single, shared across all 6 plies. The ER-301 has
+**one encoder**; it is dedicated to focus-head navigation in the
+sequencer takeover. Plain encoder advances / retreats the focus head
+universally; every ply moves in sync. Visualized as **full-row
+background highlight** across all plies (e.g. `GRAY5` fb.fill).
 
-**Column cursor** — which ply is "active." Sub encoder navigates between plies, OR
-direct jump via M1-M6 softkeys (M1 = ply 1, ..., M6 = ply 6). Cursor's column
-is the target of cell-edit, mark-start/end, and clear actions.
+**Column cursor** — which ply is "active." Direct jump via M1-M6
+softkeys is the **only** column-movement input (M1 = ply 1, ..., M6 =
+ply 6). There is no sub encoder; an earlier revision of this doc
+mentioned one, but the hardware does not provide a second rotary.
+Cursor's column is the target of cell-edit, mark-start/end, and clear
+actions.
 
-The two cursors are independent. Focus head defines the row; column cursor defines
-the ply.
+The two cursors are independent. Focus head defines the row; column
+cursor defines the ply. Authoring intent (edit / mark / clear) acts on
+the cell at `(focus_head_row, column_cursor)`.
 
 ---
 

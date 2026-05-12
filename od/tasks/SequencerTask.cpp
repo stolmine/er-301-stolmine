@@ -149,6 +149,24 @@ namespace od {
     return mSlots[clampSlot(slot)].l1Value(col, row);
   }
 
+  int SequencerTask::marker1(int slot, int col) const
+  {
+    if (col < 0 || col >= sequencer::kNumColumns) return 0;
+    return mSlots[clampSlot(slot)].columns[col].marker1;
+  }
+
+  int SequencerTask::marker2(int slot, int col) const
+  {
+    if (col < 0 || col >= sequencer::kNumColumns) return 0;
+    return mSlots[clampSlot(slot)].columns[col].marker2;
+  }
+
+  int SequencerTask::columnLength(int slot, int col) const
+  {
+    if (col < 0 || col >= sequencer::kNumColumns) return 0;
+    return mSlots[clampSlot(slot)].columns[col].length;
+  }
+
   void SequencerTask::tickOnce(int slot)
   {
     mSlots[clampSlot(slot)].tickOnce();

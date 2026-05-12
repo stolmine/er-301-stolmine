@@ -90,6 +90,11 @@ namespace od {
     int  playhead(int slot, int col) const;
     float l1Value(int slot, int col, int row) const;
 
+    // Marker / length introspection for UI rendering (loop-region dim, etc.).
+    int marker1(int slot, int col) const;
+    int marker2(int slot, int col) const;
+    int columnLength(int slot, int col) const;
+
     // Bench-only synchronous tick (do not call on running slots).
     void tickOnce(int slot);
 
