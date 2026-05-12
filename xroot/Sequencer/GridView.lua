@@ -100,12 +100,32 @@ function GridView:init(chain)
     self.rulerLabels[r] = lbl
   end
 
+  -- Active-cell cursor box. Outlines the cell at
+  -- (focusHeadRow, columnCursor). Position updates in refresh().
+  --
+  -- Anchor math: an app.Label with the default margin (4 px) has a
+  -- bounding box 8 px taller than the rendered text. setPosition(x, y)
+  -- sets the BOTTOM of that bounding box, NOT the bottom of the glyph.
+  -- The text glyph itself sits centered inside the bounding box, so
+  -- its bottom is at y+4 and its top at y+4+textHeight-1.
+  --
+  -- Cursor box wraps the rendered text glyph with ~1 px buffer top
+  -- and bottom. Empirically tuned: mBottom = labelY + 3, mHeight = 10.
+  self.cursorBox = app.Graphic(0, 0, kColPly, 10)
+  self.cursorBox:setBorder(1)
+  self.cursorBox:setBorderColor(app.GRAY10)
+  self:addMainGraphic(self.cursorBox)
+
   -- ---- navigation state ----
   -- focusHeadRow: shared "global scroll" row, encoder-driven.
   -- columnCursor: which column is active, 0..5, M1-M6-driven.
+  -- editingL1: when true, the encoder nudges the cell value at
+  --            (focusHeadRow, columnCursor) instead of scrolling.
   self.focusHeadRow = 0
   self.columnCursor = 0
   self.encoderAccum = 0  -- accumulates ticks until kEncoderThreshold is reached
+  self.editingL1    = false
+  self.editStepMode = "fine"  -- "fine" or "coarse"; toggled via dial button
 
   -- ---- sub display: slot label + transport state + softkeys ----
 
@@ -123,6 +143,13 @@ function GridView:init(chain)
   self.bpmLabel:setPosition(2, app.GRID4_LINE3)
   self.bpmLabel:setJustification(app.justifyLeft)
   self:addSubGraphic(self.bpmLabel)
+
+  -- Edit-step indicator (FINE / COARSE / SUPER FINE / SUPER COARSE).
+  -- Blank when not editing.
+  self.editStepLabel = app.Label("", kFontSub)
+  self.editStepLabel:setPosition(60, app.GRID4_LINE2)
+  self.editStepLabel:setJustification(app.justifyLeft)
+  self:addSubGraphic(self.editStepLabel)
 
   self.startStopButton = app.SubButton("start", 1)
   self:addSubGraphic(self.startStopButton)
@@ -165,6 +192,33 @@ local kHeaderActive    = 15
 -- ScopeView / ListWindow / unit editors. Each `kEncoderThreshold` ticks
 -- of physical encoder rotation advances the focus head one row.
 local kEncoderThreshold = Env.EncoderThreshold.Default
+
+-- Per-column nudge step when editing an L1 cell value. CV columns step
+-- by 50 mV (0.05 V), gate-amp by 5%, time columns by 1/16-beat. These
+-- match the typical "interesting musical resolution" for each column.
+-- Indexed by 0-based column index (kColCV1..kColStepLen).
+local kColumnSteps = {
+  [0] = 0.05,    -- cv1
+  [1] = 0.05,    -- cv2
+  [2] = 0.05,    -- cv3
+  [3] = 0.0625,  -- gate-len (beats)
+  [4] = 0.05,    -- gate-amp
+  [5] = 0.0625,  -- step-len (beats)
+}
+
+-- 4-level rate ramp for L1 edit, each level 4x the previous.
+--   fine        -> 1x
+--   coarse      -> 4x
+--   super fine  -> 0.25x   (shift held while editStepMode == "fine")
+--   super coarse-> 16x     (shift held while editStepMode == "coarse")
+-- Dial button toggles fine <-> coarse; shift in either picks the "super" variant.
+local function stepMultiplier(editStepMode, shifted)
+  if editStepMode == "coarse" then
+    return shifted and 16.0 or 4.0
+  end
+  -- fine
+  return shifted and 0.25 or 1.0
+end
 
 local function cellBrightness(isPlayhead, isFocus, inLoop)
   if isPlayhead and isFocus then return kBrightBoth end
@@ -212,7 +266,27 @@ function GridView:refresh()
       (absRow == self.focusHeadRow) and kBrightBoth or kBrightNormal)
   end
 
+  -- Cursor box: outline the cell at (focusHeadRow, columnCursor).
+  -- The focus head is always within the visible window due to the
+  -- centering scroll above, so we always have a valid visibleRow.
+  -- See the cursorBox construction comment for the +3 anchor math
+  -- (label bounding-box bottom vs actual text glyph bottom).
+  local visibleRow = self.focusHeadRow - startRow + 1  -- 1-based
+  local labelY = kHeaderY - visibleRow * kRowHeight
+  local boxX = self.columnCursor * kColPly
+  local boxY = labelY + 3
+  self.cursorBox:setPosition(boxX, boxY)
+  -- White when editing (Habitat-fluid mode), GRAY10 when just navigating.
+  self.cursorBox:setBorderColor(self.editingL1 and app.WHITE or app.GRAY10)
+
   self.bpmLabel:setText(string.format("BPM %d", math.floor(seq:getBpm() + 0.5)))
+
+  -- Edit-step indicator. Shown only while in edit mode.
+  if self.editingL1 then
+    self.editStepLabel:setText(self.editStepMode == "coarse" and "COARSE" or "FINE")
+  else
+    self.editStepLabel:setText("")
+  end
 end
 
 function GridView:onShow()
@@ -261,22 +335,49 @@ end
 -- plies per locked decision). The ER-301 has a single encoder; column
 -- movement is M-key only (mainReleased). Each kEncoderThreshold ticks
 -- of physical rotation = one row, matching ScopeView / ListWindow.
+--
+-- In edit state, the encoder instead nudges the cell value at
+-- (focusHeadRow, columnCursor) by the column's type-specific step.
 function GridView:encoder(change, shifted)
-  -- shift+encoder will become selection-extend per the plan (Step 7).
-  -- For v0.1, only honor the unshifted form.
-  if shifted then return false end
+  -- Outside edit mode, shift+encoder is reserved for selection-extend
+  -- per the plan (Step 7). For v0.1, swallow it so it doesn't scroll.
+  -- Inside edit mode, shifted selects the "super" step multiplier.
+  if shifted and not self.editingL1 then return false end
+
+  local seq = app.AudioThread.getSequencerTask()
+  if not seq then return false end
+
   self.encoderAccum = self.encoderAccum + change
   local moved = false
-  while self.encoderAccum >= kEncoderThreshold do
-    self.focusHeadRow = clamp(self.focusHeadRow + 1, 0, kMaxRow)
-    self.encoderAccum = self.encoderAccum - kEncoderThreshold
-    moved = true
+
+  if self.editingL1 then
+    local baseStep = kColumnSteps[self.columnCursor] or 0.05
+    local step = baseStep * stepMultiplier(self.editStepMode, shifted)
+    while self.encoderAccum >= kEncoderThreshold do
+      local v = seq:l1Value(kSlot, self.columnCursor, self.focusHeadRow)
+      seq:setL1(kSlot, self.columnCursor, self.focusHeadRow, v + step)
+      self.encoderAccum = self.encoderAccum - kEncoderThreshold
+      moved = true
+    end
+    while self.encoderAccum <= -kEncoderThreshold do
+      local v = seq:l1Value(kSlot, self.columnCursor, self.focusHeadRow)
+      seq:setL1(kSlot, self.columnCursor, self.focusHeadRow, v - step)
+      self.encoderAccum = self.encoderAccum + kEncoderThreshold
+      moved = true
+    end
+  else
+    while self.encoderAccum >= kEncoderThreshold do
+      self.focusHeadRow = clamp(self.focusHeadRow + 1, 0, kMaxRow)
+      self.encoderAccum = self.encoderAccum - kEncoderThreshold
+      moved = true
+    end
+    while self.encoderAccum <= -kEncoderThreshold do
+      self.focusHeadRow = clamp(self.focusHeadRow - 1, 0, kMaxRow)
+      self.encoderAccum = self.encoderAccum + kEncoderThreshold
+      moved = true
+    end
   end
-  while self.encoderAccum <= -kEncoderThreshold do
-    self.focusHeadRow = clamp(self.focusHeadRow - 1, 0, kMaxRow)
-    self.encoderAccum = self.encoderAccum + kEncoderThreshold
-    moved = true
-  end
+
   if moved then self:refresh() end
   return true
 end
@@ -292,6 +393,74 @@ function GridView:mainReleased(i, shifted)
   return false
 end
 
+-- ENTER from grid view: enter the L1 inline edit state on the active
+-- cell, or (if already editing) commit + auto-advance focus head down
+-- one row (Habitat-fluid editing). CANCEL or UP exit the edit state.
+function GridView:enterReleased(shifted)
+  if shifted then return false end
+  if self.editingL1 then
+    self.focusHeadRow = clamp(self.focusHeadRow + 1, 0, kMaxRow)
+  else
+    self.editingL1 = true
+  end
+  self:refresh()
+  return true
+end
+
+function GridView:cancelReleased(shifted)
+  if self.editingL1 then
+    self.editingL1 = false
+    self:refresh()
+    return true
+  end
+  return false
+end
+
+function GridView:upReleased(shifted)
+  if self.editingL1 then
+    self.editingL1 = false
+    self:refresh()
+    return true
+  end
+  return false
+end
+
+-- HOME jumps focus head to row 0 (only useful in the grid, not in edit
+-- mode). shift+HOME comes through as zeroReleased and zeroes the
+-- value of the active cell while in edit mode.
+function GridView:homeReleased()
+  if not self.editingL1 then
+    self.focusHeadRow = 0
+    self.encoderAccum = 0
+    self:refresh()
+    return true
+  end
+  return false
+end
+
+function GridView:zeroReleased()
+  if self.editingL1 then
+    local seq = app.AudioThread.getSequencerTask()
+    if seq then
+      seq:setL1(kSlot, self.columnCursor, self.focusHeadRow, 0.0)
+      self:refresh()
+    end
+    return true
+  end
+  return false
+end
+
+-- Dial mode button toggles between fine and coarse step in edit mode.
+-- Outside edit mode, fall through so the firmware's default dial
+-- behavior can run (encoder Fine/Coarse global state). Shift selects
+-- the "super" variant of whichever mode is current.
+function GridView:dialPressed(shifted)
+  if not self.editingL1 then return false end
+  self.editStepMode = (self.editStepMode == "fine") and "coarse" or "fine"
+  self:refresh()
+  return true
+end
+
 -- shift+ENTER dispatches as commitReleased via Application.lua. Returns
 -- to the standard scope sub-view.
 function GridView:commitReleased()
@@ -299,9 +468,5 @@ function GridView:commitReleased()
   Channels.toggleSequencerSubView()
   return true
 end
-
-function GridView:upReleased(shifted)     return false end
-function GridView:cancelReleased(shifted) return false end
-function GridView:homeReleased()          return false end
 
 return GridView
