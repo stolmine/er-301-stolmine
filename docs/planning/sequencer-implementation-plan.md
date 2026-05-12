@@ -230,18 +230,36 @@ Selection mechanic:
 
 ## Hard-button bindings within sequencer takeover
 
+The ER-301's encoder is **rotation-only** (no integrated push button),
+so every "encoder click" pattern from sister modules (teletype, etc.)
+has to be remapped here. ENTER takes the role of "open editor for
+the cell at the cursor"; commit-and-advance within the cell editor
+modal also rides on ENTER (with the modal absorbing the gesture so
+shift+ENTER doesn't bubble out).
+
 | Button | Behavior |
 |---|---|
 | HOME | Jump focus head to current playhead row (per cursor's column) |
 | CANCEL (grid view, no cell editor open) | Jump focus head to row 0 |
 | CANCEL (cell editor modal open) | Exit modal without committing |
-| ENTER (cell editor modal open) | Commit cell, exit modal back to grid |
-| ENTER (grid view) | (reserved — not currently used; could be "click cursor cell to edit" if encoder click isn't used for that) |
+| ENTER (grid view) | **Open the cell editor modal for the cell at `(focus_head_row, column_cursor)`** |
+| ENTER (cell editor modal, no slot focused) | Commit cell and exit modal back to grid |
+| ENTER (cell editor modal, M-slot held) | Commit currently-focused slot, stay in modal, advance slot cursor |
 | **shift+ENTER** anywhere | **Toggle sequencer takeover on/off** (entry + exit) |
-| UP | Toggle L1 ↔ L2 layer view |
+| UP (grid view) | Toggle L1 ↔ L2 layer view |
+| UP (cell editor modal) | Exit modal without committing (alias for CANCEL) |
 | SHIFT | Modifier — extends selection on encoder scroll, modifies S3 to clear |
-| Encoder click (grid view) | Open cell editor modal for cursor's cell |
-| Encoder click (cell editor) | Commit current slot, advance cursor to next slot |
+| M1-M6 (grid view) | Direct jump for the column cursor |
+| M1-M6 (cell editor modal) | Hold to focus that slot for encoder edit; release to release focus |
+
+**Visual cursor: a box around the cell at `(focus_head_row, column_cursor)`.**
+Without an encoder push, the user needs an unambiguous signal of which
+cell ENTER will open. The active-column header highlight + focus-row
+brightness together imply it, but a thin outline around the actual
+target cell makes the gesture-target explicit, especially on layouts
+where the highlighted row spans the full width. Implementation: a small
+`app.Drawing` (or rectangle primitive) whose position updates with
+`columnCursor` and `focusHeadRow` each refresh tick.
 
 ---
 
