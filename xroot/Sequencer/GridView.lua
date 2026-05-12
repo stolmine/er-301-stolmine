@@ -11,7 +11,7 @@
 local app = app
 local Class = require "Base.Class"
 local Window = require "Base.Window"
-local Timer = require "Timer"
+local Signal = require "Signal"
 local Env = require "Env"
 
 local GridView = Class {}
@@ -41,17 +41,57 @@ local kVisibleRows = 6               -- cell rows shown below the header
 -- height keeps the visible glyph above the bottom edge.
 local kHeaderY = 53
 
--- Format an L1 cell value into a 5-character field. CV columns may show
--- a sign; gate-amp/step-len/gate-len are non-negative. Five chars at
--- font 8 (~5 px per glyph) = 25 px, well within the 42 px per column.
-local function fmtCell(v)
+-- Per-column display formatters. Each returns a 5-character string.
+-- The engine stores CV cells in VOLTS (1V/oct convention for CV1).
+-- Gate-len and step-len cells are in BEATS (1.0 = 1 quarter note).
+-- Gate-amp is in [0, 1].
+
+local kNoteNames = { "C ", "C#", "D ", "D#", "E ", "F ", "F#", "G ", "G#", "A ", "A#", "B " }
+
+-- CV1: 1V/oct note name. Rounds to nearest semitone for display.
+-- Format puts a 2-char note name and a 3-char signed octave: "C   4",
+-- "C#  4", "B  -1", "G# 10".
+local function fmtNote(volts)
+  if volts ~= volts then return "  NaN" end
+  local semi = math.floor(volts * 12 + 0.5)
+  local oct  = math.floor(semi / 12)
+  local n    = semi - oct * 12
+  if n < 0 then n = n + 12 end
+  return string.format("%-2s%3d", kNoteNames[n + 1], oct)
+end
+
+-- CV2/CV3: signed volts with one decimal: " 1.5", "-1.5", " 10.0", "-10.0".
+local function fmtVolts(v)
   if v ~= v then return "  NaN" end
-  if math.abs(v) < 0.005 then return " 0.00" end
-  if v >= 0 then
-    return string.format("%5.2f", v)
-  else
-    return string.format("%5.2f", v)  -- "-X.XX" already 5 chars
-  end
+  return string.format("%5.1f", v)
+end
+
+-- gate-len / step-len: beats. Common musical fractions get clean names.
+local function fmtBeats(v)
+  if v ~= v then return "  NaN" end
+  if v < 0.005 then return " 0.00" end
+  if math.abs(v - 0.0625) < 0.001 then return "1/16 " end
+  if math.abs(v - 0.125)  < 0.001 then return "1/8  " end
+  if math.abs(v - 0.25)   < 0.001 then return "1/4  " end
+  if math.abs(v - 0.5)    < 0.001 then return "1/2  " end
+  if math.abs(v - 1.0)    < 0.001 then return "1    " end
+  if math.abs(v - 2.0)    < 0.001 then return "2    " end
+  if math.abs(v - 4.0)    < 0.001 then return "4    " end
+  return string.format("%5.2f", v)
+end
+
+-- gate-amp: 0..1 envelope amplitude.
+local function fmtAmp(v)
+  if v ~= v then return "  NaN" end
+  return string.format(" %4.2f", v)
+end
+
+local function fmtCellByCol(col, v)
+  if col == 0 then return fmtNote(v) end
+  if col == 1 or col == 2 then return fmtVolts(v) end
+  if col == 3 or col == 5 then return fmtBeats(v) end
+  if col == 4 then return fmtAmp(v) end
+  return string.format("%5.2f", v)
 end
 
 function GridView:init(chain)
@@ -160,7 +200,9 @@ function GridView:init(chain)
   self:addSubGraphic(self.resetButton)
 
   self.running = false
-  self.refreshTimer = nil
+  -- Per-frame refresh callback. Re-set on each onShow so the closure
+  -- captures `self`; cleared on onHide via Signal.remove.
+  self.frameCallback = nil
 end
 
 -- Hardcoded for v0.1; matches kMaxStepsPerColumn in od/sequencer/Sequencer.h.
@@ -175,7 +217,7 @@ end
 
 -- Brightness ramp (4bpp display, 0=black .. 15=white). Modelled on
 -- monome/teletype's pattern_mode.c (dim=1, normal=6, playhead=11,
--- selected=15) with the dim bumped to 3 for legibility and a focus-only
+-- selected=15), with dim bumped to 3 for legibility and a focus-only
 -- level inserted between normal and playhead.
 local kBrightDim       = 3   -- out-of-loop cells
 local kBrightNormal    = 6   -- in-loop cells, no focus or playhead
@@ -193,31 +235,32 @@ local kHeaderActive    = 15
 -- of physical encoder rotation advances the focus head one row.
 local kEncoderThreshold = Env.EncoderThreshold.Default
 
--- Per-column nudge step when editing an L1 cell value. CV columns step
--- by 50 mV (0.05 V), gate-amp by 5%, time columns by 1/16-beat. These
--- match the typical "interesting musical resolution" for each column.
--- Indexed by 0-based column index (kColCV1..kColStepLen).
+-- Per-column nudge step when editing an L1 cell value. Each column
+-- declares 4 step sizes covering the rate ramp: fine, coarse, and the
+-- "super" variants of each (shift held). Tuned for musical units per
+-- column type:
+--   CV1 (V/oct):    1 semi  / 1 oct  / 1 cent  / 12 oct
+--   CV2, CV3:       100 mV  / 1 V    / 10 mV   / 10 V
+--   gate-len/step-len: 1/16 / 1/4    / 1/64    / 1 beat
+--   gate-amp:       5%      / 20%    / 1.25%   / 80%
 local kColumnSteps = {
-  [0] = 0.05,    -- cv1
-  [1] = 0.05,    -- cv2
-  [2] = 0.05,    -- cv3
-  [3] = 0.0625,  -- gate-len (beats)
-  [4] = 0.05,    -- gate-amp
-  [5] = 0.0625,  -- step-len (beats)
+  [0] = { fine = 1/12,   coarse = 1.0,    superFine = 1/120,  superCoarse = 12.0 },
+  [1] = { fine = 0.1,    coarse = 1.0,    superFine = 0.01,   superCoarse = 10.0 },
+  [2] = { fine = 0.1,    coarse = 1.0,    superFine = 0.01,   superCoarse = 10.0 },
+  [3] = { fine = 0.0625, coarse = 0.25,   superFine = 0.0156, superCoarse = 1.0  },
+  [4] = { fine = 0.05,   coarse = 0.2,    superFine = 0.0125, superCoarse = 0.8  },
+  [5] = { fine = 0.0625, coarse = 0.25,   superFine = 0.0156, superCoarse = 1.0  },
 }
 
--- 4-level rate ramp for L1 edit, each level 4x the previous.
---   fine        -> 1x
---   coarse      -> 4x
---   super fine  -> 0.25x   (shift held while editStepMode == "fine")
---   super coarse-> 16x     (shift held while editStepMode == "coarse")
--- Dial button toggles fine <-> coarse; shift in either picks the "super" variant.
-local function stepMultiplier(editStepMode, shifted)
+-- Dial button toggles "fine" <-> "coarse"; shift held picks the
+-- corresponding "super" variant. The dial state is per-view, the shift
+-- state is implicit on each encoder event.
+local function stepForColumn(col, editStepMode, shifted)
+  local cfg = kColumnSteps[col] or kColumnSteps[1]
   if editStepMode == "coarse" then
-    return shifted and 16.0 or 4.0
+    return shifted and cfg.superCoarse or cfg.coarse
   end
-  -- fine
-  return shifted and 0.25 or 1.0
+  return shifted and cfg.superFine or cfg.fine
 end
 
 local function cellBrightness(isPlayhead, isFocus, inLoop)
@@ -232,6 +275,12 @@ function GridView:refresh()
   local seq = app.AudioThread.getSequencerTask()
   if not seq then return end
 
+  -- Scroll follows the focus head (encoder-driven). The playhead may
+  -- be inside or outside the visible window depending on where the
+  -- user has scrolled; HOME jumps focus head to row 0 (use that or
+  -- manually scroll to follow the playhead). An auto-follow-playhead
+  -- mode is intentionally NOT added here -- it conflicts with the
+  -- user's view-selection intent.
   local startRow = clamp(self.focusHeadRow - 2, 0, kMaxRow - kVisibleRows + 1)
 
   for c = 1, kNumColumns do
@@ -251,7 +300,7 @@ function GridView:refresh()
       local inLoop     = absRow >= loopLo and absRow <= loopHi
       local isFocus    = absRow == self.focusHeadRow
       local isPlayhead = absRow == playhead
-      self.cellLabels[c][r]:setText(fmtCell(v))
+      self.cellLabels[c][r]:setText(fmtCellByCol(col, v))
       self.cellLabels[c][r]:setForegroundColor(
         cellBrightness(isPlayhead, isFocus, inLoop))
     end
@@ -267,17 +316,22 @@ function GridView:refresh()
   end
 
   -- Cursor box: outline the cell at (focusHeadRow, columnCursor).
-  -- The focus head is always within the visible window due to the
-  -- centering scroll above, so we always have a valid visibleRow.
   -- See the cursorBox construction comment for the +3 anchor math
   -- (label bounding-box bottom vs actual text glyph bottom).
+  -- During playback the scroll follows the playhead, so the focus
+  -- head can be off-screen; in that case we just hide the cursor.
   local visibleRow = self.focusHeadRow - startRow + 1  -- 1-based
-  local labelY = kHeaderY - visibleRow * kRowHeight
-  local boxX = self.columnCursor * kColPly
-  local boxY = labelY + 3
-  self.cursorBox:setPosition(boxX, boxY)
-  -- White when editing (Habitat-fluid mode), GRAY10 when just navigating.
-  self.cursorBox:setBorderColor(self.editingL1 and app.WHITE or app.GRAY10)
+  if visibleRow >= 1 and visibleRow <= kVisibleRows then
+    local labelY = kHeaderY - visibleRow * kRowHeight
+    local boxX = self.columnCursor * kColPly
+    local boxY = labelY + 3
+    self.cursorBox:setPosition(boxX, boxY)
+    -- White when editing (Habitat-fluid mode), GRAY10 when just navigating.
+    self.cursorBox:setBorderColor(self.editingL1 and app.WHITE or app.GRAY10)
+    self.cursorBox:show()
+  else
+    self.cursorBox:hide()
+  end
 
   self.bpmLabel:setText(string.format("BPM %d", math.floor(seq:getBpm() + 0.5)))
 
@@ -290,17 +344,18 @@ function GridView:refresh()
 end
 
 function GridView:onShow()
-  self.refreshTimer = Timer.every(1.0 / 30.0, function()
-    self:refresh()
-    return true
-  end)
+  -- Per-display-frame refresh (55 Hz). Bypasses Timer.every which is
+  -- throttled to ~5 Hz internally and would cause the playhead to
+  -- visibly skip rows at any engine tick rate above ~5 Hz.
+  self.frameCallback = function() self:refresh() end
+  Signal.register("onDisplayFrame", self.frameCallback)
   self:refresh()
 end
 
 function GridView:onHide()
-  if self.refreshTimer then
-    Timer.cancel(self.refreshTimer)
-    self.refreshTimer = nil
+  if self.frameCallback then
+    Signal.remove("onDisplayFrame", self.frameCallback)
+    self.frameCallback = nil
   end
 end
 
@@ -351,8 +406,7 @@ function GridView:encoder(change, shifted)
   local moved = false
 
   if self.editingL1 then
-    local baseStep = kColumnSteps[self.columnCursor] or 0.05
-    local step = baseStep * stepMultiplier(self.editStepMode, shifted)
+    local step = stepForColumn(self.columnCursor, self.editStepMode, shifted)
     while self.encoderAccum >= kEncoderThreshold do
       local v = seq:l1Value(kSlot, self.columnCursor, self.focusHeadRow)
       seq:setL1(kSlot, self.columnCursor, self.focusHeadRow, v + step)

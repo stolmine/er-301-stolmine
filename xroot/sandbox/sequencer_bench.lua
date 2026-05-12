@@ -11,9 +11,14 @@
 -- the fact that the emu boots without crashes (SequencerTask::process
 -- runs each frame, filling the 24 outlet buffers).
 --
--- All slot state is reset at the end so normal sequencer usage isn't
--- polluted by the bench. Until Step 1 is locked in, this script
--- self-runs on every boot.
+-- Bench uses slot 3 so its mutations to column length / markers / L1
+-- cells do NOT leak into slot 0 (the slot the UI displays by default).
+-- resetSlot() only rewinds the playhead; it does NOT restore length
+-- or markers, so running these tests on slot 0 leaves it in a state
+-- where col 0 and col 1 are length 2 with markers (0,1) -- causing
+-- the visible UI to look like the playhead "skips" rows 2-15 on
+-- those columns after a fresh boot. Routing bench through slot 3
+-- keeps slot 0 at its C++ init defaults.
 
 local seq = app.AudioThread.getSequencerTask()
 if not seq then
@@ -39,6 +44,9 @@ local COL_GATE_LEN = 3
 local COL_GATE_AMP = 4
 local COL_STEP_LEN = 5
 
+-- Slot used by all bench tests. Anything but 0 (the UI's default).
+local SLOT = 3
+
 local function approxEq(a, b, eps)
   eps = eps or 1e-5
   return math.abs(a - b) < eps
@@ -60,11 +68,11 @@ end
 -- ---------------------------------------------------------------------------
 local function test_static_16_step()
   local name = "static-16-step-cv"
-  seq:resetSlot(0)
-  seq:setColumnLength(0, COL_CV1, 16)
-  seq:setMarkers(0, COL_CV1, 0, 15)
+  seq:resetSlot(SLOT)
+  seq:setColumnLength(SLOT, COL_CV1, 16)
+  seq:setMarkers(SLOT, COL_CV1, 0, 15)
   for r = 0, 15 do
-    seq:setL1(0, COL_CV1, r, r * 0.1)
+    seq:setL1(SLOT, COL_CV1, r, r * 0.1)
   end
 
   -- Each tickOnce captures heldCV1 from the current playhead BEFORE
@@ -72,9 +80,9 @@ local function test_static_16_step()
   --   iter 0 -> heldCV1 == row 0 value (0.0)
   --   iter 15 -> heldCV1 == row 15 value (1.5)
   for iter = 0, 15 do
-    seq:tickOnce(0)
+    seq:tickOnce(SLOT)
     local expected = iter * 0.1
-    local got = seq:heldCV1(0)
+    local got = seq:heldCV1(SLOT)
     if not approxEq(got, expected) then
       fail(name, string.format("iter %d: expected heldCV1=%.3f, got %.3f",
                                 iter, expected, got))
@@ -90,20 +98,20 @@ end
 -- ---------------------------------------------------------------------------
 local function test_polymetric_5_7()
   local name = "polymetric-5-and-7"
-  seq:resetSlot(0)
+  seq:resetSlot(SLOT)
   -- Column 0: length 5
-  seq:setColumnLength(0, COL_CV1, 5)
-  seq:setMarkers(0, COL_CV1, 0, 4)
-  for r = 0, 4 do seq:setL1(0, COL_CV1, r, r) end
+  seq:setColumnLength(SLOT, COL_CV1, 5)
+  seq:setMarkers(SLOT, COL_CV1, 0, 4)
+  for r = 0, 4 do seq:setL1(SLOT, COL_CV1, r, r) end
   -- Column 1: length 7
-  seq:setColumnLength(0, COL_CV2, 7)
-  seq:setMarkers(0, COL_CV2, 0, 6)
-  for r = 0, 6 do seq:setL1(0, COL_CV2, r, 100 + r) end
+  seq:setColumnLength(SLOT, COL_CV2, 7)
+  seq:setMarkers(SLOT, COL_CV2, 0, 6)
+  for r = 0, 6 do seq:setL1(SLOT, COL_CV2, r, 100 + r) end
 
-  for _ = 1, 35 do seq:tickOnce(0) end
+  for _ = 1, 35 do seq:tickOnce(SLOT) end
 
-  local ph0 = seq:playhead(0, COL_CV1)
-  local ph1 = seq:playhead(0, COL_CV2)
+  local ph0 = seq:playhead(SLOT, COL_CV1)
+  local ph1 = seq:playhead(SLOT, COL_CV2)
   if ph0 ~= 0 then
     fail(name, string.format("col 0 playhead expected 0 after 35 ticks, got %d", ph0))
     return
@@ -129,22 +137,22 @@ end
 -- ---------------------------------------------------------------------------
 local function test_l2_destructive_write()
   local name = "l2-destructive-mod2-add1"
-  seq:resetSlot(0)
-  seq:setColumnLength(0, COL_CV1, 2)
-  seq:setMarkers(0, COL_CV1, 0, 1)
-  seq:setColumnLength(0, COL_CV2, 2)
-  seq:setMarkers(0, COL_CV2, 0, 1)
-  seq:setL1(0, COL_CV2, 0, 5.0)
+  seq:resetSlot(SLOT)
+  seq:setColumnLength(SLOT, COL_CV1, 2)
+  seq:setMarkers(SLOT, COL_CV1, 0, 1)
+  seq:setColumnLength(SLOT, COL_CV2, 2)
+  seq:setMarkers(SLOT, COL_CV2, 0, 1)
+  seq:setL1(SLOT, COL_CV2, 0, 5.0)
 
   -- L2 cell on col 0 row 0: predicate %2 (every 2 passes of host),
   -- action +1 to col 1 at col 1's current playhead.
-  seq:setL2(0, COL_CV1, 0,
+  seq:setL2(SLOT, COL_CV1, 0,
             PRED_MODULO, -1, 2,         -- predicate: %2 on host column
             ACTION_ADD,  COL_CV2, 1.0)  -- action: +1 to col 1
 
-  for _ = 1, 5 do seq:tickOnce(0) end
+  for _ = 1, 5 do seq:tickOnce(SLOT) end
 
-  local v = seq:l1Value(0, COL_CV2, 0)
+  local v = seq:l1Value(SLOT, COL_CV2, 0)
   if not approxEq(v, 6.0) then
     fail(name, string.format("col 1 row 0 expected 6.0 after 5 ticks, got %.3f", v))
     return

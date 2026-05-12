@@ -166,12 +166,20 @@ void Slot::processFrame(int frameLen,
   cachedBpm = bpm;
   cachedSampleRate = sampleRate;
 
+  // Convention: CV cell values are stored in VOLTS. ER-301 audio buffers
+  // are normalized so 1.0 maps to +10V at the output jack, hence we
+  // emit cell_volts * 0.1 to the buffer. CV1 typically uses V/oct (1V
+  // per octave), but the engine stays unit-agnostic; the UI does the
+  // note-name conversion. Gate-len / step-len stay in beats (unit-
+  // agnostic float emitted directly). Gate-amp stays in 0..1.
+  static constexpr float kCvOutScale = 0.1f;
+
   if (!running) {
     // Hold last values; gate envelope drops to silent.
     for (int i = 0; i < frameLen; ++i) {
-      cv1[i]     = heldCV1;
-      cv2[i]     = heldCV2;
-      cv3[i]     = heldCV3;
+      cv1[i]     = heldCV1 * kCvOutScale;
+      cv2[i]     = heldCV2 * kCvOutScale;
+      cv3[i]     = heldCV3 * kCvOutScale;
       gateLen[i] = heldGateLen;
       gateAmp[i] = 0.0f;
       stepLen[i] = heldStepLen;
@@ -190,9 +198,9 @@ void Slot::processFrame(int frameLen,
   // Fill the frame with current held values. Gate output is the envelope
   // (heldGateAmp while remaining > 0, else 0).
   for (int i = 0; i < frameLen; ++i) {
-    cv1[i]     = heldCV1;
-    cv2[i]     = heldCV2;
-    cv3[i]     = heldCV3;
+    cv1[i]     = heldCV1 * kCvOutScale;
+    cv2[i]     = heldCV2 * kCvOutScale;
+    cv3[i]     = heldCV3 * kCvOutScale;
     gateLen[i] = heldGateLen;
     stepLen[i] = heldStepLen;
     if (gateRemainingSamples > 0) {
