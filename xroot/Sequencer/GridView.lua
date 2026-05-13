@@ -386,6 +386,20 @@ local kDirtyDotXOff = 38           -- right edge of column (column ends at 42)
 -- CUT only -- nothing reads it back yet.
 local clipboard = nil
 
+-- Column type categories for cross-column PASTE compatibility.
+-- Paste refuses when source and destination columns fall in different
+-- categories. Note that V/oct (col 0) is treated as "cv" alongside the
+-- raw-voltage CV columns: a V/oct clipboard pasted into a raw CV2/CV3
+-- column reinterprets the same float as volts, which is musically
+-- defensible (semitones become a step pattern in V), so the plan
+-- allows it. The strict-same-column policy is a future opt-in.
+local function columnCategory(col)
+  if col == 0 or col == 1 or col == 2 then return "cv"   end
+  if col == 3 or col == 5             then return "time" end
+  if col == 4                         then return "amp"  end
+  return "unknown"
+end
+
 -- Per-column random value generator for the RANDOMIZE action. The
 -- distributions match the column's typed range so randomized values
 -- look musically sensible: ±5 octaves for V/oct, ±5 V for raw CV,
@@ -640,12 +654,22 @@ function GridView:refresh()
     self.editStepLabel:setText("")
   end
 
-  -- Sub softkey labels: copy / cut / rand while a selection is
-  -- active, otherwise the default transport (start-stop, reset).
+  -- Sub softkey labels. Three modes:
+  --   1. selection active        -> copy / cut / rand
+  --   2. shift held + clipboard  -> paste / _ / _  (live shift overlay)
+  --   3. default transport       -> start|stop / _ / reset
+  -- The shift-overlay polls the hardware shift state each refresh
+  -- (55 Hz), so labels swap responsively as the user holds / releases
+  -- shift. Selection takes priority over shift -- once a selection is
+  -- built, shift only affects encoder gestures (extend), not buttons.
   if self.selectionActive then
     self.s1Button:setText("copy")
     self.s2Button:setText("cut")
     self.s3Button:setText("rand")
+  elseif clipboard ~= nil and app.isShiftButtonPushed() then
+    self.s1Button:setText("paste")
+    self.s2Button:setText("")
+    self.s3Button:setText("")
   else
     self.s1Button:setText(self.running and "stop" or "start")
     self.s2Button:setText("")
@@ -678,8 +702,31 @@ end
 
 -- ---- input handlers ----
 
+-- Paste clipboard.values into rows starting at focusHead, in the
+-- user's current column. Refuses silently on type mismatch (clipboard
+-- column category != destination column category). focusHead advances
+-- past the pasted region so chained pastes stitch contiguously; if the
+-- paste would run past kMaxRow it truncates at the boundary.
+function GridView:_pasteAtFocus()
+  if clipboard == nil then return false end
+  local seq = app.AudioThread.getSequencerTask()
+  if not seq then return false end
+  if columnCategory(clipboard.col) ~= columnCategory(self.columnCursor) then
+    return false
+  end
+  local startR = self.focusHeadRow
+  local n = #clipboard.values
+  for i, v in ipairs(clipboard.values) do
+    local r = startR + i - 1
+    if r > kMaxRow then break end
+    seq:setL1(kSlot, self.columnCursor, r, v)
+  end
+  self.focusHeadRow = clamp(startR + n, 0, kMaxRow)
+  self:refresh()
+  return true
+end
+
 function GridView:subReleased(i, shifted)
-  if shifted then return false end
   local seq = app.AudioThread.getSequencerTask()
   if not seq then return false end
 
@@ -716,6 +763,14 @@ function GridView:subReleased(i, shifted)
     self.selectionActive = false
     self:refresh()
     return true
+  end
+
+  -- Shift-overlay binding: shift+S1 = paste (when clipboard non-empty).
+  -- shift on S2 / S3 reserved -- fall through so the firmware doesn't
+  -- treat them as shifted-start/reset.
+  if shifted then
+    if i == 1 then return self:_pasteAtFocus() end
+    return false
   end
 
   -- Default transport: S1 start/stop, S3 reset, S2 unused.
