@@ -479,6 +479,45 @@ function GridView:refresh()
   local startRow = math.floor(self.scrollFrac)
   local subPx    = (self.scrollFrac - startRow) * kRowHeight
 
+  -- Resolve cursor / box geometry once so the ruler-hide pass and the
+  -- cursor / dotted-box render paths below share a single source of
+  -- truth. cursorRow / cursorCol mark the active-edit target (=
+  -- focusHead by default; selection master when selecting; moving end
+  -- when marking). boxLo / boxHi / boxCol describe the active dotted
+  -- range (selection or mark modal); nil when no box is active.
+  local cursorRow, cursorCol
+  local boxLo, boxHi, boxCol
+  if self.selectionActive and self.selectionColumn == self.columnCursor then
+    cursorRow = math.min(self.selectionAnchor, self.selectionEnd)
+    cursorCol = self.selectionColumn
+    boxLo     = cursorRow
+    boxHi     = math.max(self.selectionAnchor, self.selectionEnd)
+    boxCol    = self.selectionColumn
+  elseif self.markingMode == "marking_end"
+         and self.markBackup
+         and self.markBackup.col == self.columnCursor then
+    cursorRow = self.focusHeadRow
+    cursorCol = self.markBackup.col
+    boxLo     = math.min(self.markFirstMark, self.focusHeadRow)
+    boxHi     = math.max(self.markFirstMark, self.focusHeadRow)
+    boxCol    = self.markBackup.col
+  else
+    cursorRow = self.focusHeadRow
+    cursorCol = self.columnCursor
+  end
+
+  -- Ruler-suppression set: rows whose digits would be visually cut by
+  -- a cursor border or dotted box on the LAST column (where the box's
+  -- right edge crosses into ruler-text territory at x ~= 251). Off-
+  -- screen rows end up hidden anyway, so marking them here is a no-op.
+  local rulerHidden = {}
+  if cursorCol == kNumColumns - 1 then
+    rulerHidden[cursorRow] = true
+  end
+  if boxCol == kNumColumns - 1 then
+    for r = boxLo, boxHi do rulerHidden[r] = true end
+  end
+
   for c = 1, kNumColumns do
     local col = c - 1
     local playhead = seq:playhead(kSlot, col)
@@ -511,11 +550,15 @@ function GridView:refresh()
 
   -- Row ruler: absolute row numbers for the visible window, brightened
   -- on the focus row. Same slot count + Y formula as the cell grid.
+  -- Rows in `rulerHidden` (any row a last-column cursor or dotted box
+  -- crosses through) suppress their digits so the box edge doesn't
+  -- visually clip into the ruler.
   for r = 1, kVisibleRows + 1 do
     local absRow = startRow + r - 1
     local y = kHeaderY - r * kRowHeight + subPx
     local lbl = self.rulerLabels[r]
-    if y > kCellHideY or absRow > kMaxRow or absRow < 0 then
+    if y > kCellHideY or absRow > kMaxRow or absRow < 0
+       or rulerHidden[absRow] then
       lbl:hide()
     else
       lbl:setPosition(kRulerX, math.floor(y + 0.5))
@@ -533,17 +576,10 @@ function GridView:refresh()
   --                            This is the cell whose value bulk edit
   --                            increments; the rest of the selection
   --                            snaps to it (Chunk B).
-  -- Color: WHITE while editing or while a selection is active (so the
-  -- user sees that the next encoder turn will mutate a cell). GRAY10
-  -- otherwise.
-  local cursorRow, cursorCol
-  if self.selectionActive and self.selectionColumn == self.columnCursor then
-    cursorRow = math.min(self.selectionAnchor, self.selectionEnd)
-    cursorCol = self.selectionColumn
-  else
-    cursorRow = self.focusHeadRow
-    cursorCol = self.columnCursor
-  end
+  --   marking active:         moving end (focusHead) on mark column.
+  -- Color: WHITE while editing / selecting / marking (so the user sees
+  -- that the next encoder turn will mutate state). GRAY10 otherwise.
+  -- cursorRow / cursorCol are resolved at the top of refresh.
   local visibleRow = cursorRow - startRow + 1
   local labelY = kHeaderY - visibleRow * kRowHeight + subPx
   local targetY = labelY + 3
@@ -600,27 +636,15 @@ function GridView:refresh()
     self.cursorEasingY = false
   end
 
-  -- Selection / mark dotted box. Two modes feed the same drawing:
+  -- Selection / mark dotted box. boxLo / boxHi / boxCol are resolved
+  -- at the top of refresh from the same source state used by the
+  -- cursor + ruler-hide passes. Two gestures feed this drawing:
   --   * selection active on the cursor's column -> wrap selection range
   --   * mark modal on the cursor's column       -> wrap (firstMark..focusHead)
   -- Both share the same dotted-edge primitive so the visual language is
   -- consistent across "user-defined row range" gestures. Position rides
   -- on subPx so the box slides with the cells it wraps during smooth
-  -- scroll. Selection takes priority when both are somehow active
-  -- (shouldn't happen -- they're mutually exclusive -- but defensive).
-  local boxLo, boxHi, boxCol
-  if self.selectionActive and self.selectionColumn == self.columnCursor then
-    boxLo  = math.min(self.selectionAnchor, self.selectionEnd)
-    boxHi  = math.max(self.selectionAnchor, self.selectionEnd)
-    boxCol = self.selectionColumn
-  elseif self.markingMode == "marking_end"
-         and self.markBackup
-         and self.markBackup.col == self.columnCursor then
-    boxLo  = math.min(self.markFirstMark, self.focusHeadRow)
-    boxHi  = math.max(self.markFirstMark, self.focusHeadRow)
-    boxCol = self.markBackup.col
-  end
-
+  -- scroll.
   if boxCol then
     -- Clip to visible window (now including the +1 partial-bottom row).
     local topV    = math.max(1,                boxLo - startRow + 1)
