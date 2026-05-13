@@ -256,6 +256,89 @@ local function test_l2_phase15_polish()
 end
 
 -- ---------------------------------------------------------------------------
+-- Test 5: persistence roundtrip
+--
+-- Authors a known state, serializes via xroot/Sequencer/Persist.lua,
+-- wipes the slot, deserializes, asserts the state survived. Catches
+-- schema breaks at boot before they bite a real quicksave save+load.
+-- ---------------------------------------------------------------------------
+local function test_persistence_roundtrip()
+  local name = "persistence-roundtrip"
+  local Persist = require "Sequencer.Persist"
+
+  -- 1. Author a recognizable slot state.
+  seq:resetSlot(SLOT)
+  seq:setColumnLength(SLOT, COL_CV1, 12)
+  seq:setMarkers(SLOT, COL_CV1, 2, 9)
+  seq:setL1(SLOT, COL_CV1, 0, 0.5)
+  seq:setL1(SLOT, COL_CV1, 1, -1.25)
+  seq:setL1(SLOT, COL_CV1, 5, 3.0)
+  -- L2 rule on cv1 row 4: PRED_APPROX A07 ~ 0.5 -> ACTION_SET B12 = 7.
+  -- Exercises both row pins to cover the Phase 2 fields end-to-end.
+  for r = 0, 15 do seq:clearL2(SLOT, COL_CV1, r) end
+  seq:setL2(SLOT, COL_CV1, 4,
+            PRED_APPROX, COL_CV1, 7, 0.5,
+            ACTION_SET,  COL_CV2, 12, 7.0)
+
+  -- 2. Snapshot via the persist module.
+  local data = Persist.serialize()
+  if not (data and data.slots and data.slots[SLOT + 1]) then
+    fail(name, "serialize() returned empty data")
+    return
+  end
+
+  -- 3. Wipe the slot so any surviving values prove deserialize works.
+  seq:setColumnLength(SLOT, COL_CV1, 4)
+  seq:setMarkers(SLOT, COL_CV1, 0, 3)
+  for r = 0, 15 do
+    seq:setL1(SLOT, COL_CV1, r, 0.0)
+    seq:clearL2(SLOT, COL_CV1, r)
+  end
+
+  -- 4. Apply the snapshot back.
+  Persist.deserialize(data)
+
+  -- 5. Assert the persistent fields all round-tripped.
+  if seq:columnLength(SLOT, COL_CV1) ~= 12 then
+    fail(name, string.format("columnLength expected 12, got %d",
+                              seq:columnLength(SLOT, COL_CV1)))
+    return
+  end
+  if seq:marker1(SLOT, COL_CV1) ~= 2
+     or seq:marker2(SLOT, COL_CV1) ~= 9 then
+    fail(name, string.format("markers expected (2,9), got (%d,%d)",
+                              seq:marker1(SLOT, COL_CV1),
+                              seq:marker2(SLOT, COL_CV1)))
+    return
+  end
+  if not approxEq(seq:l1Value(SLOT, COL_CV1, 0), 0.5) then
+    fail(name, "l1[0] != 0.5"); return
+  end
+  if not approxEq(seq:l1Value(SLOT, COL_CV1, 1), -1.25) then
+    fail(name, "l1[1] != -1.25"); return
+  end
+  if not approxEq(seq:l1Value(SLOT, COL_CV1, 5), 3.0) then
+    fail(name, "l1[5] != 3.0"); return
+  end
+  if not seq:l2Present(SLOT, COL_CV1, 4) then
+    fail(name, "L2 cell at row 4 missing after roundtrip"); return
+  end
+  if seq:l2PredOp(SLOT, COL_CV1, 4) ~= PRED_APPROX
+     or seq:l2PredColA(SLOT, COL_CV1, 4) ~= COL_CV1
+     or seq:l2PredColARow(SLOT, COL_CV1, 4) ~= 7
+     or not approxEq(seq:l2PredVal(SLOT, COL_CV1, 4), 0.5) then
+    fail(name, "L2 predicate fields drifted"); return
+  end
+  if seq:l2ActOp(SLOT, COL_CV1, 4) ~= ACTION_SET
+     or seq:l2ActTgt(SLOT, COL_CV1, 4) ~= COL_CV2
+     or seq:l2ActTgtRow(SLOT, COL_CV1, 4) ~= 12
+     or not approxEq(seq:l2ActVal(SLOT, COL_CV1, 4), 7.0) then
+    fail(name, "L2 action fields drifted"); return
+  end
+  pass(name)
+end
+
+-- ---------------------------------------------------------------------------
 -- Run all tests, then reset the slot state so the bench leaves no trace.
 -- ---------------------------------------------------------------------------
 app.logInfo("sequencer_bench: starting Step-1 bench tests")
@@ -264,6 +347,7 @@ test_static_16_step()
 test_polymetric_5_7()
 test_l2_destructive_write()
 test_l2_phase15_polish()
+test_persistence_roundtrip()
 
 local total = #results
 local pass_count = 0

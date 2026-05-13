@@ -71,6 +71,9 @@ function QuickSavePreset:populate()
   Busy.status("Serializing channels...")
   data.channels = Channels.serialize()
 
+  Busy.status("Serializing sequencer...")
+  data.sequencer = require("Sequencer.Persist").serialize()
+
   Busy.status("Serializing unit chooser...")
   data.unitChooser = UnitChooser.serialize()
 
@@ -135,6 +138,16 @@ function QuickSavePreset:apply()
   else
     app.logInfo("%s:apply: no channels data.", self)
     result = false
+  end
+
+  -- Sequencer per-slot state (L1 cells, L2 rules, lengths, markers).
+  -- Independent of chain topology -- the seq* sources are global
+  -- externals registered at boot. Restoring here, after Channels,
+  -- keeps any chain UI consistent with the loaded state.
+  if data.sequencer then
+    require("Sequencer.Persist").deserialize(data.sequencer)
+  else
+    app.logInfo("%s:apply: no sequencer data.", self)
   end
 
   -- Sample Pool deserialization should be after Channels deserialization
