@@ -462,6 +462,14 @@ function CellEditor:init(slotIdx, col, row)
   self.stepChip:setJustification(app.justifyLeft)
   self:addSubGraphic(self.stepChip)
 
+  -- Persistent S3 hint -- the modal otherwise has no labelled
+  -- softkeys, so the "hold S3 + encoder = cycle column letter on
+  -- the focused cell-ref slot" gesture would be invisible to a new
+  -- user. The chip stays put whether or not S3 is held; it just
+  -- explains what S3 does.
+  self.s3Hint = app.SubButton("col", 3)
+  self:addSubGraphic(self.s3Hint)
+
   self.encoderAccum = 0
   self:_refresh()
 end

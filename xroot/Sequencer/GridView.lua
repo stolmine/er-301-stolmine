@@ -17,8 +17,11 @@ local Env = require "Env"
 local GridView = Class {}
 GridView:include(Window)
 
--- Slot 0 is shown by default. Multi-slot selection comes later.
-local kSlot = 0
+-- Default slot index shown when the takeover opens. Each GridView
+-- instance carries its own `self.slot` (initialized from this
+-- constant) which the user can change via shift+M2..M5 to pick
+-- among the 4 sequencer slots. Methods read self.slot at runtime.
+local kDefaultSlot = 0
 
 -- Column-name labels (matching seqN.<name> picker entries, kept to 3
 -- chars so the header "name:NN" fits in 6 chars / ~30 px at font 8).
@@ -226,6 +229,18 @@ function GridView:init(chain)
     self.rulerLabels[r] = lbl
   end
 
+  -- Slot indicator at the grid header's top-right corner. Mirrors
+  -- the sub title's "seq{N}" so the user can see which sequencer
+  -- slot the grid is showing without looking down at the sub
+  -- display. Sits in the unused space past column 6's "stL:00"
+  -- header text (ends ~x=242) and above the row ruler column
+  -- (which starts at the first cell row, y=44). Refreshed in
+  -- refresh() so slot picker (shift+M2..M5) updates it live.
+  self.slotIndicator = app.Label("S1", kFontMain)
+  self.slotIndicator:setJustification(app.justifyLeft)
+  self.slotIndicator:setPosition(kRulerX, kHeaderY)
+  self:addMainGraphic(self.slotIndicator)
+
   -- Active-cell cursor box. Outlines the cell at
   -- (focusHeadRow, columnCursor). Position updates in refresh().
   --
@@ -319,6 +334,18 @@ function GridView:init(chain)
   -- snap on first render (after onShow).
   self.scrollFrac        = nil
 
+  -- Which sequencer slot the grid currently shows / edits. Default
+  -- is slot 0; shift+M2..M5 selects slots 0..3 (M1 and M6 reserved).
+  -- The cell editor modal reads this when it opens so ENTER on the
+  -- L2 layer targets the right slot.
+  self.slot = kDefaultSlot
+
+  -- BPM fader gesture state. Set on shift+S2 press, cleared on S2
+  -- release. While held, the encoder routes to BPM nudge instead of
+  -- focus-head scroll / selection extend / etc.
+  self.bpmHeld  = false
+  self.bpmAccum = 0
+
   -- Active grid layer: "L1" shows L1 cell values (per-column formatters);
   -- "L2" shows compact pred:action rules from the L2 grammar layer.
   -- Toggled via shift+S3 (with shift-overlay label "L2" / "L1" on S3).
@@ -372,7 +399,12 @@ function GridView:init(chain)
   self.s3Button = app.SubButton("reset", 3)
   self:addSubGraphic(self.s3Button)
 
-  self.running = false
+  -- Per-slot running state shadow. S1 transport label reads
+  -- runningPerSlot[self.slot]; switching slots refreshes from this
+  -- table. The engine's own `running` flag isn't exposed via a
+  -- getter, so we track it Lua-side as a shadow of what we asked
+  -- the engine to do via startSlot / stopSlot.
+  self.runningPerSlot = { [0] = false, [1] = false, [2] = false, [3] = false }
   -- Per-frame refresh callback. Re-set on each onShow so the closure
   -- captures `self`; cleared on onHide via Signal.remove.
   self.frameCallback = nil
@@ -635,9 +667,9 @@ function GridView:refresh()
 
   for c = 1, kNumColumns do
     local col = c - 1
-    local playhead = seq:playhead(kSlot, col)
-    local m1 = seq:marker1(kSlot, col)
-    local m2 = seq:marker2(kSlot, col)
+    local playhead = seq:playhead(self.slot, col)
+    local m1 = seq:marker1(self.slot, col)
+    local m2 = seq:marker2(self.slot, col)
     local loopLo, loopHi = math.min(m1, m2), math.max(m1, m2)
 
     self.headerLabels[c]:setText(string.format("%s:%02d", kColNames[c], playhead))
@@ -658,16 +690,16 @@ function GridView:refresh()
         local text
         if self.layer == "L2" then
           text = fmtL2Cell(
-            seq:l2PredOp(kSlot, col, absRow),
-            seq:l2PredColA(kSlot, col, absRow),
-            seq:l2PredColARow(kSlot, col, absRow),
-            seq:l2PredVal(kSlot, col, absRow),
-            seq:l2ActOp(kSlot, col, absRow),
-            seq:l2ActTgt(kSlot, col, absRow),
-            seq:l2ActTgtRow(kSlot, col, absRow),
-            seq:l2ActVal(kSlot, col, absRow))
+            seq:l2PredOp(self.slot, col, absRow),
+            seq:l2PredColA(self.slot, col, absRow),
+            seq:l2PredColARow(self.slot, col, absRow),
+            seq:l2PredVal(self.slot, col, absRow),
+            seq:l2ActOp(self.slot, col, absRow),
+            seq:l2ActTgt(self.slot, col, absRow),
+            seq:l2ActTgtRow(self.slot, col, absRow),
+            seq:l2ActVal(self.slot, col, absRow))
         else
-          text = fmtCellByCol(col, seq:l1Value(kSlot, col, absRow))
+          text = fmtCellByCol(col, seq:l1Value(self.slot, col, absRow))
         end
         lbl:setText(text)
         lbl:setForegroundColor(cellBrightness(isPlayhead, isFocus, inLoop))
@@ -832,7 +864,7 @@ function GridView:refresh()
   local anyFire = false
   if self.layer == "L2" then
     for col = 0, kNumColumns - 1 do
-      local engineRow = seq:l2LastFiredRow(kSlot, col)
+      local engineRow = seq:l2LastFiredRow(self.slot, col)
       if engineRow >= 0 and engineRow ~= self.l2FireLastSeen[col] then
         self.l2FireDecay[col] = { row = engineRow, framesLeft = kFireDecayFrames }
       end
@@ -865,8 +897,11 @@ function GridView:refresh()
   self.bpmLabel:setText(string.format("BPM %d", math.floor(seq:getBpm() + 0.5)))
   -- Persistent layer indicator: "seq1.L1" or "seq1.L2" on the sub
   -- title line, so the user always knows which layer the grid view
-  -- is showing without having to hold shift.
-  self.titleLabel:setText(string.format("seq%d.%s", kSlot + 1, self.layer))
+  -- is showing without having to hold shift. Status mirrors the
+  -- selected slot's running shadow so slot-switching updates it.
+  self.titleLabel:setText(string.format("seq%d.%s", self.slot + 1, self.layer))
+  self.statusLabel:setText(self.runningPerSlot[self.slot] and "running" or "stopped")
+  self.slotIndicator:setText(string.format("S%d", self.slot + 1))
 
   -- Edit-step indicator. Shown only while in edit mode.
   if self.editingL1 then
@@ -879,28 +914,33 @@ function GridView:refresh()
   --   1. selection active     -> copy / cut / rand
   --   2. mark modal           -> start|stop / end / _
   --   3. shift held (default) -> S1 = paste (clipboard non-empty),
-  --                              S3 = OTHER layer name (always shown)
-  --   4. default              -> start|stop / mark / _
+  --                              S2 / S3 reserved for future overlays
+  --   4. default              -> start|stop / mark / L1<->L2 toggle
   -- The shift-overlay polls the hardware shift state each refresh
   -- (55 Hz), so labels swap responsively as the user holds / releases
   -- shift. Selection takes priority over everything -- once a
   -- selection is built, shift / mark gestures don't reach the bar.
+  --
+  -- Layer toggle lives on UNSHIFTED S3: the bar always shows the
+  -- OTHER layer's name ("L2" while on L1, "L1" while on L2), so the
+  -- gesture is discoverable without holding shift first.
+  local otherLayer = (self.layer == "L1") and "L2" or "L1"
   if self.selectionActive then
     self.s1Button:setText("copy")
     self.s2Button:setText("cut")
     self.s3Button:setText("rand")
   elseif self.markingMode == "marking_end" then
-    self.s1Button:setText(self.running and "stop" or "start")
+    self.s1Button:setText(self.runningPerSlot[self.slot] and "stop" or "start")
     self.s2Button:setText("end")
     self.s3Button:setText("")
   elseif app.isShiftButtonPushed() then
     self.s1Button:setText(clipboard ~= nil and "paste" or "")
-    self.s2Button:setText("")
-    self.s3Button:setText((self.layer == "L1") and "L2" or "L1")
+    self.s2Button:setText("BPM")
+    self.s3Button:setText(otherLayer)
   else
-    self.s1Button:setText(self.running and "stop" or "start")
+    self.s1Button:setText(self.runningPerSlot[self.slot] and "stop" or "start")
     self.s2Button:setText("mark")
-    self.s3Button:setText("")
+    self.s3Button:setText(otherLayer)
   end
 end
 
@@ -941,7 +981,7 @@ function GridView:_updateMarkingLive()
   if not (seq and self.markBackup) then return end
   -- Engine normalizes the loop region to min/max internally, so we can
   -- pass them in user-intended order during the live phase.
-  seq:setMarkers(kSlot, self.markBackup.col,
+  seq:setMarkers(self.slot, self.markBackup.col,
                  self.markFirstMark, self.focusHeadRow)
 end
 
@@ -951,7 +991,7 @@ function GridView:_commitMark()
   if seq and self.markBackup then
     local lo = math.min(self.markFirstMark, self.focusHeadRow)
     local hi = math.max(self.markFirstMark, self.focusHeadRow)
-    seq:setMarkers(kSlot, self.markBackup.col, lo, hi)
+    seq:setMarkers(self.slot, self.markBackup.col, lo, hi)
   end
   self.markingMode   = "idle"
   self.markBackup    = nil
@@ -962,7 +1002,7 @@ function GridView:_revertMark()
   if self.markingMode ~= "marking_end" then return end
   local seq = app.AudioThread.getSequencerTask()
   if seq and self.markBackup then
-    seq:setMarkers(kSlot, self.markBackup.col,
+    seq:setMarkers(self.slot, self.markBackup.col,
                    self.markBackup.m1, self.markBackup.m2)
   end
   self.markingMode   = "idle"
@@ -989,14 +1029,38 @@ function GridView:_pasteAtFocus()
   for i, v in ipairs(clipboard.values) do
     local r = startR + i - 1
     if r > kMaxRow then break end
-    seq:setL1(kSlot, self.columnCursor, r, v)
+    seq:setL1(self.slot, self.columnCursor, r, v)
   end
   self.focusHeadRow = clamp(startR + n, 0, kMaxRow)
   self:refresh()
   return true
 end
 
+-- subPressed: captures shift+S2 to enter BPM-nudge mode. While S2
+-- stays held, encoder routes to BPM regardless of shift state on
+-- the encoder gesture itself; release of S2 (any shift state) drops
+-- out. The press is otherwise a no-op so the rest of the sub stack
+-- (paste, mark, layer toggle) sees nothing.
+function GridView:subPressed(i, shifted)
+  if i == 2 and shifted then
+    self.bpmHeld  = true
+    self.bpmAccum = 0
+    self:refresh()
+    return true
+  end
+  return false
+end
+
 function GridView:subReleased(i, shifted)
+  -- BPM release: claim regardless of shift state, since the press
+  -- could have been shifted but release after shift was let go.
+  if i == 2 and self.bpmHeld then
+    self.bpmHeld  = false
+    self.bpmAccum = 0
+    self:refresh()
+    return true
+  end
+
   local seq = app.AudioThread.getSequencerTask()
   if not seq then return false end
 
@@ -1011,19 +1075,19 @@ function GridView:subReleased(i, shifted)
     if i == 1 then
       local values = {}
       for r = selMin, selMax do
-        values[#values + 1] = seq:l1Value(kSlot, col, r)
+        values[#values + 1] = seq:l1Value(self.slot, col, r)
       end
       clipboard = { col = col, values = values }
     elseif i == 2 then
       local values = {}
       for r = selMin, selMax do
-        values[#values + 1] = seq:l1Value(kSlot, col, r)
-        seq:setL1(kSlot, col, r, 0.0)
+        values[#values + 1] = seq:l1Value(self.slot, col, r)
+        seq:setL1(self.slot, col, r, 0.0)
       end
       clipboard = { col = col, values = values }
     elseif i == 3 then
       for r = selMin, selMax do
-        seq:setL1(kSlot, col, r, randomForColumn(col))
+        seq:setL1(self.slot, col, r, randomForColumn(col))
       end
     else
       return false
@@ -1038,9 +1102,8 @@ function GridView:subReleased(i, shifted)
   -- Shift-overlay bindings:
   --   shift+S1 = paste (only when clipboard is non-empty; see refresh
   --              for the matching label swap on S1)
-  --   shift+S3 = layer toggle (L1 <-> L2). Always available; the
-  --              shift-held S3 label always shows the OTHER layer
-  --              name as a "switch to" affordance.
+  --   shift+S3 = layer toggle (kept on shifted too for muscle memory
+  --              continuity; same gesture as unshifted S3 below).
   if shifted then
     if i == 1 then return self:_pasteAtFocus() end
     if i == 3 then
@@ -1051,16 +1114,18 @@ function GridView:subReleased(i, shifted)
     return false
   end
 
-  -- Default sub bar: S1 = transport, S2 = mark / end (modal), S3 unused.
-  -- Playhead reset moved to shift+HOME (see zeroReleased).
+  -- Default sub bar: S1 = transport, S2 = mark / end (modal),
+  -- S3 = layer toggle (L1 <-> L2). The bar always shows the OTHER
+  -- layer's name on S3 so the gesture is discoverable without
+  -- requiring the user to hold shift first.
   if i == 1 then
-    if self.running then
-      seq:stopSlot(kSlot)
-      self.running = false
+    if self.runningPerSlot[self.slot] then
+      seq:stopSlot(self.slot)
+      self.runningPerSlot[self.slot] = false
       self.statusLabel:setText("stopped")
     else
-      seq:startSlot(kSlot)
-      self.running = true
+      seq:startSlot(self.slot)
+      self.runningPerSlot[self.slot] = true
       self.statusLabel:setText("running")
     end
     return true
@@ -1072,16 +1137,23 @@ function GridView:subReleased(i, shifted)
       local col = self.columnCursor
       self.markBackup = {
         col = col,
-        m1  = seq:marker1(kSlot, col),
-        m2  = seq:marker2(kSlot, col),
+        m1  = seq:marker1(self.slot, col),
+        m2  = seq:marker2(self.slot, col),
       }
       self.markFirstMark = self.focusHeadRow
-      seq:setMarkers(kSlot, col, self.focusHeadRow, self.focusHeadRow)
+      seq:setMarkers(self.slot, col, self.focusHeadRow, self.focusHeadRow)
       self.markingMode = "marking_end"
     else
       -- Second press: commit the normalized (lo, hi) pair and exit.
       self:_commitMark()
     end
+    self:refresh()
+    return true
+  elseif i == 3 then
+    -- Layer toggle: same gesture whether shift is held or not (see
+    -- shifted path above), so the bar's S3 label is the discoverable
+    -- always-on affordance.
+    self.layer = (self.layer == "L1") and "L2" or "L1"
     self:refresh()
     return true
   end
@@ -1099,6 +1171,28 @@ function GridView:encoder(change, shifted)
   local seq = app.AudioThread.getSequencerTask()
   if not seq then return false end
 
+  -- BPM nudge has top priority: while shift+S2 is held, the encoder
+  -- routes here regardless of other modal state. Step is integer
+  -- BPM; shift on the encoder gesture itself picks the super step.
+  -- Clamped 20..300 (musical range covering most use cases).
+  if self.bpmHeld then
+    self.bpmAccum = self.bpmAccum + change
+    local step = shifted and 5 or 1
+    local cur = seq:getBpm()
+    local function clamp(v) return math.max(20, math.min(300, v)) end
+    while self.bpmAccum >= kEncoderThreshold do
+      cur = clamp(cur + step)
+      self.bpmAccum = self.bpmAccum - kEncoderThreshold
+    end
+    while self.bpmAccum <= -kEncoderThreshold do
+      cur = clamp(cur - step)
+      self.bpmAccum = self.bpmAccum + kEncoderThreshold
+    end
+    seq:setBpm(cur)
+    self:refresh()
+    return true
+  end
+
   self.encoderAccum = self.encoderAccum + change
   local moved = false
 
@@ -1106,14 +1200,14 @@ function GridView:encoder(change, shifted)
     -- Edit mode: nudge cell value. Shift picks the super step.
     local step = stepForColumn(self.columnCursor, self.editStepMode, shifted)
     while self.encoderAccum >= kEncoderThreshold do
-      local v = seq:l1Value(kSlot, self.columnCursor, self.focusHeadRow)
-      seq:setL1(kSlot, self.columnCursor, self.focusHeadRow, v + step)
+      local v = seq:l1Value(self.slot, self.columnCursor, self.focusHeadRow)
+      seq:setL1(self.slot, self.columnCursor, self.focusHeadRow, v + step)
       self.encoderAccum = self.encoderAccum - kEncoderThreshold
       moved = true
     end
     while self.encoderAccum <= -kEncoderThreshold do
-      local v = seq:l1Value(kSlot, self.columnCursor, self.focusHeadRow)
-      seq:setL1(kSlot, self.columnCursor, self.focusHeadRow, v - step)
+      local v = seq:l1Value(self.slot, self.columnCursor, self.focusHeadRow)
+      seq:setL1(self.slot, self.columnCursor, self.focusHeadRow, v - step)
       self.encoderAccum = self.encoderAccum + kEncoderThreshold
       moved = true
     end
@@ -1177,16 +1271,16 @@ function GridView:encoder(change, shifted)
     local col    = self.selectionColumn
     local step   = stepForColumn(col, self.editStepMode, false)
     local function applyBulk(delta)
-      local newV = seq:l1Value(kSlot, col, selMin) + delta
+      local newV = seq:l1Value(self.slot, col, selMin) + delta
       local pre  = self.preEditValues[col]
       local dirty = self.editedCells[col]
       if not pre   then pre   = {}; self.preEditValues[col] = pre end
       if not dirty then dirty = {}; self.editedCells[col]   = dirty end
       for r = selMin, selMax do
         if pre[r] == nil then
-          pre[r] = seq:l1Value(kSlot, col, r)
+          pre[r] = seq:l1Value(self.slot, col, r)
         end
-        seq:setL1(kSlot, col, r, newV)
+        seq:setL1(self.slot, col, r, newV)
         dirty[r] = true
       end
     end
@@ -1221,6 +1315,31 @@ end
 -- M1-M6 jump the column cursor directly to that ply. Switching to a
 -- different column clears any active selection (selection is per-column).
 function GridView:mainReleased(i, shifted)
+  -- shift+M2..M5 = slot picker (slots 0..3). M1 and M6 are reserved
+  -- per locked direction so they stay out of the slot map. On slot
+  -- switch we keep focusHead / columnCursor where they are so the
+  -- user lands on the same logical position in the new slot.
+  -- Selection / mark / bulk-edit state is per-slot, so we clear any
+  -- in-flight modal state on switch.
+  if shifted and i >= 2 and i <= 5 then
+    local newSlot = i - 2
+    if newSlot ~= self.slot then
+      -- Clear in-flight modals on the outgoing slot.
+      self.preEditValues   = {}
+      self.editedCells     = {}
+      self.selectionActive = false
+      self:_revertMark()   -- no-op if not marking
+      self.slot = newSlot
+      -- Reset visual easing so the cursor snaps to the new slot's
+      -- starting position rather than animating from old slot.
+      self.cursorAnimX   = nil
+      self.cursorAnimY   = nil
+      self.cursorEasingY = false
+      self.scrollFrac    = nil
+      self:refresh()
+    end
+    return true
+  end
   if shifted then return false end
   if i >= 1 and i <= kNumColumns then
     local newCol = i - 1
@@ -1259,7 +1378,7 @@ function GridView:enterReleased(shifted)
   -- next row via the commitAndAdvance signal below.
   if self.layer == "L2" and not self.editingL1 then
     local CellEditor = require "Sequencer.CellEditor"
-    local editor = CellEditor(kSlot, self.columnCursor, self.focusHeadRow)
+    local editor = CellEditor(self.slot, self.columnCursor, self.focusHeadRow)
     editor:subscribe("done", function() self:refresh() end)
     editor:subscribe("commitAndAdvance", function()
       self.focusHeadRow = clamp(self.focusHeadRow + 1, 0, kMaxRow)
@@ -1309,7 +1428,7 @@ function GridView:cancelReleased(shifted)
     if seq then
       for col, rows in pairs(self.preEditValues) do
         for row, val in pairs(rows) do
-          seq:setL1(kSlot, col, row, val)
+          seq:setL1(self.slot, col, row, val)
         end
       end
     end
@@ -1375,14 +1494,14 @@ function GridView:zeroReleased()
   if self.editingL1 then
     local seq = app.AudioThread.getSequencerTask()
     if seq then
-      seq:setL1(kSlot, self.columnCursor, self.focusHeadRow, 0.0)
+      seq:setL1(self.slot, self.columnCursor, self.focusHeadRow, 0.0)
       self:refresh()
     end
     return true
   end
   local seq = app.AudioThread.getSequencerTask()
   if seq then
-    seq:resetSlot(kSlot)
+    seq:resetSlot(self.slot)
     self:refresh()
   end
   return true
