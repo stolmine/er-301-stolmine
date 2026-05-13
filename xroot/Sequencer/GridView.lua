@@ -156,16 +156,33 @@ function GridView:init(chain)
   self.cursorBox:setBorderColor(app.GRAY10)
   self:addMainGraphic(self.cursorBox)
 
+  -- Selection box: a dotted-edge rectangle wrapping the active row-range
+  -- selection on `selectionColumn`. Built from app.Drawing +
+  -- app.DrawingInstructions (no C++ changes needed) -- the dotted look
+  -- is achieved by emitting many short solid hline/vline segments.
+  -- Hidden by default; refresh() rebuilds + shows when selection is
+  -- active on the user's current column.
+  self.selectionDrawing = app.Drawing(0, 0, 256, 64)
+  self.selectionInstr   = app.DrawingInstructions()
+  self.selectionDrawing:add(self.selectionInstr)
+  self:addMainGraphic(self.selectionDrawing)
+  self.selectionDrawing:hide()
+
   -- ---- navigation state ----
   -- focusHeadRow: shared "global scroll" row, encoder-driven.
   -- columnCursor: which column is active, 0..5, M1-M6-driven.
   -- editingL1: when true, the encoder nudges the cell value at
   --            (focusHeadRow, columnCursor) instead of scrolling.
-  self.focusHeadRow = 0
-  self.columnCursor = 0
-  self.encoderAccum = 0  -- accumulates ticks until kEncoderThreshold is reached
-  self.editingL1    = false
-  self.editStepMode = "fine"  -- "fine" or "coarse"; toggled via dial button
+  -- selection*: shift+encoder builds a row-range selection on a column.
+  self.focusHeadRow      = 0
+  self.columnCursor      = 0
+  self.encoderAccum      = 0  -- accumulates ticks until kEncoderThreshold is reached
+  self.editingL1         = false
+  self.editStepMode      = "fine"  -- "fine" or "coarse"; toggled via dial button
+  self.selectionActive   = false
+  self.selectionAnchor   = 0
+  self.selectionEnd      = 0
+  self.selectionColumn   = 0
 
   -- ---- sub display: slot label + transport state + softkeys ----
 
@@ -271,6 +288,31 @@ local function cellBrightness(isPlayhead, isFocus, inLoop)
   return kBrightDim
 end
 
+-- Dotted-rectangle builder for the selection box. Emits multiple short
+-- solid hline/vline segments through app.DrawingInstructions to
+-- approximate dotting; the lower-level FrameBuffer.hline supports a
+-- proper `dotting` arg but DrawingInstructions doesn't expose it.
+local kDotOn     = 2   -- pixels lit per dot
+local kDotOff    = 2   -- pixels off between dots
+local kDotPeriod = kDotOn + kDotOff
+
+local function buildDottedRect(instr, x, y, w, h, color)
+  instr:clear()
+  instr:color(color)
+  local xEnd = x + w - 1
+  local yEnd = y + h - 1
+  for px = x, xEnd, kDotPeriod do
+    local px2 = math.min(px + kDotOn - 1, xEnd)
+    instr:hline(px, px2, y)      -- bottom
+    instr:hline(px, px2, yEnd)   -- top
+  end
+  for py = y, yEnd, kDotPeriod do
+    local py2 = math.min(py + kDotOn - 1, yEnd)
+    instr:vline(x,    py, py2)   -- left
+    instr:vline(xEnd, py, py2)   -- right
+  end
+end
+
 function GridView:refresh()
   local seq = app.AudioThread.getSequencerTask()
   if not seq then return end
@@ -331,6 +373,30 @@ function GridView:refresh()
     self.cursorBox:show()
   else
     self.cursorBox:hide()
+  end
+
+  -- Selection box: dotted-edge rectangle wrapping the row-range
+  -- selection on `selectionColumn`. Hidden when the user has switched
+  -- columns (which also clears the selection, but defensive in case).
+  if self.selectionActive and self.selectionColumn == self.columnCursor then
+    local selMin = math.min(self.selectionAnchor, self.selectionEnd)
+    local selMax = math.max(self.selectionAnchor, self.selectionEnd)
+    -- Clip to visible window so off-screen portions just don't render.
+    local topV    = math.max(1,            selMin - startRow + 1)
+    local bottomV = math.min(kVisibleRows, selMax - startRow + 1)
+    if topV <= bottomV then
+      local topLabelY    = kHeaderY - topV    * kRowHeight
+      local bottomLabelY = kHeaderY - bottomV * kRowHeight
+      local selX = self.selectionColumn * kColPly
+      local selY = bottomLabelY + 3
+      local selH = (bottomV - topV) * kRowHeight + 10
+      buildDottedRect(self.selectionInstr, selX, selY, kColPly, selH, app.GRAY10)
+      self.selectionDrawing:show()
+    else
+      self.selectionDrawing:hide()
+    end
+  else
+    self.selectionDrawing:hide()
   end
 
   self.bpmLabel:setText(string.format("BPM %d", math.floor(seq:getBpm() + 0.5)))
@@ -394,11 +460,6 @@ end
 -- In edit state, the encoder instead nudges the cell value at
 -- (focusHeadRow, columnCursor) by the column's type-specific step.
 function GridView:encoder(change, shifted)
-  -- Outside edit mode, shift+encoder is reserved for selection-extend
-  -- per the plan (Step 7). For v0.1, swallow it so it doesn't scroll.
-  -- Inside edit mode, shifted selects the "super" step multiplier.
-  if shifted and not self.editingL1 then return false end
-
   local seq = app.AudioThread.getSequencerTask()
   if not seq then return false end
 
@@ -406,6 +467,7 @@ function GridView:encoder(change, shifted)
   local moved = false
 
   if self.editingL1 then
+    -- Edit mode: nudge cell value. Shift picks the super step.
     local step = stepForColumn(self.columnCursor, self.editStepMode, shifted)
     while self.encoderAccum >= kEncoderThreshold do
       local v = seq:l1Value(kSlot, self.columnCursor, self.focusHeadRow)
@@ -419,7 +481,31 @@ function GridView:encoder(change, shifted)
       self.encoderAccum = self.encoderAccum + kEncoderThreshold
       moved = true
     end
+  elseif shifted then
+    -- Nav mode + shift: extend selection. Anchor on first activation;
+    -- focusHeadRow tracks the moving end (so the cursor box sits on
+    -- the cell the user is actively dialing toward). Selection range
+    -- = [min(anchor, end), max(anchor, end)].
+    if not self.selectionActive then
+      self.selectionAnchor = self.focusHeadRow
+      self.selectionColumn = self.columnCursor
+      self.selectionActive = true
+    end
+    while self.encoderAccum >= kEncoderThreshold do
+      self.focusHeadRow = clamp(self.focusHeadRow + 1, 0, kMaxRow)
+      self.encoderAccum = self.encoderAccum - kEncoderThreshold
+      moved = true
+    end
+    while self.encoderAccum <= -kEncoderThreshold do
+      self.focusHeadRow = clamp(self.focusHeadRow - 1, 0, kMaxRow)
+      self.encoderAccum = self.encoderAccum + kEncoderThreshold
+      moved = true
+    end
+    if moved then self.selectionEnd = self.focusHeadRow end
   else
+    -- Nav mode no shift: plain focus-head scroll.
+    -- Bulk-edit on selection lands in Chunk B; for now selection is
+    -- visible but inert when encoder is turned without shift.
     while self.encoderAccum >= kEncoderThreshold do
       self.focusHeadRow = clamp(self.focusHeadRow + 1, 0, kMaxRow)
       self.encoderAccum = self.encoderAccum - kEncoderThreshold
@@ -436,11 +522,16 @@ function GridView:encoder(change, shifted)
   return true
 end
 
--- M1-M6 jump the column cursor directly to that ply.
+-- M1-M6 jump the column cursor directly to that ply. Switching to a
+-- different column clears any active selection (selection is per-column).
 function GridView:mainReleased(i, shifted)
   if shifted then return false end
   if i >= 1 and i <= kNumColumns then
-    self.columnCursor = i - 1
+    local newCol = i - 1
+    if self.selectionActive and newCol ~= self.selectionColumn then
+      self.selectionActive = false
+    end
+    self.columnCursor = newCol
     self:refresh()
     return true
   end
@@ -450,20 +541,29 @@ end
 -- ENTER from grid view: enter the L1 inline edit state on the active
 -- cell, or (if already editing) commit + auto-advance focus head down
 -- one row (Habitat-fluid editing). CANCEL or UP exit the edit state.
+-- Entering edit mode clears any active selection (mutually exclusive).
 function GridView:enterReleased(shifted)
   if shifted then return false end
   if self.editingL1 then
     self.focusHeadRow = clamp(self.focusHeadRow + 1, 0, kMaxRow)
   else
     self.editingL1 = true
+    self.selectionActive = false
   end
   self:refresh()
   return true
 end
 
 function GridView:cancelReleased(shifted)
+  -- Edit mode takes priority -- CANCEL exits edit first.
   if self.editingL1 then
     self.editingL1 = false
+    self:refresh()
+    return true
+  end
+  -- Otherwise CANCEL clears an active selection.
+  if self.selectionActive then
+    self.selectionActive = false
     self:refresh()
     return true
   end
