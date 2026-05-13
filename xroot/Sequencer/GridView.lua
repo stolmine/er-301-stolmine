@@ -454,12 +454,12 @@ function GridView:init(chain)
   self.s3Button = app.SubButton("reset", 3)
   self:addSubGraphic(self.s3Button)
 
-  -- Per-slot running state shadow. S1 transport label reads
-  -- runningPerSlot[self.slot]; switching slots refreshes from this
-  -- table. The engine's own `running` flag isn't exposed via a
-  -- getter, so we track it Lua-side as a shadow of what we asked
-  -- the engine to do via startSlot / stopSlot.
-  self.runningPerSlot = { [0] = false, [1] = false, [2] = false, [3] = false }
+  -- Global transport state shadow. S1 toggles all four slots in
+  -- lockstep: the user mutes individual slots chain-side (by muting
+  -- the chain that consumes seq*.cv1 etc.) rather than per-slot
+  -- transport here. Avoids needing a separate per-slot reset / CV
+  -- input scheme to recover from divergent states.
+  self.running = false
   -- Per-frame refresh callback. Re-set on each onShow so the closure
   -- captures `self`; cleared on onHide via Signal.remove.
   self.frameCallback = nil
@@ -999,7 +999,7 @@ function GridView:refresh()
   -- is showing without having to hold shift. Status mirrors the
   -- selected slot's running shadow so slot-switching updates it.
   self.titleLabel:setText(string.format("seq%d.%s", self.slot + 1, self.layer))
-  self.statusLabel:setText(self.runningPerSlot[self.slot] and "running" or "stopped")
+  self.statusLabel:setText(self.running and "running" or "stopped")
   self.slotIndicator:setText(string.format("S%d", self.slot + 1))
 
   -- Shift-held preview overlay: clipboard preview wins (paste-target
@@ -1056,7 +1056,7 @@ function GridView:refresh()
     self.s2Button:setText("cut")
     self.s3Button:setText("rand")
   elseif self.markingMode == "marking_end" then
-    self.s1Button:setText(self.runningPerSlot[self.slot] and "stop" or "start")
+    self.s1Button:setText(self.running and "stop" or "start")
     self.s2Button:setText("end")
     self.s3Button:setText("")
   elseif app.isShiftButtonPushed() then
@@ -1064,7 +1064,7 @@ function GridView:refresh()
     self.s2Button:setText("BPM")
     self.s3Button:setText(otherLayer)
   else
-    self.s1Button:setText(self.runningPerSlot[self.slot] and "stop" or "start")
+    self.s1Button:setText(self.running and "stop" or "start")
     self.s2Button:setText("mark")
     self.s3Button:setText(otherLayer)
   end
@@ -1326,13 +1326,17 @@ function GridView:subReleased(i, shifted)
   -- layer's name on S3 so the gesture is discoverable without
   -- requiring the user to hold shift first.
   if i == 1 then
-    if self.runningPerSlot[self.slot] then
-      seq:stopSlot(self.slot)
-      self.runningPerSlot[self.slot] = false
+    -- Unified transport across all four slots so users mute
+    -- individual slots chain-side (where it composes with the rest
+    -- of the patch) rather than juggling per-slot runs that can
+    -- drift apart without a reset gesture.
+    if self.running then
+      for s = 0, 3 do seq:stopSlot(s) end
+      self.running = false
       self.statusLabel:setText("stopped")
     else
-      seq:startSlot(self.slot)
-      self.runningPerSlot[self.slot] = true
+      for s = 0, 3 do seq:startSlot(s) end
+      self.running = true
       self.statusLabel:setText("running")
     end
     return true
