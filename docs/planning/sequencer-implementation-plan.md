@@ -10,18 +10,19 @@ listed as "deferred to implementation phase" are now resolved; see the **Locked
 decisions** section below. New ambiguities surfaced during the lock-in pass are
 captured in **Deferred ambiguities** (intentionally not blocking engine work).
 
-**Progress (as of 2026-05-12):** Steps 1, 2, 4, 7, 8 done. Step 5 partially
-shipped (L1 inline edit; L2 modal still pending). Step 6 partially shipped
-(selection-mode sub layout done; per-column mark-start/end cycle still
-pending). Steps 3, 9 not yet started. Branch `feature/sequencer` carries
-the work; commits run from `ba75ad7` (engine) through `864b251` (paste).
+**Progress (as of 2026-05-12):** Steps 1, 2, 4, 6, 7, 8 done. Step 5
+partially shipped (L1 inline edit; L2 modal still pending). Steps 3, 9
+not yet started. Branch `feature/sequencer` carries the work; commits
+run from `ba75ad7` (engine) through `3bf71d8` (mark dotted box).
 The sequencer is **user-authorable end-to-end on the device for L1
 patterns**: wire any `seqN.*` source into a chain, `shift+ENTER` from
-scope, navigate to a cell, ENTER to edit, encoder to nudge, shift+encoder
-to extend a row-range selection, bare encoder to bulk-edit (with revert
-via CANCEL / commit via UP), S1/S2/S3 to copy/cut/randomize, shift+S1 to
-paste at focus head. L2 grammar authoring + per-column loop markers +
-quicksave persistence are the remaining authoring features.
+scope, navigate to a cell, ENTER to edit, encoder to nudge,
+shift+encoder to extend a row-range selection, bare encoder to
+bulk-edit (with revert via CANCEL / commit via UP), S1/S2/S3 to
+copy/cut/randomize, shift+S1 to paste at focus head, S2 to enter the
+per-column mark-start/end modal. Remaining for v0.1: L2 grammar
+authoring (Step 5b), quicksave persistence (Step 3), polish + bench
+(Step 9).
 
 ---
 
@@ -164,43 +165,29 @@ cell on every tick (held-CV / single-step drone behaviors).
 
 ### Grid view, L1 mode (as shipped)
 
-The actual sub layout currently in the takeover is simpler than the
-earlier draft below — slot semantics shifted as the implementation
-landed. The earlier draft is kept further down for reference; treat
-this block as authoritative.
-
 ```
 +--S1 ply-----+--S2 ply-----+--S3 ply-----+
 |             |             |             |
-|  start|stop |     (--)    |    reset    |   (default; selection inactive)
+|  start|stop |    mark     |     —       |   (default; no overlay)
 |             |             |             |
 +-------------+-------------+-------------+
-   S1 = transport      S2 = unused        S3 = playhead reset
-   (Toggle play /      (reserved for      (sends all playheads
-    stop on slot 0)     mark-start/end     to row 0; does NOT
-                        when shipped)      stop transport)
+   S1 = transport      S2 = enter mark    S3 = unused
+   (Toggle play /      modal on the       (playhead reset
+    stop on slot 0)    cursor's column     moved to
+                                           shift+HOME)
 
-Shift held + clipboard non-empty:
+Mark modal (after 1st S2 press):
 +-------------+-------------+-------------+
-|    paste    |     (--)    |    (--)     |
+|  start|stop |    end      |     —       |
++-------------+-------------+-------------+
+   S2 commits live (firstMark..focusHead) to the column's
+   normalized (lo, hi) loop pair on second press.
+
+Shift held + clipboard non-empty (no other modal):
++-------------+-------------+-------------+
+|    paste    |     —       |     —       |
 +-------------+-------------+-------------+
    S1 = paste at focus head, advance focusHead by N
-```
-
-Earlier draft for reference (some slots remain unbuilt):
-
-```
-+--S1 ply (~42px)-+--S2 ply (~42px)-+--S3 ply (~42px)-+
-|     +1.0        |   mark start    |   ▸ playhead    |
-|     EDIT ▸      |     ▸ mark end  |                 |
-|                 |     (cycles)    |                 |
-+-----------------+-----------------+-----------------+
-   (S1 click =       (S2 click =       (S3 default =
-    keyboard          cycles per-col    jump-to-playhead,
-    modal on cell --  state machine --  not yet built;
-    L2 only; L1       not yet built)    today S3=reset)
-    uses inline ENTER
-    edit instead)
 ```
 
 ### Grid view, L2 mode
@@ -285,18 +272,30 @@ encoder gestures.
 
 ## Sub-bar state-rotation summary
 
-The default (no-selection) sub bar is `start|stop / _ / reset`. Selection
-swaps it entirely to `copy / cut / rand`. Holding shift while in default
-state opens a paste overlay on S1 when the clipboard is non-empty.
+The default sub bar is `start|stop / mark / _`. Three overlays swap it:
 
-| Selection | Clipboard | Shift | S1 | S2 | S3 |
-|---|---|---|---|---|---|
-| No  | Empty     | No  | start\|stop | —     | reset |
-| No  | Empty     | Yes | start\|stop | —     | reset |
-| No  | Non-empty | No  | start\|stop | —     | reset |
-| No  | Non-empty | Yes | **paste**   | —     | —     |
-| Yes | (any)     | No  | copy        | cut   | rand  |
-| Yes | (any)     | Yes | copy        | cut   | rand  |
+- **Selection mode** (shift+encoder built a row-range): replaces all three
+  ply with `copy / cut / rand`.
+- **Mark modal** (1st S2 press; 2nd press / UP / ENTER / column-switch
+  commits): S2 reads `end`; S1 keeps transport active; S3 blank.
+- **Shift-paste overlay** (shift held + clipboard non-empty, no other
+  modal): S1 swaps to `paste`; S2 / S3 blank.
+
+Priority: selection > marking > shift-paste > default. Resolved per
+refresh from gesture state.
+
+| Selection | Marking | Clipboard | Shift | S1 | S2 | S3 |
+|---|---|---|---|---|---|---|
+| No  | No  | Empty     | No  | start\|stop | mark      | — |
+| No  | No  | Empty     | Yes | start\|stop | mark      | — |
+| No  | No  | Non-empty | No  | start\|stop | mark      | — |
+| No  | No  | Non-empty | Yes | **paste**   | —         | — |
+| No  | Yes | (any)     | (any) | start\|stop | **end** | — |
+| Yes | —   | (any)     | (any) | copy        | cut       | rand |
+
+S3 reset was removed; **playhead reset is now shift+HOME** outside the
+L1 cell editor (`zeroReleased`). Inside the editor, shift+HOME keeps
+its existing role as the "zero this cell" gesture.
 
 Clipboard scope:
 - **Single slot, ephemeral** (not persisted across patch save).
@@ -517,7 +516,7 @@ Cell content as compact `pred:action` notation (e.g., `%4:B+1`, `?60:B!`, `>0.5:
 ## Effort estimate
 
 **~8.3 weeks** of focused development for v1. Status snapshot 2026-05-12
-(approximately ~5.5 of 8.3 weeks shipped):
+(approximately ~5.8 of 8.3 weeks shipped):
 
 | Piece | Estimate | Status |
 |---|---|---|
@@ -526,11 +525,11 @@ Cell content as compact `pred:action` notation (e.g., `%4:B+1`, `?60:B!`, `>0.5:
 | Patch persistence | 0.5 | ⏳ pending |
 | Grid view | 1.5 | ✅ shipped (`f8be7a7` … `22d7b01`) |
 | Cell editor modal | 1.5 | 🟡 L1 inline done (`ede9963`); L2 modal remaining (~1.0 week) |
-| Sub-display routing | 0.5 | 🟡 selection-mode swap + shift-paste overlay done (`bf30bfe`, `864b251`); mark-start/end cycle remaining (~0.3 week) |
+| Sub-display routing | 0.5 | ✅ shipped (`bf30bfe`, `864b251`, `0b47789`, `3bf71d8`) |
 | Selection + clipboard | 1.0 | ✅ shipped (`e7aaea3`, `22d7b01`, `bf30bfe`, `864b251` -- Chunks A/B/C + PASTE) |
 | Access path (scope-mode shift+ENTER only) | 0.3 | ✅ shipped (`ade1f44`) |
 | Polish + bench | 1.0 | ⏳ pending |
-| **Total** | **~8.3** | **~5.5 shipped, ~2.8 remaining** |
+| **Total** | **~8.3** | **~5.8 shipped, ~2.5 remaining** |
 
 This is **focused**-time. Calendar time depends on context-switching with other
 work; realistic delivery is **3-4 months**.
@@ -582,13 +581,31 @@ now settled. Engine and UI code should reference these directly.
     takeover (small text at top of main display showing current BPM).
 
 11. **PASTE binding.** Lives on a live shift-held overlay on S1 of the
-    default (no-selection) sub bar: `start|stop / _ / reset` swaps to
+    default (no-selection) sub bar: `start|stop / mark / _` swaps to
     `paste / _ / _` while shift is held AND the clipboard is non-empty.
     Transport stays positionally consistent (S1 unshifted always =
     start/stop). Selection mode is never affected by this overlay --
     while selecting, shift only modifies encoder gestures. Decided
     against the alternative of moving transport to S2 (would break
     scope-mode reflex). Shipped in `864b251`.
+
+12. **Mark-start/end modal.** S2 enters a per-column modal: 1st press
+    snapshots the existing `(marker1, marker2)` pair into `markBackup`
+    and plants `markFirstMark` at focusHead; encoder + HOME during the
+    modal live-update marker2 so the loop dim slides with the user;
+    2nd S2 press / UP / ENTER / column-switch via M-key all commit the
+    normalized `(min, max)` pair and exit; CANCEL reverts to the
+    snapshot. The shared dotted-edge primitive used for selection
+    wraps the live `(firstMark..focusHead)` range while the modal is
+    active. Cursor box turns white during marking (same active-state
+    cue used for edit / selection modes). Shipped in `0b47789`,
+    `3bf71d8`.
+
+13. **Playhead reset gesture.** Moved off the sub bar to
+    **shift+HOME** outside the L1 cell editor. Inside the editor,
+    shift+HOME retains its prior "zero this cell" behaviour. The S3
+    softkey is now unused (reserved for future per-state-machine
+    needs). Shipped in `0b47789`.
 
 ---
 
@@ -657,14 +674,21 @@ implementation phase (step 5).
    not yet built** (the 6-slot Keyboard.Slot fork for predicate:action
    authoring per the spec). Budget remaining: ~1.5 weeks for L2 modal.
 
-6. 🟡 **Sub-display state machines + mark-start/end — partial.** The
-   selection-mode sub bar swap (`copy / cut / rand`) and the shift-held
-   paste overlay (`paste / _ / _` when clipboard non-empty) are shipped
-   in `bf30bfe` and `864b251`. **The per-column mark-start/end cycle is
-   still unbuilt** -- loop bounds are populated by the bench harness only.
-   In the UI, M-press currently jumps the column cursor; the long-press
-   or shift-modifier path to "mark start / mark end" still needs design
-   + plumbing. Remaining: ~0.3 week.
+6. ✅ **Sub-display state machines + mark-start/end.** Sub bar swaps
+   between selection (`copy / cut / rand`), mark modal
+   (`start|stop / end / _`), shift-paste overlay (`paste / _ / _` when
+   clipboard non-empty), and default (`start|stop / mark / _`).
+   Priority order: selection > marking > shift-paste > default. S2
+   drives a per-column mark modal: 1st press snapshots the existing
+   `(marker1, marker2)` and plants `markFirstMark` at focusHead;
+   encoder + HOME during the modal live-update marker2; 2nd press / UP
+   / ENTER / column-switch commit the normalized `(lo, hi)` pair;
+   CANCEL reverts to the snapshot. The same dotted-edge primitive
+   used for selection wraps the live `(firstMark..focusHead)` range.
+   S3 reset button was reclaimed; **playhead reset moved to
+   shift+HOME** outside the L1 cell editor (zeroReleased keeps its
+   zero-the-cell behaviour while editing). Shipped in `bf30bfe`,
+   `864b251`, `0b47789`, `3bf71d8`. **Step 6 done.**
 
 7. ✅ **Selection + clipboard.** shift+scroll builds a row-range selection
    on the active column. Bare encoder during selection bulk-edits all
