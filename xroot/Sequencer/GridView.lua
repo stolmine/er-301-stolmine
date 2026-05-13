@@ -246,13 +246,15 @@ function GridView:init(chain)
   self.editStepLabel:setJustification(app.justifyLeft)
   self:addSubGraphic(self.editStepLabel)
 
-  self.startStopButton = app.SubButton("start", 1)
-  self:addSubGraphic(self.startStopButton)
-
-  -- S2 reserved (slot selector etc.).
-
-  self.resetButton = app.SubButton("reset", 3)
-  self:addSubGraphic(self.resetButton)
+  -- Sub-display soft buttons. Texts swap between two modes via
+  -- refresh(): default (start/stop, S2 empty, reset) and selection
+  -- (copy / cut / rand). Action dispatch happens in subReleased().
+  self.s1Button = app.SubButton("start", 1)
+  self:addSubGraphic(self.s1Button)
+  self.s2Button = app.SubButton("", 2)
+  self:addSubGraphic(self.s2Button)
+  self.s3Button = app.SubButton("reset", 3)
+  self:addSubGraphic(self.s3Button)
 
   self.running = false
   -- Per-frame refresh callback. Re-set on each onShow so the closure
@@ -375,6 +377,36 @@ local kCellHideY      = kHeaderY - kRowHeight + 1
 local kDirtyDotW    = 2
 local kDirtyDotH    = 2
 local kDirtyDotXOff = 38           -- right edge of column (column ends at 42)
+
+-- Single-slot ephemeral clipboard for L1 row-range selections. Stored
+-- as { col = integer, values = {float, float, ...} }. Module-local
+-- so it persists across GridView reopens during one session but does
+-- NOT persist across patch save/restore (per the plan's "ephemeral"
+-- decision). PASTE is a follow-up; for now this is consumed by COPY/
+-- CUT only -- nothing reads it back yet.
+local clipboard = nil
+
+-- Per-column random value generator for the RANDOMIZE action. The
+-- distributions match the column's typed range so randomized values
+-- look musically sensible: ±5 octaves for V/oct, ±5 V for raw CV,
+-- common-fraction beats for length columns, 0..1 amplitude for gates.
+local kRandomBeats = { 0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0 }
+local function randomForColumn(col)
+  if col == 0 then
+    -- CV1 (V/oct): random semitone in -60..+60 (5 octaves each way).
+    return math.random(-60, 60) / 12.0
+  elseif col == 1 or col == 2 then
+    -- CV2 / CV3: -5..+5 V, 0.1 V resolution.
+    return math.random(-50, 50) / 10.0
+  elseif col == 3 or col == 5 then
+    -- gate-len / step-len: draw from common-fraction set.
+    return kRandomBeats[math.random(1, #kRandomBeats)]
+  elseif col == 4 then
+    -- gate-amp: 0..1, 0.05 step.
+    return math.random(0, 20) / 20.0
+  end
+  return 0.0
+end
 
 local function buildDottedRect(instr, x, y, w, h, color)
   instr:clear()
@@ -607,6 +639,18 @@ function GridView:refresh()
   else
     self.editStepLabel:setText("")
   end
+
+  -- Sub softkey labels: copy / cut / rand while a selection is
+  -- active, otherwise the default transport (start-stop, reset).
+  if self.selectionActive then
+    self.s1Button:setText("copy")
+    self.s2Button:setText("cut")
+    self.s3Button:setText("rand")
+  else
+    self.s1Button:setText(self.running and "stop" or "start")
+    self.s2Button:setText("")
+    self.s3Button:setText("reset")
+  end
 end
 
 function GridView:onShow()
@@ -639,17 +683,51 @@ function GridView:subReleased(i, shifted)
   local seq = app.AudioThread.getSequencerTask()
   if not seq then return false end
 
+  -- Selection-mode sub buttons (copy / cut / rand). All three commit
+  -- any in-flight bulk edit implicitly: editedCells + preEditValues
+  -- are dropped (values stay as-is in the engine) and the selection
+  -- collapses. The action itself sees the post-bulk-edit values.
+  if self.selectionActive then
+    local selMin = math.min(self.selectionAnchor, self.selectionEnd)
+    local selMax = math.max(self.selectionAnchor, self.selectionEnd)
+    local col    = self.selectionColumn
+    if i == 1 then
+      local values = {}
+      for r = selMin, selMax do
+        values[#values + 1] = seq:l1Value(kSlot, col, r)
+      end
+      clipboard = { col = col, values = values }
+    elseif i == 2 then
+      local values = {}
+      for r = selMin, selMax do
+        values[#values + 1] = seq:l1Value(kSlot, col, r)
+        seq:setL1(kSlot, col, r, 0.0)
+      end
+      clipboard = { col = col, values = values }
+    elseif i == 3 then
+      for r = selMin, selMax do
+        seq:setL1(kSlot, col, r, randomForColumn(col))
+      end
+    else
+      return false
+    end
+    self.preEditValues   = {}
+    self.editedCells     = {}
+    self.selectionActive = false
+    self:refresh()
+    return true
+  end
+
+  -- Default transport: S1 start/stop, S3 reset, S2 unused.
   if i == 1 then
     if self.running then
       seq:stopSlot(kSlot)
       self.running = false
       self.statusLabel:setText("stopped")
-      self.startStopButton:setText("start")
     else
       seq:startSlot(kSlot)
       self.running = true
       self.statusLabel:setText("running")
-      self.startStopButton:setText("stop")
     end
     return true
   elseif i == 3 then
