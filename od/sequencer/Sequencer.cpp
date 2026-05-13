@@ -236,8 +236,19 @@ void Slot::setMarkers(int col, int m1, int m2)
 {
   if (col < 0 || col >= kNumColumns) return;
   Column& c = columns[col];
-  c.marker1 = std::max(0, std::min(m1, c.length - 1));
-  c.marker2 = std::max(0, std::min(m2, c.length - 1));
+  // Clamp to engine maximum (kMaxStepsPerColumn), then auto-grow the
+  // column's logical length so the higher of (m1, m2) fits inside it.
+  // Without the grow, default length = 16 silently clamped any marker
+  // past row 15 -- the UI has no separate length control yet, so the
+  // user's mark gesture would just appear to land at row 15 with no
+  // feedback. Length only grows here; shrinking remains the explicit
+  // job of setColumnLength.
+  m1 = std::max(0, std::min(m1, kMaxStepsPerColumn - 1));
+  m2 = std::max(0, std::min(m2, kMaxStepsPerColumn - 1));
+  const int needed = std::max(m1, m2) + 1;
+  if (c.length < needed) c.length = needed;
+  c.marker1 = m1;
+  c.marker2 = m2;
 }
 
 void Slot::setL2(int col, int row, const Predicate& p, const Action& a)
