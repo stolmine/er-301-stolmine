@@ -730,32 +730,113 @@ implementation phase (step 5).
    commitReleased per `xroot/Application.lua:300-305`). Shipped in `ade1f44`.
    **Step 8 done.**
 
-9. ⏳ **Polish + listen test** — under-load consistency, tempo sync,
-   RNG reproducibility, patch quicksave round-trips. **1 week.** _Not
-   started._ Concrete backlog as of 2026-05-13:
+9. ⏳ **Polish + listen test.** _Not started._ Revised estimate
+   **~1.5–2.0 weeks** with the expanded backlog below. Items roughly
+   in priority order; deferable items at the bottom can slip to v1.1
+   if not biting in practice.
 
-   - **L2 cell editor: S3 column-targeting indication.** While the
-     user holds S3 in the modal (= "encoder cycles column letter
-     instead of row index"), there's no on-screen cue that the mode
-     has flipped. Cheap fix: tag the focused M1 / M4 slot border (or
-     add a small "col" chip near it) while `self.s3Held` is true.
-     ~0.05w.
+   ### UI affordances
 
-   - **Multi-slot grid view.** Today GridView hardcodes `kSlot = 0`
-     so the user only sees / edits slot 0's pattern. The other three
-     slots run silently via their picker exposures but are unreachable
-     in the UI. Candidate gesture: shift+M1..M4 selects slots 0..3
-     (M5 / M6 free for future use; or shift+M2..M5 leaving M1 / M6
-     reserved). Bench harness already runs on slot 3, so the engine
-     side is proven. ~0.2w.
+   - **(1) L2 cell editor: persistent S3 hint on sub.** Inside the
+     modal, S3 has no on-screen label, so the user has no signal that
+     S3 does anything. Add a persistent text chip near the S3 ply
+     position ("col" or "↔ col", ASCII-safe). Always visible in the
+     modal regardless of held state. ~0.05w. File:
+     `xroot/Sequencer/CellEditor.lua`.
 
-   - Sample-accurate tick scheduling.
-   - Gate-row source disambiguation (gate-row TODO in
-     `Sequencer.h:215-220`).
-   - gate-len / gate-amp / step-len output semantics under load.
-   - RNG reproducibility (locked decision #4): persist seed in
-     quicksave + add a re-seed gesture, OR add a Settings entry for
-     reproducible-vs-evolving randomness.
+   - **(2) Always-visible layer toggle on unshifted S3.** Today the
+     L1↔L2 toggle is hidden behind shift+S3. Promote it: unshifted S3
+     always shows the OTHER layer name. Bidirectional, mirrored
+     between L1 and L2 sub bars. ~0.05w. File:
+     `xroot/Sequencer/GridView.lua`.
+
+   - **(3) In-takeover BPM control on shift+S2.** BPM is read-only
+     inside the takeover today (only editable via admin Settings).
+     Add `shift+S2 + encoder` to nudge BPM with fine/coarse/super
+     stepping. Applies in both L1 and L2 default views (NOT inside
+     selection or modal). Uniform value across all four slots. ~0.15w.
+
+   - **(4) Multi-slot grid view + picker.** GridView hardcodes
+     `kSlot = 0`. **Gesture: shift+M2, M3, M4, M5 = slots 0..3**
+     (M1 and M6 reserved). Replace constant with `self.slot`; refresh
+     updates the "seq{N}.{layer}" title naturally. ~0.2w.
+
+   - **(5) L2 grid expanded-rule preview on shift+S1.** Cells in the
+     L2 grid render abbreviated rules with "…" truncation. On L2,
+     no modal, no selection: hold shift → S1 shows the full
+     pred:action of the cell at `(focusHeadRow, columnCursor)`.
+     Conditional: when clipboard non-empty, the same gesture
+     previews the clipboard contents (paste-target preview) instead.
+     ~0.15w. Reuses `CellEditor.compactPreview()` (factor out into
+     a shared `Sequencer/Format.lua` or duplicate).
+
+   - **(6) Coherent / "musical" randomization.** Today RANDOMIZE
+     draws from fixed per-column distributions. Add a constrained
+     variant that picks only from values already present in the
+     column / selection. Placement: **shift+S3 in selection mode =
+     coherent random**, unshifted S3 = unconstrained. Extends to
+     ACTION_RAND once item 7 lands; may add `ACTION_RAND_COHERENT`
+     to keep the Action struct from growing. ~0.2w.
+
+   - **(7) Enable L2 selection (Phase 3-lite).** Lift the Phase 1
+     block on L2 selection/copy/cut/paste/random. Selection on L2
+     builds a row-range; clipboard distinguishes L1 vs L2 content;
+     cross-layer paste refuses. ~0.25w.
+
+   ### Engine + audio refinement
+
+   - **(8) Audio-thread priority audit for clock stability.**
+     Sequencer task at `INT_MAX - 2`. Measure tick jitter under load
+     (heavy patches + recording). Bump priority if needed. ~0.15w.
+
+   - **(9) Sample-accurate tick scheduling.** Ticks fire at frame
+     boundaries → up to ~2.6 ms jitter at 48 kHz / 128 samples.
+     Refactor `processFrame` to split frames at tick boundaries.
+     Deferable to v1.1 if not biting. ~0.2w.
+
+   - **(10) Gate-row source disambiguation.** Resolve the gate-row
+     TODO at `Sequencer.h:215-220`. v0.1 reads gate-amp from CV1's
+     playhead row; pick final semantics (per-column gate? composite?)
+     and reconcile PRED_FIRE's slot-level scope. ~0.15w.
+
+   - **(11) gate-len / gate-amp / step-len under load.** Verify
+     polymetric patterns don't drift, gate envelopes don't glitch.
+     Listen + bench. Deferable to v1.1. ~0.1w.
+
+   - **(12) RNG reproducibility (locked decision #4).** Pick one:
+     (a) persist seed in quicksave + Settings toggle; (b) explicit
+     re-seed gesture (e.g. shift+HOME outside modals). ~0.1w.
+
+   ### Verification
+
+   - Multi-slot non-interference under playback (all 4 slots ticking
+     distinct patterns, no cross-bleed).
+   - Quicksave round-trip across firmware reboot with playback
+     resuming as authored.
+   - Long-run listen test (~30 min).
+   - Bench expansion: row-pinned predicate/action, multi-slot
+     independence, L2 selection round-trip (post item 7).
+
+   ### Intentionally dropped from polish
+
+   - **L2 cell-editor "delete this cell" gesture.** Covered by
+     selection-mode CUT (once L2 selection lands in item 7) and by
+     per-cell zero-out in the existing modal flow.
+
+   ### Sub-bar state table — proposed post-Step 9
+
+   | Layer | Selection | Marking | Clipboard | Shift | S1 | S2 | S3 |
+   |---|---|---|---|---|---|---|---|
+   | L1 | No  | No  | Empty     | No  | start\|stop      | mark | L2 |
+   | L1 | No  | No  | Empty     | Yes | —                | BPM  | L2 |
+   | L1 | No  | No  | Non-empty | Yes | paste            | BPM  | L2 |
+   | L1 | No  | Yes | (any)     | (any) | start\|stop    | end  | — |
+   | L1 | Yes | —   | (any)     | No  | copy             | cut  | rand |
+   | L1 | Yes | —   | (any)     | Yes | copy             | cut  | coherent rand |
+   | L2 | No  | No  | Empty     | No  | start\|stop      | mark | L1 |
+   | L2 | No  | No  | Empty     | Yes | rule preview     | BPM  | L1 |
+   | L2 | No  | No  | Non-empty | Yes | paste + clip preview | BPM | L1 |
+   | L2 | Yes | —   | (any)     | (any) | copy / cut / rand | | |
 
 ---
 
