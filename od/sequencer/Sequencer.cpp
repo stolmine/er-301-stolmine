@@ -216,31 +216,52 @@ void Slot::processFrame(int frameLen,
     return;
   }
 
-  // Fire 0 or more ticks at the start of the frame. The while-loop
-  // handles the case where samplesPerTick < frameLen (very fast tempos
-  // or short step-lengths).
-  while (samplesUntilTick <= 0) {
-    const int spt = fireTick();
-    samplesUntilTick += spt;
-  }
-
-  // Fill the frame with current held values. Gate output is the envelope
-  // (heldGateAmp while remaining > 0, else 0).
-  for (int i = 0; i < frameLen; ++i) {
-    cv1[i]     = heldCV1 * kCvOutScale;
-    cv2[i]     = heldCV2 * kCvOutScale;
-    cv3[i]     = heldCV3 * kCvOutScale;
-    gateLen[i] = heldGateLen;
-    stepLen[i] = heldStepLen;
-    if (gateRemainingSamples > 0) {
-      gateAmp[i] = heldGateAmp;
-      --gateRemainingSamples;
-    } else {
-      gateAmp[i] = 0.0f;
+  // Sample-accurate tick scheduling: split the frame at tick
+  // boundaries so a tick that falls mid-frame fires at the right
+  // sample position instead of being delayed to the next frame.
+  // Previously the whole frame held one set of values (the values
+  // captured at the most recent tick before frame start), so any
+  // tick due during the frame was deferred to the next frame start
+  // -- up to one frameLen (~2.67 ms at 48 kHz / 128 samples) of
+  // jitter, audible at fast tick rates.
+  //
+  // Outer loop runs once per intra-frame tick plus once for the
+  // tail. In typical operation that's one or two iterations -- at
+  // 1/16 @ 120 BPM, ticks are ~6000 samples apart vs. 128-sample
+  // frames, so roughly 1 frame in 47 contains a tick boundary.
+  // Inner fill is the same per-sample cost; we just hit it in two
+  // shorter passes when a tick splits the frame.
+  int filled = 0;
+  while (filled < frameLen) {
+    // Fire all due ticks before continuing the fill. `while` (not
+    // `if`) handles the pathological case where samplesPerTick is
+    // smaller than the remaining frame budget -- multiple ticks
+    // within one segment.
+    while (samplesUntilTick <= 0) {
+      const int spt = fireTick();
+      samplesUntilTick += spt;
     }
+    // Fill samples up to the next tick boundary or the frame end,
+    // whichever comes first.
+    const int remaining = frameLen - filled;
+    const int n = (samplesUntilTick < remaining) ? samplesUntilTick : remaining;
+    for (int j = 0; j < n; ++j) {
+      const int i = filled + j;
+      cv1[i]     = heldCV1 * kCvOutScale;
+      cv2[i]     = heldCV2 * kCvOutScale;
+      cv3[i]     = heldCV3 * kCvOutScale;
+      gateLen[i] = heldGateLen;
+      stepLen[i] = heldStepLen;
+      if (gateRemainingSamples > 0) {
+        gateAmp[i] = heldGateAmp;
+        --gateRemainingSamples;
+      } else {
+        gateAmp[i] = 0.0f;
+      }
+    }
+    filled += n;
+    samplesUntilTick -= n;
   }
-
-  samplesUntilTick -= frameLen;
 }
 
 void Slot::setL1(int col, int row, float value)
