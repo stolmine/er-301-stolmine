@@ -28,8 +28,14 @@ standard unit instantiation."
 
 **Revised framing:** sequencer is a **global firmware service** with virtual-jack
 outputs in `Source/ExternalChooser`, alongside `IN1-4`, `G1-4`, `Ax-Dx`, `OUTx`.
-**Fixed slot count: 4 sequencers** per patch (`seq1` through `seq4`), each with the
-six outputs the spec defines.
+**Fixed slot count: 4 sequencers** per patch (`seq1` through `seq4`).
+
+**Externally exposed outputs per slot (revised 2026-05-12):** `cv1`, `cv2`, `cv3`,
+and `gate` (= the gate-amp envelope output). step-len and gate-len remain as L1
+columns in the grid for authoring, but their effect is entirely INTERNAL: step-len
+drives the tick scheduler, gate-len defines the gate envelope duration. They are
+not patchable into other chains. The picker therefore shows 4 sources per slot
+(16 total across 4 slots) rather than the originally specified 6 (24 total).
 
 Implications:
 - No standard unit lifecycle, no per-instance inlets/outlets.
@@ -203,13 +209,36 @@ When user clicks S1 to enter the modal cell editor:
 ```
 +--S1 ply-----+--S2 ply-----+--S3 ply-----+
 |             |             |             |
-|   COPY      |   CUT       |   CLEAR     |
+|   COPY      |    CUT      |   RANDOM    |
 |             |             |             |
 +-------------+-------------+-------------+
 ```
 
-Sub returns to grid mode (L1 or L2) once an action is committed or selection is
-cancelled.
+Sub returns to grid mode once an action is committed or selection is cancelled.
+
+**Selection scope (revised 2026-05-12):** selection is a **row-range within a
+single column** (the active column cursor), not a 2D rectangle. The selection
+anchor is the focus-head row when `shift+encoder` first extends it; the
+selection grows / shrinks as the encoder rotates.
+
+**Bulk edit (no sub action):** if the user does NOT press a sub button while
+the selection is active, the bare encoder (without shift) edits **all selected
+cells uniformly**. The top-of-selection cell is the "master." On the first
+encoder turn after selection is built, the master takes the increment AND every
+other selected cell SNAPS TO the master's new value (i.e., the selection
+becomes a constant fill at that value). Subsequent turns increment the master
+and every cell follows. Conceptually: "set selection to a constant the user
+can then dial."
+
+**Sub buttons:**
+- S1 = COPY (writes selection to clipboard, leaves cells unchanged)
+- S2 = CUT (writes selection to clipboard, sets cells to zero)
+- S3 = RANDOMIZE (replaces each selected cell with a random value in the
+  column's typed range; CV columns randomize within +/- 5 V, gate-amp within
+  0..1, gate-len/step-len within the common-fraction set, etc.)
+
+**PASTE** lands as a follow-up; see the original S3 state-rotation table below
+for the clipboard semantics.
 
 ---
 
