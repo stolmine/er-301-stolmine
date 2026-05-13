@@ -153,6 +153,11 @@ public:
   // frames. Survives across ticks (engine only writes when a fire
   // actually happens); the UI handles decay timing.
   int lastL2FiredRow = -1;
+  // Monotonic counter of fires on this column. Incremented each
+  // time an L2 cell here evaluates true. UI compares deltas so a
+  // SAME-row repeat fire (e.g. a %N rule on a single cell) is
+  // detected as a fresh event rather than as "same as last time."
+  uint32_t l2FireSerial = 0;
 
   // Loop-region helpers (direction-tolerant per locked decision #2).
   int loopMin() const;

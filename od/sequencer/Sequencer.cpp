@@ -55,6 +55,7 @@ void Slot::init(int slotIdx)
     col.pendingJump = -1;
     col.lastTickValue  = std::numeric_limits<float>::quiet_NaN();
     col.lastL2FiredRow = -1;
+    col.l2FireSerial   = 0;
   }
 
   // Seed step-len column with a sane default so a fresh slot's first tick
@@ -137,6 +138,7 @@ int Slot::fireTick()
     if (col.l2[row].present) {
       if (od::sequencer::evaluate(*this, col.l2[row].pred, c)) {
         col.lastL2FiredRow = row;
+        ++col.l2FireSerial;
         od::sequencer::apply(*this, col.l2[row].action, c);
       }
     }

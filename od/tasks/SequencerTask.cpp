@@ -255,6 +255,12 @@ namespace od {
     return mSlots[clampSlot(slot)].columns[col].lastL2FiredRow;
   }
 
+  int SequencerTask::l2FireSerial(int slot, int col) const
+  {
+    if (col < 0 || col >= sequencer::kNumColumns) return 0;
+    return static_cast<int>(mSlots[clampSlot(slot)].columns[col].l2FireSerial);
+  }
+
   void SequencerTask::tickOnce(int slot)
   {
     mSlots[clampSlot(slot)].tickOnce();

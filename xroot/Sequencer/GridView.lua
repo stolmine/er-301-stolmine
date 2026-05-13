@@ -191,16 +191,26 @@ end
 
 -- Non-truncating variant of fmtL2Cell. Used by the shift-held
 -- preview overlay on the sub display where a 5-char field would be
--- too tight to read the full rule.
+-- too tight to read the full rule. Unlike fmtL2Cell (which omits
+-- the host letter for compactness), this resolves host (col == -1)
+-- to the cell's own column letter so the user always sees the
+-- column references explicitly.
 local function fmtL2CellFull(predOp, predColA, predColARow, predVal,
-                              actOp, actTgt, actTgtRow, actVal)
+                              actOp, actTgt, actTgtRow, actVal,
+                              hostCol)
   if predOp == 0 then return "-" end
-  local p = colRefText(predColA, predColARow) .. (kPredSymbolMap[predOp] or "?")
+  local function resolved(col, row)
+    local r = (col < 0) and (hostCol or 0) or col
+    local s = kColLetters[r + 1] or "?"
+    if row and row >= 0 then s = s .. string.format("%02d", row) end
+    return s
+  end
+  local p = resolved(predColA, predColARow) .. (kPredSymbolMap[predOp] or "?")
   if kPredHasVal[predOp] then p = p .. fmtNum(predVal) end
   local a = ""
   if actOp ~= 0 then
     if kActHasTgt[actOp] then
-      a = colRefText(actTgt, actTgtRow)
+      a = resolved(actTgt, actTgtRow)
     end
     a = a .. (kActSymbolMap[actOp] or "?")
     if kActHasVal[actOp] then a = a .. fmtNum(actVal) end
@@ -320,8 +330,11 @@ function GridView:init(chain)
   self.l2FireDrawing:add(self.l2FireInstr)
   self:addMainGraphic(self.l2FireDrawing)
   self.l2FireDrawing:hide()
-  self.l2FireDecay    = {}   -- [col] = { row = N, framesLeft = K }
-  self.l2FireLastSeen = {}   -- [col] = last seen lastL2FiredRow value
+  self.l2FireDecay         = {}   -- [col] = { row = N, framesLeft = K }
+  self.l2FireLastSerial    = {}   -- [col] = last seen l2FireSerial value
+                                  -- (compares against engine's monotonic
+                                  -- fire counter so same-row repeats still
+                                  -- register as new fire events)
 
   -- ---- navigation state ----
   -- focusHeadRow: shared "global scroll" row, encoder-driven.
@@ -944,11 +957,17 @@ function GridView:refresh()
   local anyFire = false
   if self.layer == "L2" then
     for col = 0, kNumColumns - 1 do
-      local engineRow = seq:l2LastFiredRow(self.slot, col)
-      if engineRow >= 0 and engineRow ~= self.l2FireLastSeen[col] then
+      -- Detect new fires via the engine's monotonic fire serial so
+      -- same-row repeats (e.g. a %3 rule on a single cell) still
+      -- register as fresh events. lastL2FiredRow is read alongside
+      -- to know WHICH row to draw the dot on.
+      local engineSerial = seq:l2FireSerial(self.slot, col)
+      local engineRow    = seq:l2LastFiredRow(self.slot, col)
+      if engineSerial ~= (self.l2FireLastSerial[col] or 0)
+         and engineRow >= 0 then
         self.l2FireDecay[col] = { row = engineRow, framesLeft = kFireDecayFrames }
       end
-      self.l2FireLastSeen[col] = engineRow
+      self.l2FireLastSerial[col] = engineSerial
       local d = self.l2FireDecay[col]
       if d and d.framesLeft > 0 then
         local visR = d.row - startRow + 1
@@ -1004,7 +1023,8 @@ function GridView:refresh()
         seq:l2ActOp(self.slot, self.columnCursor, self.focusHeadRow),
         seq:l2ActTgt(self.slot, self.columnCursor, self.focusHeadRow),
         seq:l2ActTgtRow(self.slot, self.columnCursor, self.focusHeadRow),
-        seq:l2ActVal(self.slot, self.columnCursor, self.focusHeadRow))
+        seq:l2ActVal(self.slot, self.columnCursor, self.focusHeadRow),
+        self.columnCursor)
     end
   end
   self.previewLabel:setText(previewText)

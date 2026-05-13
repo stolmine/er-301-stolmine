@@ -119,6 +119,11 @@ namespace od {
     // this column since init / reset. UI side reads this each refresh
     // and decays its own indicator timestamp Lua-side.
     int   l2LastFiredRow(int slot, int col) const;
+    // Monotonic fire counter (uint32_t cast to int for SWIG). UI
+    // tracks last-seen value per column; a different value means a
+    // new fire happened since the last poll, even when the row is
+    // the same as before (e.g. a %N rule on a single cell).
+    int   l2FireSerial(int slot, int col) const;
 
     // Bench-only synchronous tick (do not call on running slots).
     void tickOnce(int slot);
