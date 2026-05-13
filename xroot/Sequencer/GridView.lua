@@ -112,12 +112,15 @@ function GridView:init(chain)
     self.headerLabels[c] = lbl
   end
 
-  -- Cell value grid: kVisibleRows rows x kNumColumns columns.
+  -- Cell value grid: (kVisibleRows + 1) slots x kNumColumns columns.
+  -- The +1 slot holds the partially-visible row that slides in from
+  -- the bottom edge during a smooth scroll transition. Each slot's
+  -- Y position is recomputed every refresh from `self.scrollFrac`.
   self.cellLabels = {}
   for c = 1, kNumColumns do
     local x = (c - 1) * kColPly + 2
     self.cellLabels[c] = {}
-    for r = 1, kVisibleRows do
+    for r = 1, kVisibleRows + 1 do
       local y = kHeaderY - r * kRowHeight
       local lbl = app.Label("      ", kFontMain)
       lbl:setJustification(app.justifyLeft)
@@ -129,9 +132,10 @@ function GridView:init(chain)
 
   -- Row ruler at the right edge: one label per visible row showing the
   -- absolute row number. Overlays the unused space past column 6's
-  -- text (cell text ends ~x=242, ruler at x=244).
+  -- text (cell text ends ~x=242, ruler at x=244). Same +1-slot extra
+  -- as the cell grid so the bottom partial row gets a ruler value.
   self.rulerLabels = {}
-  for r = 1, kVisibleRows do
+  for r = 1, kVisibleRows + 1 do
     local y = kHeaderY - r * kRowHeight
     local lbl = app.Label("00", kFontMain)
     lbl:setJustification(app.justifyLeft)
@@ -168,6 +172,16 @@ function GridView:init(chain)
   self:addMainGraphic(self.selectionDrawing)
   self.selectionDrawing:hide()
 
+  -- Dirty-edit indicator overlay. While a bulk-edit is in progress
+  -- (selection active and at least one cell mutated), every modified
+  -- cell gets a small dot rendered at its right edge. Rebuilt each
+  -- refresh from `self.editedCells`. Hidden when nothing is dirty.
+  self.dirtyDrawing = app.Drawing(0, 0, 256, 64)
+  self.dirtyInstr   = app.DrawingInstructions()
+  self.dirtyDrawing:add(self.dirtyInstr)
+  self:addMainGraphic(self.dirtyDrawing)
+  self.dirtyDrawing:hide()
+
   -- ---- navigation state ----
   -- focusHeadRow: shared "global scroll" row, encoder-driven.
   -- columnCursor: which column is active, 0..5, M1-M6-driven.
@@ -183,6 +197,30 @@ function GridView:init(chain)
   self.selectionAnchor   = 0
   self.selectionEnd      = 0
   self.selectionColumn   = 0
+  -- Bulk-edit revert/dirty state. preEditValues[col][row] holds the
+  -- pre-bulk-edit value of each affected cell, captured the first time
+  -- that cell is touched by an encoder tick. editedCells[col][row] is
+  -- a set marking which cells currently show the dirty-edit indicator.
+  -- CANCEL restores from preEditValues; UP commits (drops both tables).
+  self.preEditValues     = {}
+  self.editedCells       = {}
+  -- Cursor-box easing state. Floats track the current rendered position
+  -- of the cursor; each refresh eases them toward the logical target by
+  -- kCursorEase. nil means "snap on next render" (used on first show
+  -- and after hide). Y target moves smoothly with subPx during scroll
+  -- transitions, so cursorAnimY normally just tracks it; `cursorEasingY`
+  -- is flipped on when a discontinuous Y jump is detected (boundary
+  -- scrolls where startRow can't shift) and stays on until the lerp
+  -- catches up.
+  self.cursorAnimX       = nil
+  self.cursorAnimY       = nil
+  self.cursorEasingY     = false
+
+  -- Scroll-position easing state. scrollFrac is the absolute row at
+  -- the top of the visible window in fractional row units; it eases
+  -- toward the integer targetStart computed from focusHeadRow. nil =
+  -- snap on first render (after onShow).
+  self.scrollFrac        = nil
 
   -- ---- sub display: slot label + transport state + softkeys ----
 
@@ -296,6 +334,48 @@ local kDotOn     = 2   -- pixels lit per dot
 local kDotOff    = 2   -- pixels off between dots
 local kDotPeriod = kDotOn + kDotOff
 
+-- Cursor-box easing factor (per-refresh lerp toward target). At 55 Hz
+-- refresh, 0.4 converges to ~95% in 6 frames (~110 ms), making row /
+-- column transitions visibly slide rather than snap. Snaps the final
+-- pixel when within kCursorSnapEps to avoid sub-pixel oscillation.
+local kCursorEase    = 0.4
+local kCursorSnapEps = 0.5
+
+-- Discontinuous-jump threshold on cursor Y. The cursor's target Y
+-- moves smoothly with subPx during a scroll transition (~1.8 px per
+-- frame at 0.2 scroll lerp). A frame-over-frame target delta larger
+-- than this means the cursor has jumped to a different visible row
+-- in a single step (boundary scroll near row 0 / kMaxRow), which we
+-- want to ease through.
+local kCursorJumpPx  = 5
+
+-- Smooth-scroll constants. Lerp factor is scaled UP from the
+-- firmware exponential-lerp standard (0.2, in MondrianList.cpp:99
+-- / SpottedStrip.cpp:37 / ChainOverview.cpp:458) so that the initial
+-- per-frame *pixel* velocity is equivalent. Those lists use row
+-- pitches around 18-22 px, giving initial velocity 0.2 * ~20 ~= 4
+-- px/frame. Our grid row is 9 px; matching that absolute velocity
+-- requires lerp ~= 4/9 ~= 0.44, rounded to 0.4 (initial velocity
+-- 3.6 px/frame). Snap at 1 px keeps the final settle ~< 1 px, also
+-- tightened from firmware's 2 px because of the same row-pitch
+-- ratio (2 px snap on a 9 px row would be a visibly bumpy 22%-of-a-row
+-- settle vs. ~6% on a typical Mondrian row).
+local kScrollLerp     = 0.4
+local kScrollSnapRows = 1 / kRowHeight
+
+-- Cells slide upward (toward the header) as scrollFrac increases. A
+-- cell whose Y exceeds this threshold has its glyph overlapping the
+-- header strip and is hidden until the next integer scroll position
+-- moves it out of view entirely. = kHeaderY - kRowHeight + 1 = 45.
+local kCellHideY      = kHeaderY - kRowHeight + 1
+
+-- Dirty-cell indicator geometry: a small filled dot at the right edge
+-- of an edited cell. dotX is the column-relative x offset; dot is 2x2
+-- pixels at the vertical middle of the row's text glyph.
+local kDirtyDotW    = 2
+local kDirtyDotH    = 2
+local kDirtyDotXOff = 38           -- right edge of column (column ends at 42)
+
 local function buildDottedRect(instr, x, y, w, h, color)
   instr:clear()
   instr:color(color)
@@ -317,13 +397,30 @@ function GridView:refresh()
   local seq = app.AudioThread.getSequencerTask()
   if not seq then return end
 
-  -- Scroll follows the focus head (encoder-driven). The playhead may
-  -- be inside or outside the visible window depending on where the
-  -- user has scrolled; HOME jumps focus head to row 0 (use that or
-  -- manually scroll to follow the playhead). An auto-follow-playhead
-  -- mode is intentionally NOT added here -- it conflicts with the
-  -- user's view-selection intent.
-  local startRow = clamp(self.focusHeadRow - 2, 0, kMaxRow - kVisibleRows + 1)
+  -- Smooth-scroll target: focus head sits at the 3rd visible row
+  -- when not at row-range boundaries. scrollFrac eases at 0.2 toward
+  -- this target each refresh; subPx is the fractional remainder in
+  -- pixels, used to slide every row position vertically during
+  -- transitions. HOME / boundary jumps trigger longer eases (the
+  -- target moves by multiple rows in one focusHead update).
+  --
+  -- Scroll only follows focusHeadRow. The playhead may be inside or
+  -- outside the visible window; auto-follow-playhead is intentionally
+  -- NOT here -- it would conflict with the user's view-selection
+  -- intent.
+  local targetStart = clamp(self.focusHeadRow - 2, 0,
+                            kMaxRow - kVisibleRows + 1)
+  if self.scrollFrac == nil then
+    self.scrollFrac = targetStart
+  else
+    self.scrollFrac = self.scrollFrac * (1 - kScrollLerp)
+                       + targetStart * kScrollLerp
+    if math.abs(self.scrollFrac - targetStart) < kScrollSnapRows then
+      self.scrollFrac = targetStart
+    end
+  end
+  local startRow = math.floor(self.scrollFrac)
+  local subPx    = (self.scrollFrac - startRow) * kRowHeight
 
   for c = 1, kNumColumns do
     local col = c - 1
@@ -336,59 +433,131 @@ function GridView:refresh()
     self.headerLabels[c]:setForegroundColor(
       (col == self.columnCursor) and kHeaderActive or kHeaderInactive)
 
-    for r = 1, kVisibleRows do
+    for r = 1, kVisibleRows + 1 do
       local absRow = startRow + r - 1
-      local v = seq:l1Value(kSlot, col, absRow)
-      local inLoop     = absRow >= loopLo and absRow <= loopHi
-      local isFocus    = absRow == self.focusHeadRow
-      local isPlayhead = absRow == playhead
-      self.cellLabels[c][r]:setText(fmtCellByCol(col, v))
-      self.cellLabels[c][r]:setForegroundColor(
-        cellBrightness(isPlayhead, isFocus, inLoop))
+      local y = kHeaderY - r * kRowHeight + subPx
+      local lbl = self.cellLabels[c][r]
+      if y > kCellHideY or absRow > kMaxRow or absRow < 0 then
+        lbl:hide()
+      else
+        lbl:setPosition((c - 1) * kColPly + 2, math.floor(y + 0.5))
+        local v = seq:l1Value(kSlot, col, absRow)
+        local inLoop     = absRow >= loopLo and absRow <= loopHi
+        local isFocus    = absRow == self.focusHeadRow
+        local isPlayhead = absRow == playhead
+        lbl:setText(fmtCellByCol(col, v))
+        lbl:setForegroundColor(cellBrightness(isPlayhead, isFocus, inLoop))
+        lbl:show()
+      end
     end
   end
 
   -- Row ruler: absolute row numbers for the visible window, brightened
-  -- on the focus row.
-  for r = 1, kVisibleRows do
+  -- on the focus row. Same slot count + Y formula as the cell grid.
+  for r = 1, kVisibleRows + 1 do
     local absRow = startRow + r - 1
-    self.rulerLabels[r]:setText(string.format("%02d", absRow))
-    self.rulerLabels[r]:setForegroundColor(
-      (absRow == self.focusHeadRow) and kBrightBoth or kBrightNormal)
+    local y = kHeaderY - r * kRowHeight + subPx
+    local lbl = self.rulerLabels[r]
+    if y > kCellHideY or absRow > kMaxRow or absRow < 0 then
+      lbl:hide()
+    else
+      lbl:setPosition(kRulerX, math.floor(y + 0.5))
+      lbl:setText(string.format("%02d", absRow))
+      lbl:setForegroundColor(
+        (absRow == self.focusHeadRow) and kBrightBoth or kBrightNormal)
+      lbl:show()
+    end
   end
 
-  -- Cursor box: outline the cell at (focusHeadRow, columnCursor).
-  -- See the cursorBox construction comment for the +3 anchor math
-  -- (label bounding-box bottom vs actual text glyph bottom).
-  -- During playback the scroll follows the playhead, so the focus
-  -- head can be off-screen; in that case we just hide the cursor.
-  local visibleRow = self.focusHeadRow - startRow + 1  -- 1-based
-  if visibleRow >= 1 and visibleRow <= kVisibleRows then
-    local labelY = kHeaderY - visibleRow * kRowHeight
-    local boxX = self.columnCursor * kColPly
-    local boxY = labelY + 3
-    self.cursorBox:setPosition(boxX, boxY)
-    -- White when editing (Habitat-fluid mode), GRAY10 when just navigating.
-    self.cursorBox:setBorderColor(self.editingL1 and app.WHITE or app.GRAY10)
+  -- Cursor box: outline the cell at the "active edit target."
+  --   nav / edit mode:        focusHeadRow on columnCursor.
+  --   selection active:       master row = top of selection (=
+  --                            min(anchor, end)) on selectionColumn.
+  --                            This is the cell whose value bulk edit
+  --                            increments; the rest of the selection
+  --                            snaps to it (Chunk B).
+  -- Color: WHITE while editing or while a selection is active (so the
+  -- user sees that the next encoder turn will mutate a cell). GRAY10
+  -- otherwise.
+  local cursorRow, cursorCol
+  if self.selectionActive and self.selectionColumn == self.columnCursor then
+    cursorRow = math.min(self.selectionAnchor, self.selectionEnd)
+    cursorCol = self.selectionColumn
+  else
+    cursorRow = self.focusHeadRow
+    cursorCol = self.columnCursor
+  end
+  local visibleRow = cursorRow - startRow + 1
+  local labelY = kHeaderY - visibleRow * kRowHeight + subPx
+  local targetY = labelY + 3
+  if visibleRow >= 1 and visibleRow <= kVisibleRows + 1
+     and targetY <= kCellHideY + 3 then
+    local targetX = cursorCol * kColPly
+    -- X easing: column changes (M-key) jump the cursor by 42 px in
+    -- a single frame; ease toward the new column.
+    if self.cursorAnimX == nil then
+      self.cursorAnimX = targetX
+    else
+      self.cursorAnimX = self.cursorAnimX + (targetX - self.cursorAnimX) * kCursorEase
+      if math.abs(self.cursorAnimX - targetX) < kCursorSnapEps then
+        self.cursorAnimX = targetX
+      end
+    end
+    -- Y handling: during a smooth scroll, targetY changes by ~1.8 px
+    -- per frame (subPx motion), so snapping to it keeps the cursor
+    -- glued to the focus row as the data slides. Boundary scrolls
+    -- (focusHead near 0 or kMaxRow, scrollFrac clamped) advance
+    -- visibleRow by 1 in a single frame -- a ~9 px jump in targetY,
+    -- which we detect and ease through.
+    if self.cursorAnimY == nil then
+      self.cursorAnimY = targetY
+      self.cursorEasingY = false
+    else
+      local delta = targetY - self.cursorAnimY
+      if math.abs(delta) > kCursorJumpPx then
+        self.cursorEasingY = true
+      end
+      if self.cursorEasingY then
+        self.cursorAnimY = self.cursorAnimY + delta * kCursorEase
+        if math.abs(self.cursorAnimY - targetY) < kCursorSnapEps then
+          self.cursorAnimY = targetY
+          self.cursorEasingY = false
+        end
+      else
+        self.cursorAnimY = targetY
+      end
+    end
+    self.cursorBox:setPosition(
+      math.floor(self.cursorAnimX + 0.5),
+      math.floor(self.cursorAnimY + 0.5))
+    local active = self.editingL1 or self.selectionActive
+    self.cursorBox:setBorderColor(active and app.WHITE or app.GRAY10)
     self.cursorBox:show()
   else
     self.cursorBox:hide()
+    -- Reset easing so next show snaps rather than animating in from
+    -- the cursor's last on-screen position.
+    self.cursorAnimX   = nil
+    self.cursorAnimY   = nil
+    self.cursorEasingY = false
   end
 
   -- Selection box: dotted-edge rectangle wrapping the row-range
   -- selection on `selectionColumn`. Hidden when the user has switched
   -- columns (which also clears the selection, but defensive in case).
+  -- Position rides on subPx so the dotted edge slides with the cells
+  -- it wraps during smooth-scroll transitions.
   if self.selectionActive and self.selectionColumn == self.columnCursor then
     local selMin = math.min(self.selectionAnchor, self.selectionEnd)
     local selMax = math.max(self.selectionAnchor, self.selectionEnd)
-    -- Clip to visible window so off-screen portions just don't render.
-    local topV    = math.max(1,            selMin - startRow + 1)
-    local bottomV = math.min(kVisibleRows, selMax - startRow + 1)
+    -- Clip to visible window (now including the +1 partial-bottom row).
+    local topV    = math.max(1,                selMin - startRow + 1)
+    local bottomV = math.min(kVisibleRows + 1, selMax - startRow + 1)
     if topV <= bottomV then
-      local topLabelY    = kHeaderY - topV    * kRowHeight
-      local bottomLabelY = kHeaderY - bottomV * kRowHeight
+      local topLabelY    = kHeaderY - topV    * kRowHeight + subPx
+      local bottomLabelY = kHeaderY - bottomV * kRowHeight + subPx
       local selX = self.selectionColumn * kColPly
-      local selY = bottomLabelY + 3
+      local selY = math.floor(bottomLabelY + 3 + 0.5)
       local selH = (bottomV - topV) * kRowHeight + 10
       buildDottedRect(self.selectionInstr, selX, selY, kColPly, selH, app.GRAY10)
       self.selectionDrawing:show()
@@ -397,6 +566,37 @@ function GridView:refresh()
     end
   else
     self.selectionDrawing:hide()
+  end
+
+  -- Dirty-cell indicators: small dot at the right edge of every cell
+  -- in `editedCells` whose row currently falls in the visible window.
+  -- Drawing is rebuilt from scratch each refresh -- the dirty set
+  -- changes only on encoder ticks during a bulk edit, so paying the
+  -- full rebuild at 55 Hz is cheap (usually nothing to draw). Position
+  -- rides on subPx so the dots slide with their owning cells.
+  self.dirtyInstr:clear()
+  local anyDirty = false
+  for col, rowSet in pairs(self.editedCells) do
+    for absRow, _ in pairs(rowSet) do
+      local visR = absRow - startRow + 1
+      if visR >= 1 and visR <= kVisibleRows + 1 then
+        local labelY = kHeaderY - visR * kRowHeight + subPx
+        if labelY <= kCellHideY then
+          if not anyDirty then
+            self.dirtyInstr:color(app.WHITE)
+            anyDirty = true
+          end
+          local dotX = col * kColPly + kDirtyDotXOff
+          local dotY = math.floor(labelY + 6 + 0.5)
+          self.dirtyInstr:fill(dotX, dotY, kDirtyDotW, kDirtyDotH)
+        end
+      end
+    end
+  end
+  if anyDirty then
+    self.dirtyDrawing:show()
+  else
+    self.dirtyDrawing:hide()
   end
 
   self.bpmLabel:setText(string.format("BPM %d", math.floor(seq:getBpm() + 0.5)))
@@ -413,6 +613,13 @@ function GridView:onShow()
   -- Per-display-frame refresh (55 Hz). Bypasses Timer.every which is
   -- throttled to ~5 Hz internally and would cause the playhead to
   -- visibly skip rows at any engine tick rate above ~5 Hz.
+  -- Reset cursor + scroll easing so the first frame snaps to the
+  -- current target rather than animating in from the previous
+  -- session's last on-screen position.
+  self.cursorAnimX   = nil
+  self.cursorAnimY   = nil
+  self.cursorEasingY = false
+  self.scrollFrac    = nil
   self.frameCallback = function() self:refresh() end
   Signal.register("onDisplayFrame", self.frameCallback)
   self:refresh()
@@ -483,9 +690,10 @@ function GridView:encoder(change, shifted)
     end
   elseif shifted then
     -- Nav mode + shift: extend selection. Anchor on first activation;
-    -- focusHeadRow tracks the moving end (so the cursor box sits on
-    -- the cell the user is actively dialing toward). Selection range
-    -- = [min(anchor, end), max(anchor, end)].
+    -- focusHeadRow tracks the moving end. Selection range =
+    -- [min(anchor, end), max(anchor, end)]. The cursor box renders
+    -- at min(anchor, end) (= master) per Chunk B; the focusHeadRow
+    -- stays as the moving end for the next shift-encoder tick.
     if not self.selectionActive then
       self.selectionAnchor = self.focusHeadRow
       self.selectionColumn = self.columnCursor
@@ -502,10 +710,50 @@ function GridView:encoder(change, shifted)
       moved = true
     end
     if moved then self.selectionEnd = self.focusHeadRow end
+  elseif self.selectionActive and self.selectionColumn == self.columnCursor then
+    -- Bulk edit on selection. Top of selection (= min(anchor, end))
+    -- is master. Each encoder tick reads master's current value,
+    -- adds the column's fine/coarse step, and writes the result to
+    -- every cell in [selMin, selMax]. After the first tick, all
+    -- selected cells share the master's value; subsequent ticks
+    -- step them together.
+    --
+    -- Pre-edit snapshot: the first time a tick mutates a given cell,
+    -- capture its original value into preEditValues so that CANCEL
+    -- can revert. Subsequent ticks on that cell do NOT overwrite the
+    -- snapshot (the snapshot must always be the user's pre-edit
+    -- value, not the in-progress edited value). editedCells[col][r]
+    -- gates the dirty-dot overlay in refresh.
+    local selMin = math.min(self.selectionAnchor, self.selectionEnd)
+    local selMax = math.max(self.selectionAnchor, self.selectionEnd)
+    local col    = self.selectionColumn
+    local step   = stepForColumn(col, self.editStepMode, false)
+    local function applyBulk(delta)
+      local newV = seq:l1Value(kSlot, col, selMin) + delta
+      local pre  = self.preEditValues[col]
+      local dirty = self.editedCells[col]
+      if not pre   then pre   = {}; self.preEditValues[col] = pre end
+      if not dirty then dirty = {}; self.editedCells[col]   = dirty end
+      for r = selMin, selMax do
+        if pre[r] == nil then
+          pre[r] = seq:l1Value(kSlot, col, r)
+        end
+        seq:setL1(kSlot, col, r, newV)
+        dirty[r] = true
+      end
+    end
+    while self.encoderAccum >= kEncoderThreshold do
+      applyBulk(step)
+      self.encoderAccum = self.encoderAccum - kEncoderThreshold
+      moved = true
+    end
+    while self.encoderAccum <= -kEncoderThreshold do
+      applyBulk(-step)
+      self.encoderAccum = self.encoderAccum + kEncoderThreshold
+      moved = true
+    end
   else
-    -- Nav mode no shift: plain focus-head scroll.
-    -- Bulk-edit on selection lands in Chunk B; for now selection is
-    -- visible but inert when encoder is turned without shift.
+    -- Nav mode no shift, no selection: plain focus-head scroll.
     while self.encoderAccum >= kEncoderThreshold do
       self.focusHeadRow = clamp(self.focusHeadRow + 1, 0, kMaxRow)
       self.encoderAccum = self.encoderAccum - kEncoderThreshold
@@ -529,6 +777,12 @@ function GridView:mainReleased(i, shifted)
   if i >= 1 and i <= kNumColumns then
     local newCol = i - 1
     if self.selectionActive and newCol ~= self.selectionColumn then
+      -- Switching columns implicitly commits any in-flight bulk edit.
+      -- Values stay at their current (edited) state, but the pre-edit
+      -- snapshot + dirty markers are dropped so they don't follow the
+      -- user to the new column.
+      self.preEditValues   = {}
+      self.editedCells     = {}
       self.selectionActive = false
     end
     self.columnCursor = newCol
@@ -548,6 +802,10 @@ function GridView:enterReleased(shifted)
     self.focusHeadRow = clamp(self.focusHeadRow + 1, 0, kMaxRow)
   else
     self.editingL1 = true
+    -- Entering edit mode while a bulk-edit is active commits it (same
+    -- semantics as UP / column-change): keep values, drop snapshot.
+    self.preEditValues   = {}
+    self.editedCells     = {}
     self.selectionActive = false
   end
   self:refresh()
@@ -561,8 +819,20 @@ function GridView:cancelReleased(shifted)
     self:refresh()
     return true
   end
-  -- Otherwise CANCEL clears an active selection.
+  -- Otherwise CANCEL = REVERT: restore any bulk-edit pre-edit values
+  -- to the engine, then clear the selection. If no bulk edit has
+  -- occurred this is just a deselect.
   if self.selectionActive then
+    local seq = app.AudioThread.getSequencerTask()
+    if seq then
+      for col, rows in pairs(self.preEditValues) do
+        for row, val in pairs(rows) do
+          seq:setL1(kSlot, col, row, val)
+        end
+      end
+    end
+    self.preEditValues = {}
+    self.editedCells   = {}
     self.selectionActive = false
     self:refresh()
     return true
@@ -573,6 +843,16 @@ end
 function GridView:upReleased(shifted)
   if self.editingL1 then
     self.editingL1 = false
+    self:refresh()
+    return true
+  end
+  -- UP = implicit COMMIT during selection: drop the pre-edit snapshot
+  -- and dirty markers (keeping the bulk-edited cell values as-is) and
+  -- release the selection handle.
+  if self.selectionActive then
+    self.preEditValues = {}
+    self.editedCells   = {}
+    self.selectionActive = false
     self:refresh()
     return true
   end
