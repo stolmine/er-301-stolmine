@@ -222,6 +222,17 @@ function GridView:init(chain)
   -- snap on first render (after onShow).
   self.scrollFrac        = nil
 
+  -- Mark-start / mark-end modal state. Idle outside the modal; while
+  -- "marking_end" the S2 ply reads "end" and every focusHead change
+  -- live-updates marker2 on the active column so the loop dim moves
+  -- with the user's intent. First S2 press snapshots the pre-marking
+  -- (m1, m2) pair into markBackup so CANCEL can restore. Second S2
+  -- press (or UP, ENTER, M-key) commits the normalized (lo, hi) pair
+  -- and clears the snapshot.
+  self.markingMode    = "idle"  -- or "marking_end"
+  self.markBackup     = nil     -- {col, m1, m2} of pre-marking state
+  self.markFirstMark  = nil     -- absolute row of the committed first mark
+
   -- ---- sub display: slot label + transport state + softkeys ----
 
   self.titleLabel = app.Label("seq1", 12)
@@ -577,6 +588,7 @@ function GridView:refresh()
       math.floor(self.cursorAnimX + 0.5),
       math.floor(self.cursorAnimY + 0.5))
     local active = self.editingL1 or self.selectionActive
+                    or self.markingMode == "marking_end"
     self.cursorBox:setBorderColor(active and app.WHITE or app.GRAY10)
     self.cursorBox:show()
   else
@@ -654,26 +666,31 @@ function GridView:refresh()
     self.editStepLabel:setText("")
   end
 
-  -- Sub softkey labels. Three modes:
+  -- Sub softkey labels. Four modes, checked in priority order:
   --   1. selection active        -> copy / cut / rand
-  --   2. shift held + clipboard  -> paste / _ / _  (live shift overlay)
-  --   3. default transport       -> start|stop / _ / reset
+  --   2. mark modal (marking_end)-> start|stop / end / _
+  --   3. shift held + clipboard  -> paste / _ / _  (live shift overlay)
+  --   4. default                 -> start|stop / mark / _
   -- The shift-overlay polls the hardware shift state each refresh
   -- (55 Hz), so labels swap responsively as the user holds / releases
-  -- shift. Selection takes priority over shift -- once a selection is
-  -- built, shift only affects encoder gestures (extend), not buttons.
+  -- shift. Selection takes priority over everything -- once a
+  -- selection is built, shift / mark gestures don't reach the bar.
   if self.selectionActive then
     self.s1Button:setText("copy")
     self.s2Button:setText("cut")
     self.s3Button:setText("rand")
+  elseif self.markingMode == "marking_end" then
+    self.s1Button:setText(self.running and "stop" or "start")
+    self.s2Button:setText("end")
+    self.s3Button:setText("")
   elseif clipboard ~= nil and app.isShiftButtonPushed() then
     self.s1Button:setText("paste")
     self.s2Button:setText("")
     self.s3Button:setText("")
   else
     self.s1Button:setText(self.running and "stop" or "start")
-    self.s2Button:setText("")
-    self.s3Button:setText("reset")
+    self.s2Button:setText("mark")
+    self.s3Button:setText("")
   end
 end
 
@@ -701,6 +718,47 @@ function GridView:onHide()
 end
 
 -- ---- input handlers ----
+
+-- Mark-mode helpers. All three are no-ops when markingMode != "marking_end".
+-- _updateMarkingLive: write (markFirstMark, focusHead) to the engine each
+--                     time focusHead changes so the loop dim slides live.
+-- _commitMark:        normalize the in-flight pair to (lo, hi) and write
+--                     it, then exit the modal.
+-- _revertMark:        restore the pre-marking (m1, m2) snapshot and exit.
+function GridView:_updateMarkingLive()
+  if self.markingMode ~= "marking_end" then return end
+  local seq = app.AudioThread.getSequencerTask()
+  if not (seq and self.markBackup) then return end
+  -- Engine normalizes the loop region to min/max internally, so we can
+  -- pass them in user-intended order during the live phase.
+  seq:setMarkers(kSlot, self.markBackup.col,
+                 self.markFirstMark, self.focusHeadRow)
+end
+
+function GridView:_commitMark()
+  if self.markingMode ~= "marking_end" then return end
+  local seq = app.AudioThread.getSequencerTask()
+  if seq and self.markBackup then
+    local lo = math.min(self.markFirstMark, self.focusHeadRow)
+    local hi = math.max(self.markFirstMark, self.focusHeadRow)
+    seq:setMarkers(kSlot, self.markBackup.col, lo, hi)
+  end
+  self.markingMode   = "idle"
+  self.markBackup    = nil
+  self.markFirstMark = nil
+end
+
+function GridView:_revertMark()
+  if self.markingMode ~= "marking_end" then return end
+  local seq = app.AudioThread.getSequencerTask()
+  if seq and self.markBackup then
+    seq:setMarkers(kSlot, self.markBackup.col,
+                   self.markBackup.m1, self.markBackup.m2)
+  end
+  self.markingMode   = "idle"
+  self.markBackup    = nil
+  self.markFirstMark = nil
+end
 
 -- Paste clipboard.values into rows starting at focusHead, in the
 -- user's current column. Refuses silently on type mismatch (clipboard
@@ -773,7 +831,8 @@ function GridView:subReleased(i, shifted)
     return false
   end
 
-  -- Default transport: S1 start/stop, S3 reset, S2 unused.
+  -- Default sub bar: S1 = transport, S2 = mark / end (modal), S3 unused.
+  -- Playhead reset moved to shift+HOME (see zeroReleased).
   if i == 1 then
     if self.running then
       seq:stopSlot(kSlot)
@@ -785,8 +844,25 @@ function GridView:subReleased(i, shifted)
       self.statusLabel:setText("running")
     end
     return true
-  elseif i == 3 then
-    seq:resetSlot(kSlot)
+  elseif i == 2 then
+    if self.markingMode == "idle" then
+      -- First press: snapshot existing marker pair, plant marker1 at
+      -- focusHead, set marker2 = focusHead as a 1-step seed loop, and
+      -- enter the modal. Encoder + HOME from here live-update marker2.
+      local col = self.columnCursor
+      self.markBackup = {
+        col = col,
+        m1  = seq:marker1(kSlot, col),
+        m2  = seq:marker2(kSlot, col),
+      }
+      self.markFirstMark = self.focusHeadRow
+      seq:setMarkers(kSlot, col, self.focusHeadRow, self.focusHeadRow)
+      self.markingMode = "marking_end"
+    else
+      -- Second press: commit the normalized (lo, hi) pair and exit.
+      self:_commitMark()
+    end
+    self:refresh()
     return true
   end
   return false
@@ -821,6 +897,22 @@ function GridView:encoder(change, shifted)
       self.encoderAccum = self.encoderAccum + kEncoderThreshold
       moved = true
     end
+  elseif self.markingMode == "marking_end" then
+    -- Mark modal: encoder scrolls focusHead and live-updates marker2
+    -- on the column being marked. Shift modifier is ignored here --
+    -- marking is exclusive of selection-extend, so the user can't
+    -- accidentally bend the encoder into a selection mid-mark.
+    while self.encoderAccum >= kEncoderThreshold do
+      self.focusHeadRow = clamp(self.focusHeadRow + 1, 0, kMaxRow)
+      self.encoderAccum = self.encoderAccum - kEncoderThreshold
+      moved = true
+    end
+    while self.encoderAccum <= -kEncoderThreshold do
+      self.focusHeadRow = clamp(self.focusHeadRow - 1, 0, kMaxRow)
+      self.encoderAccum = self.encoderAccum + kEncoderThreshold
+      moved = true
+    end
+    if moved then self:_updateMarkingLive() end
   elseif shifted then
     -- Nav mode + shift: extend selection. Anchor on first activation;
     -- focusHeadRow tracks the moving end. Selection range =
@@ -918,6 +1010,12 @@ function GridView:mainReleased(i, shifted)
       self.editedCells     = {}
       self.selectionActive = false
     end
+    -- Column-switch during a mark modal also implicit-commits the
+    -- in-flight marker pair (on its original column) before moving.
+    if self.markingMode == "marking_end"
+       and self.markBackup and newCol ~= self.markBackup.col then
+      self:_commitMark()
+    end
     self.columnCursor = newCol
     self:refresh()
     return true
@@ -934,6 +1032,9 @@ function GridView:enterReleased(shifted)
   if self.editingL1 then
     self.focusHeadRow = clamp(self.focusHeadRow + 1, 0, kMaxRow)
   else
+    -- Entering edit mode commits any in-flight mark modal (same
+    -- semantics as UP / column-change).
+    self:_commitMark()
     self.editingL1 = true
     -- Entering edit mode while a bulk-edit is active commits it (same
     -- semantics as UP / column-change): keep values, drop snapshot.
@@ -949,6 +1050,14 @@ function GridView:cancelReleased(shifted)
   -- Edit mode takes priority -- CANCEL exits edit first.
   if self.editingL1 then
     self.editingL1 = false
+    self:refresh()
+    return true
+  end
+  -- Mark modal: CANCEL = REVERT the in-flight (markFirstMark, focusHead)
+  -- pair back to the pre-S2 snapshot. Symmetric with selection's
+  -- CANCEL-reverts behavior.
+  if self.markingMode == "marking_end" then
+    self:_revertMark()
     self:refresh()
     return true
   end
@@ -989,6 +1098,14 @@ function GridView:upReleased(shifted)
     self:refresh()
     return true
   end
+  -- UP also implicit-commits a mark modal (alias for the second S2
+  -- press); the in-flight markFirstMark/focusHead pair becomes the
+  -- final loop region.
+  if self.markingMode == "marking_end" then
+    self:_commitMark()
+    self:refresh()
+    return true
+  end
   return false
 end
 
@@ -999,12 +1116,21 @@ function GridView:homeReleased()
   if not self.editingL1 then
     self.focusHeadRow = 0
     self.encoderAccum = 0
+    -- During a mark modal, jumping to row 0 should drag marker2 with
+    -- the focus head so the live loop visual stays in sync.
+    self:_updateMarkingLive()
     self:refresh()
     return true
   end
   return false
 end
 
+-- shift+HOME dispatches as zeroReleased. Inside the L1 cell editor it
+-- zeros the focused cell (the original "shift+HOME = clear cell"
+-- gesture). Outside the editor it now stands in for the playhead
+-- reset previously bound to S3 (since S3 was reclaimed for marking);
+-- pressing it sends every column's playhead back to row 0 without
+-- touching transport state.
 function GridView:zeroReleased()
   if self.editingL1 then
     local seq = app.AudioThread.getSequencerTask()
@@ -1014,7 +1140,12 @@ function GridView:zeroReleased()
     end
     return true
   end
-  return false
+  local seq = app.AudioThread.getSequencerTask()
+  if seq then
+    seq:resetSlot(kSlot)
+    self:refresh()
+  end
+  return true
 end
 
 -- Dial mode button toggles between fine and coarse step in edit mode.
