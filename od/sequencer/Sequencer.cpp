@@ -50,6 +50,7 @@ void Slot::init(int slotIdx)
     col.marker1     = 0;
     col.marker2     = 15;
     col.playhead    = 0;
+    col.currentRow  = 0;
     col.passCount   = 0;
     col.pendingJump = -1;
     col.lastTickValue  = std::numeric_limits<float>::quiet_NaN();
@@ -79,6 +80,15 @@ int Slot::fireTick()
   // Reset per-tick edge flag. PRED_FIRE reads this during step 3
   // (L2 eval); it'll be set true below if step 2 retriggers the gate.
   firedThisTick = false;
+
+  // Capture currentRow per column before any L1/L2 processing or
+  // playhead advance. UI getters read currentRow so the displayed
+  // highlight matches the row being emitted THIS tick (= playhead
+  // at the start of fireTick), not the row scheduled for the next
+  // tick (= playhead after advance at the end).
+  for (int c = 0; c < kNumColumns; ++c) {
+    columns[c].currentRow = columns[c].playhead;
+  }
 
   Column& cv1c     = columns[kColCV1];
   Column& cv2c     = columns[kColCV2];
@@ -301,7 +311,8 @@ void Slot::stop()
 void Slot::reset()
 {
   for (int c = 0; c < kNumColumns; ++c) {
-    columns[c].playhead = columns[c].loopMin();
+    columns[c].playhead   = columns[c].loopMin();
+    columns[c].currentRow = columns[c].loopMin();
     columns[c].passCount = 0;
     columns[c].pendingJump = -1;
     // Clear PRED_CHANGED's tick-over-tick comparator so the first

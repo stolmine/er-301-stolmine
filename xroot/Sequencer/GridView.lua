@@ -89,10 +89,20 @@ local function fmtAmp(v)
   return string.format(" %4.2f", v)
 end
 
+-- step-len: clock ticks per row. Engine stores the value in beats
+-- (1.0 = quarter note); at the locked 4 PPQN this is 4 ticks per
+-- beat, so ticks = beats * 4. Displayed as an integer so the user
+-- doesn't see decimals when nudging the step length.
+local function fmtTicks(v)
+  if v ~= v then return "  NaN" end
+  return string.format("%5d", math.floor(v * 4 + 0.5))
+end
+
 local function fmtCellByCol(col, v)
   if col == 0 then return fmtNote(v) end
   if col == 1 or col == 2 then return fmtVolts(v) end
-  if col == 3 or col == 5 then return fmtBeats(v) end
+  if col == 3 then return fmtBeats(v) end   -- gate-len: fractional beats
+  if col == 5 then return fmtTicks(v) end   -- step-len: integer ticks
   if col == 4 then return fmtAmp(v) end
   return string.format("%5.2f", v)
 end
@@ -478,15 +488,20 @@ local kEncoderThreshold = Env.EncoderThreshold.Default
 -- column type:
 --   CV1 (V/oct):    1 semi  / 1 oct  / 1 cent  / 12 oct
 --   CV2, CV3:       100 mV  / 1 V    / 10 mV   / 10 V
---   gate-len/step-len: 1/16 / 1/4    / 1/64    / 1 beat
---   gate-amp:       5%      / 20%    / 1.25%   / 80%
+--   gate-len:       1/16   / 1/4    / 1/64    / 1 beat (fractional)
+--   gate-amp:       5%     / 20%    / 1.25%   / 80%
+--   step-len:       1 tick / 4 ticks / 1 tick / 16 ticks (integer ticks
+--                   only -- the engine's 4 PPQN base means 1 tick = 1/16
+--                   note = 0.25 beats; sub-tick steps would land off-
+--                   grid and read as ugly decimals in the column, so
+--                   super-fine matches fine.)
 local kColumnSteps = {
   [0] = { fine = 1/12,   coarse = 1.0,    superFine = 1/120,  superCoarse = 12.0 },
   [1] = { fine = 0.1,    coarse = 1.0,    superFine = 0.01,   superCoarse = 10.0 },
   [2] = { fine = 0.1,    coarse = 1.0,    superFine = 0.01,   superCoarse = 10.0 },
   [3] = { fine = 0.0625, coarse = 0.25,   superFine = 0.0156, superCoarse = 1.0  },
   [4] = { fine = 0.05,   coarse = 0.2,    superFine = 0.0125, superCoarse = 0.8  },
-  [5] = { fine = 0.0625, coarse = 0.25,   superFine = 0.0156, superCoarse = 1.0  },
+  [5] = { fine = 0.25,   coarse = 1.0,    superFine = 0.25,   superCoarse = 4.0  },
 }
 
 -- Dial button toggles "fine" <-> "coarse"; shift held picks the
@@ -620,6 +635,10 @@ end
 -- look musically sensible: ±5 octaves for V/oct, ±5 V for raw CV,
 -- common-fraction beats for length columns, 0..1 amplitude for gates.
 local kRandomBeats = { 0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0 }
+-- Step-len draws from integer-tick multiples only. 1 tick = 0.25 beats
+-- at the engine's 4 PPQN. Choices map to 1, 2, 4, 8, 16, 32 ticks --
+-- i.e. 1/16, 1/8, 1/4, 1/2, whole, double-whole notes.
+local kRandomStepTicks = { 1, 2, 4, 8, 16, 32 }
 local function randomForColumn(col)
   if col == 0 then
     -- CV1 (V/oct): random semitone in -60..+60 (5 octaves each way).
@@ -627,9 +646,13 @@ local function randomForColumn(col)
   elseif col == 1 or col == 2 then
     -- CV2 / CV3: -5..+5 V, 0.1 V resolution.
     return math.random(-50, 50) / 10.0
-  elseif col == 3 or col == 5 then
-    -- gate-len / step-len: draw from common-fraction set.
+  elseif col == 3 then
+    -- gate-len: draw from the common-fraction set (fractional beats
+    -- allowed for envelope duration -- sub-tick is fine here).
     return kRandomBeats[math.random(1, #kRandomBeats)]
+  elseif col == 5 then
+    -- step-len: integer tick count converted back to beats.
+    return kRandomStepTicks[math.random(1, #kRandomStepTicks)] * 0.25
   elseif col == 4 then
     -- gate-amp: 0..1, 0.05 step.
     return math.random(0, 20) / 20.0

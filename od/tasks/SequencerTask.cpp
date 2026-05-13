@@ -146,7 +146,13 @@ namespace od {
 
   int SequencerTask::playhead(int slot, int col) const
   {
-    return mSlots[clampSlot(slot)].playhead(col);
+    if (col < 0 || col >= sequencer::kNumColumns) return 0;
+    // Return currentRow (= the row being emitted right now) rather
+    // than playhead (= the row scheduled for the next tick). UI
+    // wants the audibly-current row so the highlight doesn't lead
+    // the audio by one step. Internal C++ paths still use
+    // col.playhead directly via Slot::playhead().
+    return mSlots[clampSlot(slot)].columns[col].currentRow;
   }
 
   float SequencerTask::l1Value(int slot, int col, int row) const

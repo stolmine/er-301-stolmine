@@ -127,7 +127,12 @@ public:
   int length    = 16;        // logical number of rows in use
   int marker1   = 0;         // raw markers; loop region = [min(m1,m2), max(m1,m2)]
   int marker2   = 15;
-  int playhead  = 0;
+  int playhead  = 0;         // row that the NEXT fireTick will read
+  int currentRow = 0;        // row that the engine is presently emitting
+                             // (captured at top of fireTick before the
+                             // playhead advance at the end). UI reads
+                             // this via SequencerTask::playhead so the
+                             // visible highlight matches what's audible.
   int passCount = 0;         // increments each time playhead wraps the loop end
 
   // Reserved for tick-boundary deferred jumps (e.g. ACTION_JUMP_*).

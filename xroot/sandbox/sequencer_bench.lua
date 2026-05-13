@@ -102,7 +102,11 @@ end
 
 -- ---------------------------------------------------------------------------
 -- Test 2: polymetric 5/7 -- columns with different lengths advance
--- independently. After LCM(5,7) = 35 ticks, both playheads back to 0.
+-- independently. After LCM(5,7) + 1 = 36 ticks, both columns have just
+-- emitted row 0, so seq:playhead (which returns currentRow = the
+-- last-emitted row) reads 0 on both. The +1 accounts for the new
+-- "playhead returns currently-emitting row, not next-to-emit row"
+-- semantic introduced in Step 9.
 -- ---------------------------------------------------------------------------
 local function test_polymetric_5_7()
   local name = "polymetric-5-and-7"
@@ -116,7 +120,7 @@ local function test_polymetric_5_7()
   seq:setMarkers(SLOT, COL_CV2, 0, 6)
   for r = 0, 6 do seq:setL1(SLOT, COL_CV2, r, 100 + r) end
 
-  for _ = 1, 35 do seq:tickOnce(SLOT) end
+  for _ = 1, 36 do seq:tickOnce(SLOT) end
 
   local ph0 = seq:playhead(SLOT, COL_CV1)
   local ph1 = seq:playhead(SLOT, COL_CV2)
