@@ -248,11 +248,12 @@ private:
   int fireTick();
 };
 
-// TODO(gate-row): Working assumption for v0.1 — gate-len and gate-amp values
-// are read from CV1's playhead row when any tick fires. The polymetric model
-// permits each column to have its own playhead, so "which column's row
-// defines THE step?" is a real spec question. Needs resolution before Step 4
-// (grid view UI). See docs/planning/sequencer-implementation-plan.md
-// "Open ambiguities flagged" section.
+// gate-row resolution (was: TODO). Each column reads from its OWN
+// playhead row, including gate-len and gate-amp. This makes gate emission
+// polymetric in the same way CV1/2/3 and step-len are -- a 2-step
+// gate-amp loop fires gates on every tick (assuming both cells non-zero)
+// while CV1 runs its own 16-step pattern in parallel. PRED_FIRE checks
+// the slot's firedThisTick flag, which is set when gate-amp at its own
+// playhead is non-zero on the current tick.
 
 }}  // namespace od::sequencer
