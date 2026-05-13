@@ -600,21 +600,35 @@ function GridView:refresh()
     self.cursorEasingY = false
   end
 
-  -- Selection box: dotted-edge rectangle wrapping the row-range
-  -- selection on `selectionColumn`. Hidden when the user has switched
-  -- columns (which also clears the selection, but defensive in case).
-  -- Position rides on subPx so the dotted edge slides with the cells
-  -- it wraps during smooth-scroll transitions.
+  -- Selection / mark dotted box. Two modes feed the same drawing:
+  --   * selection active on the cursor's column -> wrap selection range
+  --   * mark modal on the cursor's column       -> wrap (firstMark..focusHead)
+  -- Both share the same dotted-edge primitive so the visual language is
+  -- consistent across "user-defined row range" gestures. Position rides
+  -- on subPx so the box slides with the cells it wraps during smooth
+  -- scroll. Selection takes priority when both are somehow active
+  -- (shouldn't happen -- they're mutually exclusive -- but defensive).
+  local boxLo, boxHi, boxCol
   if self.selectionActive and self.selectionColumn == self.columnCursor then
-    local selMin = math.min(self.selectionAnchor, self.selectionEnd)
-    local selMax = math.max(self.selectionAnchor, self.selectionEnd)
+    boxLo  = math.min(self.selectionAnchor, self.selectionEnd)
+    boxHi  = math.max(self.selectionAnchor, self.selectionEnd)
+    boxCol = self.selectionColumn
+  elseif self.markingMode == "marking_end"
+         and self.markBackup
+         and self.markBackup.col == self.columnCursor then
+    boxLo  = math.min(self.markFirstMark, self.focusHeadRow)
+    boxHi  = math.max(self.markFirstMark, self.focusHeadRow)
+    boxCol = self.markBackup.col
+  end
+
+  if boxCol then
     -- Clip to visible window (now including the +1 partial-bottom row).
-    local topV    = math.max(1,                selMin - startRow + 1)
-    local bottomV = math.min(kVisibleRows + 1, selMax - startRow + 1)
+    local topV    = math.max(1,                boxLo - startRow + 1)
+    local bottomV = math.min(kVisibleRows + 1, boxHi - startRow + 1)
     if topV <= bottomV then
       local topLabelY    = kHeaderY - topV    * kRowHeight + subPx
       local bottomLabelY = kHeaderY - bottomV * kRowHeight + subPx
-      local selX = self.selectionColumn * kColPly
+      local selX = boxCol * kColPly
       local selY = math.floor(bottomLabelY + 3 + 0.5)
       local selH = (bottomV - topV) * kRowHeight + 10
       buildDottedRect(self.selectionInstr, selX, selY, kColPly, selH, app.GRAY10)
