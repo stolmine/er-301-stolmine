@@ -32,9 +32,17 @@ local PRED_EQ      = 2
 local PRED_GT      = 3
 local PRED_LT      = 4
 
+local PRED_PROBABILITY = 5
+local PRED_APPROX      = 6
+local PRED_FIRE        = 7
+local PRED_CHANGED     = 8
+
 local ACTION_ADD   = 1
 local ACTION_SUB   = 2
 local ACTION_SET   = 3
+local ACTION_FIRE  = 6
+local ACTION_RAND  = 7
+local ACTION_MUTE  = 8
 
 -- Column indices, mirroring od/sequencer/Sequencer.h
 local COL_CV1      = 0
@@ -161,6 +169,90 @@ local function test_l2_destructive_write()
 end
 
 -- ---------------------------------------------------------------------------
+-- Test 4: L2 Phase 1.5 polish ops -- exercise the four new predicates
+-- (PRED_PROBABILITY, PRED_APPROX, PRED_FIRE, PRED_CHANGED) and three new
+-- actions (ACTION_MUTE, plus ACTION_FIRE and ACTION_RAND are
+-- non-deterministic targets, so we cover the deterministic ones).
+--
+-- Layout: CV1 is a 4-step loop driving the L2 program; CV2 is pinned to
+-- a 1-step loop (length=1, markers 0..0) so its playhead stays at row 0
+-- and acts as a target accumulator we can read back.
+--   CV1 row 0: ?100  : B+1   (always fires, accumulates CV2)
+--   CV1 row 1: !     : B=5   (fires on slot gate retrigger -> CV2 := 5)
+--   CV1 row 2: c     : B+1   (CV1's value didn't change -> skip)
+--   CV1 row 3: ~0    : BM    (CV1[3]=0 approx 0 -> MUTE CV2)
+-- Gate-amp[1] = 1.0 so tick 2 retriggers the slot gate; other rows = 0.
+-- ---------------------------------------------------------------------------
+local function test_l2_phase15_polish()
+  local name = "l2-phase15-polish"
+  seq:resetSlot(SLOT)
+  -- Clear any L2 cells left over from prior tests on CV1's first 4 rows.
+  for r = 0, 3 do seq:clearL2(SLOT, COL_CV1, r) end
+
+  -- CV1: 4-step loop with all cells explicitly zeroed. resetSlot only
+  -- rewinds the playhead -- it does NOT clear L1 values, so prior tests
+  -- (e.g. static-16-step leaves cv1[r] = r*0.1) would otherwise leak
+  -- non-zero values into PRED_CHANGED / PRED_APPROX assertions below.
+  seq:setColumnLength(SLOT, COL_CV1, 4)
+  seq:setMarkers(SLOT, COL_CV1, 0, 3)
+  for r = 0, 3 do seq:setL1(SLOT, COL_CV1, r, 0.0) end
+  -- CV2: 1-step loop pinned at row 0 -- the target accumulator.
+  seq:setColumnLength(SLOT, COL_CV2, 1)
+  seq:setMarkers(SLOT, COL_CV2, 0, 0)
+  seq:setL1(SLOT, COL_CV2, 0, 0.0)
+  -- Gate-amp pattern: only row 1 is non-zero so tick 2 retriggers gate.
+  seq:setL1(SLOT, COL_GATE_AMP, 0, 0.0)
+  seq:setL1(SLOT, COL_GATE_AMP, 1, 1.0)
+  seq:setL1(SLOT, COL_GATE_AMP, 2, 0.0)
+  seq:setL1(SLOT, COL_GATE_AMP, 3, 0.0)
+  seq:seedRng(SLOT, 0xCAFE)
+
+  seq:setL2(SLOT, COL_CV1, 0,
+            PRED_PROBABILITY, -1, 100.0,
+            ACTION_ADD, COL_CV2, 1.0)
+  seq:setL2(SLOT, COL_CV1, 1,
+            PRED_FIRE, -1, 0.0,
+            ACTION_SET, COL_CV2, 5.0)
+  seq:setL2(SLOT, COL_CV1, 2,
+            PRED_CHANGED, -1, 0.0,
+            ACTION_ADD, COL_CV2, 1.0)
+  seq:setL2(SLOT, COL_CV1, 3,
+            PRED_APPROX, -1, 0.0,
+            ACTION_MUTE, COL_CV2, 0.0)
+
+  -- Tick 1: PROB 100 -> ADD +1 -> CV2 = 1.
+  seq:tickOnce(SLOT)
+  local v = seq:l1Value(SLOT, COL_CV2, 0)
+  if not approxEq(v, 1.0) then
+    fail(name, string.format("tick1 expected CV2=1.0 (PROB+ADD), got %.3f", v))
+    return
+  end
+  -- Tick 2: gate-amp[1]=1.0 -> firedThisTick -> PRED_FIRE -> SET 5.
+  seq:tickOnce(SLOT)
+  v = seq:l1Value(SLOT, COL_CV2, 0)
+  if not approxEq(v, 5.0) then
+    fail(name, string.format("tick2 expected CV2=5.0 (FIRE+SET), got %.3f", v))
+    return
+  end
+  -- Tick 3: PRED_CHANGED on CV1: cv1[2]=0 vs lastTickValue=0 -> not
+  -- changed -> ACTION_ADD skipped. CV2 stays at 5.
+  seq:tickOnce(SLOT)
+  v = seq:l1Value(SLOT, COL_CV2, 0)
+  if not approxEq(v, 5.0) then
+    fail(name, string.format("tick3 expected CV2=5.0 (CHANGED stays false), got %.3f", v))
+    return
+  end
+  -- Tick 4: PRED_APPROX 0 -> cv1[3]=0 within eps -> MUTE -> CV2 = 0.
+  seq:tickOnce(SLOT)
+  v = seq:l1Value(SLOT, COL_CV2, 0)
+  if not approxEq(v, 0.0) then
+    fail(name, string.format("tick4 expected CV2=0.0 (APPROX+MUTE), got %.3f", v))
+    return
+  end
+  pass(name)
+end
+
+-- ---------------------------------------------------------------------------
 -- Run all tests, then reset the slot state so the bench leaves no trace.
 -- ---------------------------------------------------------------------------
 app.logInfo("sequencer_bench: starting Step-1 bench tests")
@@ -168,6 +260,7 @@ app.logInfo("sequencer_bench: starting Step-1 bench tests")
 test_static_16_step()
 test_polymetric_5_7()
 test_l2_destructive_write()
+test_l2_phase15_polish()
 
 local total = #results
 local pass_count = 0

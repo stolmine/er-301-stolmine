@@ -11,6 +11,7 @@
 // kMaxStepsPerColumn so no .resize() is needed at runtime.
 
 #include <cstdint>
+#include <limits>
 #include <random>
 #include <vector>
 
@@ -129,6 +130,13 @@ public:
   // -1 = no pending jump; >= 0 = jump target row, applied at next tick start.
   int pendingJump = -1;
 
+  // Last-tick playhead-row L1 value, captured at the END of fireTick
+  // (after L2 actions may have mutated L1). Used by PRED_CHANGED:
+  // "did THIS column's playhead-row value differ from last tick's?"
+  // NaN sentinel means "no prior tick" -- PRED_CHANGED returns false
+  // on the first tick after init/reset.
+  float lastTickValue = std::numeric_limits<float>::quiet_NaN();
+
   // Loop-region helpers (direction-tolerant per locked decision #2).
   int loopMin() const;
   int loopMax() const;
@@ -167,6 +175,12 @@ public:
   // Cached at start of processFrame so fireTick() can reach BPM/SR
   float cachedBpm        = 120.0f;
   float cachedSampleRate = 48000.0f;
+
+  // Set true at the top of every fireTick whenever this tick retriggers
+  // the gate (gate-amp > 0 at CV1's playhead row, per the gate-row TODO
+  // model). Read by PRED_FIRE. Slot-level until the per-column gate
+  // resolution lands (Sequencer.h gate-row TODO).
+  bool firedThisTick = false;
 
   // ---- audio-thread API ----
   // Fill `frameLen` samples into each of the 6 output buffers. May fire

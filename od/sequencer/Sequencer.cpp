@@ -52,6 +52,7 @@ void Slot::init(int slotIdx)
     col.playhead    = 0;
     col.passCount   = 0;
     col.pendingJump = -1;
+    col.lastTickValue = std::numeric_limits<float>::quiet_NaN();
   }
 
   // Seed step-len column with a sane default so a fresh slot's first tick
@@ -69,10 +70,15 @@ void Slot::init(int slotIdx)
   gateRemainingSamples = 0;
   cachedBpm        = 120.0f;
   cachedSampleRate = 48000.0f;
+  firedThisTick    = false;
 }
 
 int Slot::fireTick()
 {
+  // Reset per-tick edge flag. PRED_FIRE reads this during step 3
+  // (L2 eval); it'll be set true below if step 2 retriggers the gate.
+  firedThisTick = false;
+
   Column& cv1c     = columns[kColCV1];
   Column& cv2c     = columns[kColCV2];
   Column& cv3c     = columns[kColCV3];
@@ -96,7 +102,8 @@ int Slot::fireTick()
   //    continues counting down. Otherwise we retrigger: amp = new value,
   //    duration = gateLenBeats * samplesPerBeat.
   const float rowGateAmp = gateAmpC.l1[cv1c.playhead].value;
-  if (rowGateAmp > 0.0f) {
+  firedThisTick = (rowGateAmp > 0.0f);
+  if (firedThisTick) {
     heldGateAmp = rowGateAmp;
     const float samplesPerBeat = 60.0f * cachedSampleRate / cachedBpm;
     int n = static_cast<int>(heldGateLen * samplesPerBeat);
@@ -121,6 +128,16 @@ int Slot::fireTick()
         od::sequencer::apply(*this, col.l2[row].action, c);
       }
     }
+  }
+
+  // 3.5. Capture each column's current playhead-row L1 value into
+  //      Column::lastTickValue so the NEXT tick's PRED_CHANGED can
+  //      compare against it. Runs AFTER L2 actions (step 3) so that
+  //      same-tick L2 mutations register as a "change" on the next
+  //      tick.
+  for (int c = 0; c < kNumColumns; ++c) {
+    Column& col = columns[c];
+    col.lastTickValue = col.l1[col.playhead].value;
   }
 
   // 4. Compute samples until NEXT tick from the step-len value we just
@@ -285,11 +302,15 @@ void Slot::reset()
     columns[c].playhead = columns[c].loopMin();
     columns[c].passCount = 0;
     columns[c].pendingJump = -1;
+    // Clear PRED_CHANGED's tick-over-tick comparator so the first
+    // tick after reset can never "change" against a stale value.
+    columns[c].lastTickValue = std::numeric_limits<float>::quiet_NaN();
   }
   samplesUntilTick = 0;
   heldCV1 = heldCV2 = heldCV3 = 0.0f;
   heldGateAmp = 0.0f;
   gateRemainingSamples = 0;
+  firedThisTick = false;
 }
 
 void Slot::seedRng(uint32_t seed)
