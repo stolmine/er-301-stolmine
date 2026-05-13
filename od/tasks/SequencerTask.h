@@ -95,6 +95,19 @@ namespace od {
     int marker2(int slot, int col) const;
     int columnLength(int slot, int col) const;
 
+    // L2 cell introspection for the L2 grid view. Returned ints map back
+    // to the PredicateOp / ActionOp enums in Sequencer.h. predColA and
+    // actionTargetCol return -1 to mean "host column" / "self" (the
+    // same convention used by setL2). For an absent cell, l2Present
+    // returns false and the other getters all return 0 / -1.
+    bool  l2Present(int slot, int col, int row) const;
+    int   l2PredOp(int slot, int col, int row) const;
+    int   l2PredColA(int slot, int col, int row) const;
+    float l2PredVal(int slot, int col, int row) const;
+    int   l2ActOp(int slot, int col, int row) const;
+    int   l2ActTgt(int slot, int col, int row) const;
+    float l2ActVal(int slot, int col, int row) const;
+
     // Bench-only synchronous tick (do not call on running slots).
     void tickOnce(int slot);
 

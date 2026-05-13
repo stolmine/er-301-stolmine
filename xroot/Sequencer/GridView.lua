@@ -94,6 +94,73 @@ local function fmtCellByCol(col, v)
   return string.format("%5.2f", v)
 end
 
+-- L2 cell rendering. Each L2 cell is a `predicate : action` rule that
+-- fires when the host column's playhead lands on the cell's row. The
+-- compact rendering fits the same 5-char field as L1: empty cells show
+-- a centered em-dash, present cells show truncated "pred:action".
+local kColLetters    = { "A", "B", "C", "D", "E", "F" }
+local kPredSymbolMap = {
+  [0] = "",      -- PRED_NONE (absent shown as em-dash by caller)
+  [1] = "%",     -- PRED_MODULO
+  [2] = "=",     -- PRED_EQ
+  [3] = ">",     -- PRED_GT
+  [4] = "<",     -- PRED_LT
+  [5] = "?",     -- PRED_PROBABILITY
+  [6] = "~",     -- PRED_APPROX
+  [7] = "!",     -- PRED_FIRE  (no operand)
+  [8] = "c",     -- PRED_CHANGED (no operand)
+  [9] = "@",     -- PRED_STEP_RANGE
+}
+local kPredHasVal = {
+  [1] = true, [2] = true, [3] = true, [4] = true,
+  [5] = true, [6] = true, [9] = true,
+}
+local kActSymbolMap = {
+  [0]  = "",     -- ACTION_NONE
+  [1]  = "+",    -- ACTION_ADD
+  [2]  = "-",    -- ACTION_SUB
+  [3]  = "=",    -- ACTION_SET
+  [4]  = "*",    -- ACTION_MUL
+  [5]  = "/",    -- ACTION_DIV
+  [6]  = "!",    -- ACTION_FIRE (no operand)
+  [7]  = "?",    -- ACTION_RAND (no operand)
+  [8]  = "M",    -- ACTION_MUTE (no operand)
+  [9]  = "j",    -- ACTION_JUMP_THIS  (operand = row)
+  [10] = "J",    -- ACTION_JUMP_GLOBAL
+  [11] = ".",    -- ACTION_JUMP_SELF
+}
+local kActHasVal = {
+  [1] = true, [2] = true, [3] = true, [4] = true, [5] = true,
+  [9] = true, [10] = true, [11] = true,
+}
+local kActHasTgt = {
+  [1] = true, [2] = true, [3] = true, [4] = true, [5] = true,
+  [6] = true, [7] = true, [8] = true,
+}
+
+local function fmtNum(v)
+  if v == math.floor(v) then return tostring(math.floor(v)) end
+  return string.format("%.1f", v)
+end
+
+local function fmtL2Cell(predOp, predColA, predVal, actOp, actTgt, actVal)
+  if predOp == 0 then return "  -  " end
+  local p = kPredSymbolMap[predOp] or "?"
+  if predColA >= 0 then p = kColLetters[predColA + 1] .. p end
+  if kPredHasVal[predOp] then p = p .. fmtNum(predVal) end
+  local a = ""
+  if actOp ~= 0 then
+    a = kActSymbolMap[actOp] or "?"
+    if kActHasTgt[actOp] and actTgt >= 0 then
+      a = kColLetters[actTgt + 1] .. a
+    end
+    if kActHasVal[actOp] then a = a .. fmtNum(actVal) end
+  end
+  local s = (#a > 0) and (p .. ":" .. a) or p
+  if #s > 5 then s = s:sub(1, 4) .. ":" end
+  return string.format("%-5s", s)
+end
+
 function GridView:init(chain)
   Window.init(self)
   self:setClassName("Sequencer.GridView")
@@ -221,6 +288,14 @@ function GridView:init(chain)
   -- toward the integer targetStart computed from focusHeadRow. nil =
   -- snap on first render (after onShow).
   self.scrollFrac        = nil
+
+  -- Active grid layer: "L1" shows L1 cell values (per-column formatters);
+  -- "L2" shows compact pred:action rules from the L2 grammar layer.
+  -- Toggled via shift+S3 (with shift-overlay label "L2" / "L1" on S3).
+  -- Phase 1 is read-only on L2: ENTER, shift+encoder selection, paste,
+  -- and bulk ops are blocked while layer == "L2". Marking, transport,
+  -- and scroll work on both layers since they're layer-agnostic.
+  self.layer = "L1"
 
   -- Mark-start / mark-end modal state. Idle outside the modal; while
   -- "marking_end" the S2 ply reads "end" and every focusHead change
@@ -537,11 +612,22 @@ function GridView:refresh()
         lbl:hide()
       else
         lbl:setPosition((c - 1) * kColPly + 2, math.floor(y + 0.5))
-        local v = seq:l1Value(kSlot, col, absRow)
         local inLoop     = absRow >= loopLo and absRow <= loopHi
         local isFocus    = absRow == self.focusHeadRow
         local isPlayhead = absRow == playhead
-        lbl:setText(fmtCellByCol(col, v))
+        local text
+        if self.layer == "L2" then
+          text = fmtL2Cell(
+            seq:l2PredOp(kSlot, col, absRow),
+            seq:l2PredColA(kSlot, col, absRow),
+            seq:l2PredVal(kSlot, col, absRow),
+            seq:l2ActOp(kSlot, col, absRow),
+            seq:l2ActTgt(kSlot, col, absRow),
+            seq:l2ActVal(kSlot, col, absRow))
+        else
+          text = fmtCellByCol(col, seq:l1Value(kSlot, col, absRow))
+        end
+        lbl:setText(text)
         lbl:setForegroundColor(cellBrightness(isPlayhead, isFocus, inLoop))
         lbl:show()
       end
@@ -696,6 +782,10 @@ function GridView:refresh()
   end
 
   self.bpmLabel:setText(string.format("BPM %d", math.floor(seq:getBpm() + 0.5)))
+  -- Persistent layer indicator: "seq1.L1" or "seq1.L2" on the sub
+  -- title line, so the user always knows which layer the grid view
+  -- is showing without having to hold shift.
+  self.titleLabel:setText(string.format("seq%d.%s", kSlot + 1, self.layer))
 
   -- Edit-step indicator. Shown only while in edit mode.
   if self.editingL1 then
@@ -704,11 +794,12 @@ function GridView:refresh()
     self.editStepLabel:setText("")
   end
 
-  -- Sub softkey labels. Four modes, checked in priority order:
-  --   1. selection active        -> copy / cut / rand
-  --   2. mark modal (marking_end)-> start|stop / end / _
-  --   3. shift held + clipboard  -> paste / _ / _  (live shift overlay)
-  --   4. default                 -> start|stop / mark / _
+  -- Sub softkey labels. Modes checked in priority order:
+  --   1. selection active     -> copy / cut / rand
+  --   2. mark modal           -> start|stop / end / _
+  --   3. shift held (default) -> S1 = paste (clipboard non-empty),
+  --                              S3 = OTHER layer name (always shown)
+  --   4. default              -> start|stop / mark / _
   -- The shift-overlay polls the hardware shift state each refresh
   -- (55 Hz), so labels swap responsively as the user holds / releases
   -- shift. Selection takes priority over everything -- once a
@@ -721,10 +812,10 @@ function GridView:refresh()
     self.s1Button:setText(self.running and "stop" or "start")
     self.s2Button:setText("end")
     self.s3Button:setText("")
-  elseif clipboard ~= nil and app.isShiftButtonPushed() then
-    self.s1Button:setText("paste")
+  elseif app.isShiftButtonPushed() then
+    self.s1Button:setText(clipboard ~= nil and "paste" or "")
     self.s2Button:setText("")
-    self.s3Button:setText("")
+    self.s3Button:setText((self.layer == "L1") and "L2" or "L1")
   else
     self.s1Button:setText(self.running and "stop" or "start")
     self.s2Button:setText("mark")
@@ -805,6 +896,8 @@ end
 -- paste would run past kMaxRow it truncates at the boundary.
 function GridView:_pasteAtFocus()
   if clipboard == nil then return false end
+  -- Clipboard is L1 cell values only; refuse paste on L2 layer.
+  if self.layer ~= "L1" then return false end
   local seq = app.AudioThread.getSequencerTask()
   if not seq then return false end
   if columnCategory(clipboard.col) ~= columnCategory(self.columnCursor) then
@@ -861,11 +954,19 @@ function GridView:subReleased(i, shifted)
     return true
   end
 
-  -- Shift-overlay binding: shift+S1 = paste (when clipboard non-empty).
-  -- shift on S2 / S3 reserved -- fall through so the firmware doesn't
-  -- treat them as shifted-start/reset.
+  -- Shift-overlay bindings:
+  --   shift+S1 = paste (only when clipboard is non-empty; see refresh
+  --              for the matching label swap on S1)
+  --   shift+S3 = layer toggle (L1 <-> L2). Always available; the
+  --              shift-held S3 label always shows the OTHER layer
+  --              name as a "switch to" affordance.
   if shifted then
     if i == 1 then return self:_pasteAtFocus() end
+    if i == 3 then
+      self.layer = (self.layer == "L1") and "L2" or "L1"
+      self:refresh()
+      return true
+    end
     return false
   end
 
@@ -951,8 +1052,11 @@ function GridView:encoder(change, shifted)
       moved = true
     end
     if moved then self:_updateMarkingLive() end
-  elseif shifted then
+  elseif shifted and self.layer == "L1" then
     -- Nav mode + shift: extend selection. Anchor on first activation;
+    -- selection mechanic is L1-only in Phase 1 (the bulk-edit semantics
+    -- don't translate cleanly to L2 cell rules). On L2, shift+encoder
+    -- falls through to plain scroll below.
     -- focusHeadRow tracks the moving end. Selection range =
     -- [min(anchor, end), max(anchor, end)]. The cursor box renders
     -- at min(anchor, end) (= master) per Chunk B; the focusHeadRow
@@ -1067,6 +1171,9 @@ end
 -- Entering edit mode clears any active selection (mutually exclusive).
 function GridView:enterReleased(shifted)
   if shifted then return false end
+  -- Phase 1: ENTER on the L2 layer is a no-op (the L2 cell editor
+  -- modal is Phase 2). L1 inline edit only opens on the L1 layer.
+  if self.layer == "L2" and not self.editingL1 then return false end
   if self.editingL1 then
     self.focusHeadRow = clamp(self.focusHeadRow + 1, 0, kMaxRow)
   else

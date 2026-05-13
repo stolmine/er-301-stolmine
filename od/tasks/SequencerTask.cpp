@@ -167,6 +167,63 @@ namespace od {
     return mSlots[clampSlot(slot)].columns[col].length;
   }
 
+  // L2 cell introspection. All seven getters share the same out-of-bounds
+  // policy: invalid (slot, col, row) -> the absent-cell defaults. Callers
+  // should gate further reads on l2Present() returning true.
+  static inline bool inL2Range(int col, int row)
+  {
+    return col >= 0 && col < sequencer::kNumColumns
+        && row >= 0 && row < sequencer::kMaxStepsPerColumn;
+  }
+
+  bool SequencerTask::l2Present(int slot, int col, int row) const
+  {
+    if (!inL2Range(col, row)) return false;
+    return mSlots[clampSlot(slot)].columns[col].l2[row].present;
+  }
+
+  int SequencerTask::l2PredOp(int slot, int col, int row) const
+  {
+    if (!inL2Range(col, row)) return 0;
+    const auto& cell = mSlots[clampSlot(slot)].columns[col].l2[row];
+    return cell.present ? static_cast<int>(cell.pred.op) : 0;
+  }
+
+  int SequencerTask::l2PredColA(int slot, int col, int row) const
+  {
+    if (!inL2Range(col, row)) return -1;
+    const auto& cell = mSlots[clampSlot(slot)].columns[col].l2[row];
+    return cell.present ? static_cast<int>(cell.pred.colA) : -1;
+  }
+
+  float SequencerTask::l2PredVal(int slot, int col, int row) const
+  {
+    if (!inL2Range(col, row)) return 0.0f;
+    const auto& cell = mSlots[clampSlot(slot)].columns[col].l2[row];
+    return cell.present ? cell.pred.operand : 0.0f;
+  }
+
+  int SequencerTask::l2ActOp(int slot, int col, int row) const
+  {
+    if (!inL2Range(col, row)) return 0;
+    const auto& cell = mSlots[clampSlot(slot)].columns[col].l2[row];
+    return cell.present ? static_cast<int>(cell.action.op) : 0;
+  }
+
+  int SequencerTask::l2ActTgt(int slot, int col, int row) const
+  {
+    if (!inL2Range(col, row)) return -1;
+    const auto& cell = mSlots[clampSlot(slot)].columns[col].l2[row];
+    return cell.present ? static_cast<int>(cell.action.targetCol) : -1;
+  }
+
+  float SequencerTask::l2ActVal(int slot, int col, int row) const
+  {
+    if (!inL2Range(col, row)) return 0.0f;
+    const auto& cell = mSlots[clampSlot(slot)].columns[col].l2[row];
+    return cell.present ? cell.action.operand : 0.0f;
+  }
+
   void SequencerTask::tickOnce(int slot)
   {
     mSlots[clampSlot(slot)].tickOnce();
