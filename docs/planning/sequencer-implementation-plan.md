@@ -10,14 +10,18 @@ listed as "deferred to implementation phase" are now resolved; see the **Locked
 decisions** section below. New ambiguities surfaced during the lock-in pass are
 captured in **Deferred ambiguities** (intentionally not blocking engine work).
 
-**Progress (as of 2026-05-12):** Steps 1, 2, 4, 8 done. Step 5 partially shipped
-(L1 inline edit; L2 modal still pending). Steps 3, 6, 7, 9 not yet started.
-Branch `feature/sequencer` carries the work; commits run from `ba75ad7` (engine)
-through `ede9963` (cursor box + L1 edit). The sequencer is **user-authorable
-end-to-end on the device for L1 patterns**: wire any `seqN.*` source into a
-chain, `shift+ENTER` from scope, navigate to a cell, ENTER to edit, encoder to
-nudge, S1 to start. L2 grammar authoring + persistence + selection still live
-behind their respective step numbers below.
+**Progress (as of 2026-05-12):** Steps 1, 2, 4, 7, 8 done. Step 5 partially
+shipped (L1 inline edit; L2 modal still pending). Step 6 partially shipped
+(selection-mode sub layout done; per-column mark-start/end cycle still
+pending). Steps 3, 9 not yet started. Branch `feature/sequencer` carries
+the work; commits run from `ba75ad7` (engine) through `864b251` (paste).
+The sequencer is **user-authorable end-to-end on the device for L1
+patterns**: wire any `seqN.*` source into a chain, `shift+ENTER` from
+scope, navigate to a cell, ENTER to edit, encoder to nudge, shift+encoder
+to extend a row-range selection, bare encoder to bulk-edit (with revert
+via CANCEL / commit via UP), S1/S2/S3 to copy/cut/randomize, shift+S1 to
+paste at focus head. L2 grammar authoring + per-column loop markers +
+quicksave persistence are the remaining authoring features.
 
 ---
 
@@ -158,17 +162,45 @@ cell on every tick (held-CV / single-step drone behaviors).
 
 ## Sub-display layout (3 plies, S1 / S2 / S3)
 
-### Grid view, L1 mode
+### Grid view, L1 mode (as shipped)
+
+The actual sub layout currently in the takeover is simpler than the
+earlier draft below — slot semantics shifted as the implementation
+landed. The earlier draft is kept further down for reference; treat
+this block as authoritative.
+
+```
++--S1 ply-----+--S2 ply-----+--S3 ply-----+
+|             |             |             |
+|  start|stop |     (--)    |    reset    |   (default; selection inactive)
+|             |             |             |
++-------------+-------------+-------------+
+   S1 = transport      S2 = unused        S3 = playhead reset
+   (Toggle play /      (reserved for      (sends all playheads
+    stop on slot 0)     mark-start/end     to row 0; does NOT
+                        when shipped)      stop transport)
+
+Shift held + clipboard non-empty:
++-------------+-------------+-------------+
+|    paste    |     (--)    |    (--)     |
++-------------+-------------+-------------+
+   S1 = paste at focus head, advance focusHead by N
+```
+
+Earlier draft for reference (some slots remain unbuilt):
 
 ```
 +--S1 ply (~42px)-+--S2 ply (~42px)-+--S3 ply (~42px)-+
-|     +1.0        |   mark start    |   ▸ playhead    |   (default; clipboard empty)
-|     EDIT ▸      |     ▸ mark end  |   (state-       |
-|                 |     (cycles)    |    dependent)   |
+|     +1.0        |   mark start    |   ▸ playhead    |
+|     EDIT ▸      |     ▸ mark end  |                 |
+|                 |     (cycles)    |                 |
 +-----------------+-----------------+-----------------+
-   S1 click =        S2 click =        S3 default = jump to playhead
-   keyboard          cycles per-col    S3 with paste = paste clipboard
-   modal on cell     state machine     S3 + shift = clear cell
+   (S1 click =       (S2 click =       (S3 default =
+    keyboard          cycles per-col    jump-to-playhead,
+    modal on cell --  state machine --  not yet built;
+    L2 only; L1       not yet built)    today S3=reset)
+    uses inline ENTER
+    edit instead)
 ```
 
 ### Grid view, L2 mode
@@ -237,32 +269,56 @@ can then dial."
   column's typed range; CV columns randomize within +/- 5 V, gate-amp within
   0..1, gate-len/step-len within the common-fraction set, etc.)
 
-**PASTE** lands as a follow-up; see the original S3 state-rotation table below
-for the clipboard semantics.
+**PASTE (shipped 2026-05-12):** lives on a **live shift-held overlay** on
+the default (no-selection) sub bar, not on S3. While shift is held AND the
+clipboard is non-empty, the sub labels swap from `start|stop / _ / reset`
+to `paste / _ / _`; releasing shift restores the default. Pressing
+shift+S1 writes the clipboard values into rows
+`[focusHead .. focusHead + N - 1]` in the user's current column, then
+advances focusHead by N (chained pastes stitch contiguously). Type-check
+is by column category (`cv` for col 0/1/2, `time` for col 3/5, `amp` for
+col 4); cross-category paste refuses silently. Selection mode takes
+priority over the shift overlay — while selecting, shift only affects
+encoder gestures.
 
 ---
 
-## S3 ply state-rotation summary
+## Sub-bar state-rotation summary
 
-| Clipboard state | Selection active | S3 default | S3 + shift |
-|---|---|---|---|
-| Empty | No | jump to playhead | clear cell |
-| Empty | Yes | (sub in selection mode) | (sub in selection mode) |
-| Non-empty | No | paste at focus head | clear cell |
-| Non-empty | Yes | (sub in selection mode) | (sub in selection mode) |
+The default (no-selection) sub bar is `start|stop / _ / reset`. Selection
+swaps it entirely to `copy / cut / rand`. Holding shift while in default
+state opens a paste overlay on S1 when the clipboard is non-empty.
+
+| Selection | Clipboard | Shift | S1 | S2 | S3 |
+|---|---|---|---|---|---|
+| No  | Empty     | No  | start\|stop | —     | reset |
+| No  | Empty     | Yes | start\|stop | —     | reset |
+| No  | Non-empty | No  | start\|stop | —     | reset |
+| No  | Non-empty | Yes | **paste**   | —     | —     |
+| Yes | (any)     | No  | copy        | cut   | rand  |
+| Yes | (any)     | Yes | copy        | cut   | rand  |
 
 Clipboard scope:
 - **Single slot, ephemeral** (not persisted across patch save).
-- Cross-column paste: type-checked. Paste preserves source column's type,
-  refuses incompatible (CV→time = no, CV1→CV2 = yes).
-- Layer-checked: L1 selections paste into L1 only; L2 → L2 only.
+- Cross-column paste: type-checked by column category (cv = col 0/1/2,
+  time = col 3/5, amp = col 4). Cross-category paste refuses silently.
+  Same-category cross-column paste OK (CV1 → CV2 ok, gate-len → step-len
+  ok), since the engine values are float-compatible.
+- Layer-checked: L1 selections paste into L1 only; L2 → L2 only. (L2 not
+  yet built; the clipboard is L1-only in practice.)
 
 Selection mechanic:
-- Hold **SHIFT** + encoder scroll extends selection range from focus head's current
-  cell.
-- Selected cells render with distinct background (inverted text or border).
-- Sub display switches to the COPY/CUT/CLEAR layout.
-- Exit selection: **CANCEL** hard button (or release shift, if shift-held model).
+- Hold **SHIFT** + encoder scroll extends selection range from focus head's
+  current cell.
+- Selected cells render with a dotted-edge selection box; the cursor box
+  pins to the top-of-selection (= master) cell.
+- Sub display switches to `copy / cut / rand` layout.
+- Bulk-edit during selection: bare encoder writes `master + step` to every
+  cell in the selection. Dirty marker (small dot on right edge) appears
+  on each modified cell.
+- Exit selection: **CANCEL** reverts bulk edits to the pre-edit snapshot
+  and clears the selection; **UP** commits (keeps values, clears markers);
+  switching columns via M1-M6 or entering ENTER-edit-mode implicitly commits.
 
 ---
 
@@ -461,20 +517,20 @@ Cell content as compact `pred:action` notation (e.g., `%4:B+1`, `?60:B!`, `>0.5:
 ## Effort estimate
 
 **~8.3 weeks** of focused development for v1. Status snapshot 2026-05-12
-(approximately ~4 of 8.3 weeks shipped):
+(approximately ~5.5 of 8.3 weeks shipped):
 
 | Piece | Estimate | Status |
 |---|---|---|
 | C++ engine | 2 weeks | ✅ shipped (`ba75ad7`) |
-| Picker integration | 0.5 | ✅ shipped (`ba75ad7`) |
+| Picker integration | 0.5 | ✅ shipped (`ba75ad7`, trimmed `763296b`) |
 | Patch persistence | 0.5 | ⏳ pending |
-| Grid view | 1.5 | ✅ shipped (`f8be7a7` … `ede9963`) |
+| Grid view | 1.5 | ✅ shipped (`f8be7a7` … `22d7b01`) |
 | Cell editor modal | 1.5 | 🟡 L1 inline done (`ede9963`); L2 modal remaining (~1.0 week) |
-| Sub-display routing | 0.5 | ⏳ pending |
-| Selection + clipboard | 1.0 | ⏳ pending |
+| Sub-display routing | 0.5 | 🟡 selection-mode swap + shift-paste overlay done (`bf30bfe`, `864b251`); mark-start/end cycle remaining (~0.3 week) |
+| Selection + clipboard | 1.0 | ✅ shipped (`e7aaea3`, `22d7b01`, `bf30bfe`, `864b251` -- Chunks A/B/C + PASTE) |
 | Access path (scope-mode shift+ENTER only) | 0.3 | ✅ shipped (`ade1f44`) |
 | Polish + bench | 1.0 | ⏳ pending |
-| **Total** | **~8.3** | **~4.3 shipped, ~4.0 remaining** |
+| **Total** | **~8.3** | **~5.5 shipped, ~2.8 remaining** |
 
 This is **focused**-time. Calendar time depends on context-switching with other
 work; realistic delivery is **3-4 months**.
@@ -525,6 +581,15 @@ now settled. Engine and UI code should reference these directly.
 10. **BPM display.** Always-visible header line within the sequencer
     takeover (small text at top of main display showing current BPM).
 
+11. **PASTE binding.** Lives on a live shift-held overlay on S1 of the
+    default (no-selection) sub bar: `start|stop / _ / reset` swaps to
+    `paste / _ / _` while shift is held AND the clipboard is non-empty.
+    Transport stays positionally consistent (S1 unshifted always =
+    start/stop). Selection mode is never affected by this overlay --
+    while selecting, shift only modifies encoder gestures. Decided
+    against the alternative of moving transport to S2 (would break
+    scope-mode reflex). Shipped in `864b251`.
+
 ---
 
 ## Deferred ambiguities (surfaced 2026-05-12)
@@ -550,13 +615,12 @@ implementation phase (step 5).
   or template-generated from a grammar table? Template-generation is the
   default unless a hand-authored variant proves clearer in mockup.
 
-- **StepListGraphic origin.** Plan cites
-  `er-301-habitat/mods/spreadsheet/StepListGraphic.h` as the visual idiom
-  to fork for the grid view. Habitat is a separate repo. Options: mirror
-  the file into stolmine, build a compatible widget fresh in
-  `xroot/Sequencer/`, or promote StepListGraphic into the firmware proper.
-  Engine work proceeds either way; decide before grid-view work
-  (implementation sequence step 4).
+- **StepListGraphic origin.** _Resolved 2026-05-12._ Built fresh in
+  `xroot/Sequencer/GridView.lua` using stock `app.Label` / `app.Drawing`
+  / `app.DrawingInstructions` primitives. No fork of Habitat's
+  `StepListGraphic.h` was needed; the widget is Lua-only, ~700 lines,
+  and depends on no C++ additions beyond the engine. The earlier
+  cross-reference to Habitat stands as a visual-idiom citation only.
 
 ---
 
@@ -593,12 +657,25 @@ implementation phase (step 5).
    not yet built** (the 6-slot Keyboard.Slot fork for predicate:action
    authoring per the spec). Budget remaining: ~1.5 weeks for L2 modal.
 
-6. ⏳ **Sub-display state machines + mark-start/end** — wire up the 3-ply layout
-   logic and per-column loop-marking cycle. **0.5 week.** _Not started._
+6. 🟡 **Sub-display state machines + mark-start/end — partial.** The
+   selection-mode sub bar swap (`copy / cut / rand`) and the shift-held
+   paste overlay (`paste / _ / _` when clipboard non-empty) are shipped
+   in `bf30bfe` and `864b251`. **The per-column mark-start/end cycle is
+   still unbuilt** -- loop bounds are populated by the bench harness only.
+   In the UI, M-press currently jumps the column cursor; the long-press
+   or shift-modifier path to "mark start / mark end" still needs design
+   + plumbing. Remaining: ~0.3 week.
 
-7. ⏳ **Selection + clipboard** — shift+scroll selection, COPY/CUT/CLEAR ops,
-   paste at focus head. **1 week.** _Not started._ shift+encoder in the grid
-   view is currently a no-op stub waiting for this step.
+7. ✅ **Selection + clipboard.** shift+scroll builds a row-range selection
+   on the active column. Bare encoder during selection bulk-edits all
+   selected cells (top-as-master snap then dial). `copy` / `cut` / `rand`
+   on S1/S2/S3 commit any in-flight bulk edit and run the action; CANCEL
+   reverts; UP commits. Shift-held overlay on the default sub bar reveals
+   `paste` on S1 when the clipboard is non-empty; paste lands at focus
+   head and advances focus head past the pasted region. Type-checked by
+   column category. Shipped across `e7aaea3` (Chunk A), `22d7b01`
+   (Chunk B + smooth scroll), `bf30bfe` (Chunk C), `864b251` (PASTE).
+   **Step 7 done.**
 
 8. ✅ **Access path** — `shift+ENTER` toggle in scope mode, single path.
    Routed via `Channels.toggleSequencerSubView` from
