@@ -10,19 +10,20 @@ listed as "deferred to implementation phase" are now resolved; see the **Locked
 decisions** section below. New ambiguities surfaced during the lock-in pass are
 captured in **Deferred ambiguities** (intentionally not blocking engine work).
 
-**Progress (as of 2026-05-12):** Steps 1, 2, 4, 6, 7, 8 done. Step 5
-partially shipped (L1 inline edit; L2 modal still pending). Steps 3, 9
-not yet started. Branch `feature/sequencer` carries the work; commits
-run from `ba75ad7` (engine) through `3bf71d8` (mark dotted box).
-The sequencer is **user-authorable end-to-end on the device for L1
-patterns**: wire any `seqN.*` source into a chain, `shift+ENTER` from
-scope, navigate to a cell, ENTER to edit, encoder to nudge,
-shift+encoder to extend a row-range selection, bare encoder to
-bulk-edit (with revert via CANCEL / commit via UP), S1/S2/S3 to
-copy/cut/randomize, shift+S1 to paste at focus head, S2 to enter the
-per-column mark-start/end modal. Remaining for v0.1: L2 grammar
-authoring (Step 5b), quicksave persistence (Step 3), polish + bench
-(Step 9).
+**Progress (as of 2026-05-13):** Steps 1, 2, 3, 4, 5, 6, 7, 8 done.
+Only Step 9 (polish + bench) remains. Branch `feature/sequencer`
+carries the work; commits run from `ba75ad7` (engine) through
+`bf2c312` (quicksave persistence). The sequencer is **end-to-end
+user-authorable** on the device for both L1 patterns AND L2
+predicate:action rules: wire any `seqN.*` source into a chain,
+`shift+ENTER` from scope, navigate to a cell. On L1: ENTER to inline-
+edit, encoder to nudge, shift+encoder for row-range selection, bare
+encoder to bulk-edit, S1/S2/S3 for copy/cut/randomize, shift+S1 for
+paste. On L2 (`shift+S3` to swap layer): ENTER opens the 6-slot cell
+editor modal with column + row-pin targeting on operands, full
+predicate / action grammar exposure (every op the engine evaluates),
+live preview + NL gloss. Patch state survives quicksave round-trip
+across power-cycle. Remaining: polish + bench (Step 9).
 
 ---
 
@@ -515,21 +516,21 @@ Cell content as compact `pred:action` notation (e.g., `%4:B+1`, `?60:B!`, `>0.5:
 
 ## Effort estimate
 
-**~8.3 weeks** of focused development for v1. Status snapshot 2026-05-12
-(approximately ~5.8 of 8.3 weeks shipped):
+**~8.3 weeks** of focused development for v1. Status snapshot 2026-05-13
+(approximately ~7.3 of 8.3 weeks shipped):
 
 | Piece | Estimate | Status |
 |---|---|---|
 | C++ engine | 2 weeks | ✅ shipped (`ba75ad7`) |
 | Picker integration | 0.5 | ✅ shipped (`ba75ad7`, trimmed `763296b`) |
-| Patch persistence | 0.5 | ⏳ pending |
+| Patch persistence | 0.5 | ✅ shipped (`bf2c312`) |
 | Grid view | 1.5 | ✅ shipped (`f8be7a7` … `22d7b01`) |
-| Cell editor modal | 1.5 | 🟡 L1 inline done (`ede9963`); L2 modal remaining (~1.0 week) |
+| Cell editor (L1 inline + L2 modal) | 1.5 | ✅ shipped (`ede9963`, `721a8e8`) |
 | Sub-display routing | 0.5 | ✅ shipped (`bf30bfe`, `864b251`, `0b47789`, `3bf71d8`) |
 | Selection + clipboard | 1.0 | ✅ shipped (`e7aaea3`, `22d7b01`, `bf30bfe`, `864b251` -- Chunks A/B/C + PASTE) |
 | Access path (scope-mode shift+ENTER only) | 0.3 | ✅ shipped (`ade1f44`) |
 | Polish + bench | 1.0 | ⏳ pending |
-| **Total** | **~8.3** | **~5.8 shipped, ~2.5 remaining** |
+| **Total** | **~8.3** | **~7.3 shipped, ~1.0 remaining** |
 
 This is **focused**-time. Calendar time depends on context-switching with other
 work; realistic delivery is **3-4 months**.
@@ -654,8 +655,16 @@ implementation phase (step 5).
    in `xroot/Source/ExternalChooser/init.lua` as `seq1`..`seq4`. Wireable
    from any chain's input picker. Shipped in `ba75ad7`. **Step 2 done.**
 
-3. ⏳ **Patch persistence** — round-trip the slot state in quicksave. Catch any
-   serialization edge cases early. **0.5 week.** _Not started._
+3. ✅ **Patch persistence.** `xroot/Sequencer/Persist.lua` serializes
+   per-slot state (length, markers, dense L1 cells, sparse L2 rules
+   with row pins) into `data.sequencer`, hooked into
+   `xroot/Persist/QuickSavePreset.lua` `populate()` / `apply()`.
+   On load: each slot is force-stopped, stale cells cleared, saved
+   state applied via existing engine setters, then `resetSlot` clears
+   transient state. Skipped (per locked decisions): RNG state,
+   running flag, all transient runtime fields. Bench includes a 5th
+   `test_persistence_roundtrip` test exercising both predicate +
+   action row pins. Shipped in `bf2c312`. **Step 3 done.**
 
 4. ✅ **Read-only grid view** — `xroot/Sequencer/GridView.lua`. Six column
    headers ("name:NN" with live playhead row counter), 6-row × 6-column cell
@@ -666,13 +675,27 @@ implementation phase (step 5).
    access path. Encoder threshold matches `Env.EncoderThreshold.Default`.
    Shipped across `f8be7a7` → `ede9963`. **Step 4 done.**
 
-5. ⏳ **Cell editor — partial.** L1 inline edit shipped in `ede9963`: ENTER
-   toggles an "editingL1" state, encoder nudges the cell value at
-   `(focusHeadRow, columnCursor)` by per-column step, dial button cycles
-   fine/coarse, shift selects the super variant, shift+HOME zeros the cell,
-   ENTER while editing commits + auto-advances (Habitat-fluid). **L2 modal
-   not yet built** (the 6-slot Keyboard.Slot fork for predicate:action
-   authoring per the spec). Budget remaining: ~1.5 weeks for L2 modal.
+5. ✅ **Cell editor (L1 inline + L2 modal).** L1 inline edit shipped in
+   `ede9963`: ENTER toggles "editingL1", encoder nudges by per-column
+   step, dial button cycles fine/coarse, shift selects super, shift+HOME
+   zeros the cell, ENTER while editing commits + advances focusHead
+   (Habitat-fluid). **L2 modal** shipped in `721a8e8`:
+   `xroot/Sequencer/CellEditor.lua` -- six tap-to-focus slots in the
+   order `predColA / predOp / predOperand / actTarget / actOp /
+   actOperand` so each side reads naturally (`A=3.5`, `B+1`). Cell-ref
+   slots (M1 / M4) support row pinning -- bare encoder increments row
+   index, S3 held + encoder cycles column letter, HOME clears the pin.
+   Engine struct extended with `Predicate.colARow` / `Action.targetRow`;
+   pin defaults to -1 (use that column's playhead). `setL2` grew two
+   args; `l2PredColARow` / `l2ActTgtRow` getters added. Live preview on
+   S1 + IF / THEN NL gloss on S2 / S3. shift+ENTER commits + advances
+   focusHead + stays in modal for Habitat-fluid sweep authoring.
+   **Step 5 done.**
+
+   L2 fire indicator (Phase 2 polish): `Column.lastL2FiredRow` set in
+   `fireTick` step 3 when a rule evaluates true. GridView L2 layer
+   tracks per-column decay (~180 ms at 55 Hz) and renders a 2x2 dot on
+   the cell's right edge -- same primitive as the L1 dirty marker.
 
 6. ✅ **Sub-display state machines + mark-start/end.** Sub bar swaps
    between selection (`copy / cut / rand`), mark modal
@@ -707,10 +730,32 @@ implementation phase (step 5).
    commitReleased per `xroot/Application.lua:300-305`). Shipped in `ade1f44`.
    **Step 8 done.**
 
-9. ⏳ **Polish + listen test** — under-load consistency, tempo sync, RNG
-   reproducibility, patch quicksave round-trips. **1 week.** _Not started._
-   Sample-accurate tick scheduling, gate-row source disambiguation, and the
-   gate-len/gate-amp/step-len output semantics also belong here.
+9. ⏳ **Polish + listen test** — under-load consistency, tempo sync,
+   RNG reproducibility, patch quicksave round-trips. **1 week.** _Not
+   started._ Concrete backlog as of 2026-05-13:
+
+   - **L2 cell editor: S3 column-targeting indication.** While the
+     user holds S3 in the modal (= "encoder cycles column letter
+     instead of row index"), there's no on-screen cue that the mode
+     has flipped. Cheap fix: tag the focused M1 / M4 slot border (or
+     add a small "col" chip near it) while `self.s3Held` is true.
+     ~0.05w.
+
+   - **Multi-slot grid view.** Today GridView hardcodes `kSlot = 0`
+     so the user only sees / edits slot 0's pattern. The other three
+     slots run silently via their picker exposures but are unreachable
+     in the UI. Candidate gesture: shift+M1..M4 selects slots 0..3
+     (M5 / M6 free for future use; or shift+M2..M5 leaving M1 / M6
+     reserved). Bench harness already runs on slot 3, so the engine
+     side is proven. ~0.2w.
+
+   - Sample-accurate tick scheduling.
+   - Gate-row source disambiguation (gate-row TODO in
+     `Sequencer.h:215-220`).
+   - gate-len / gate-amp / step-len output semantics under load.
+   - RNG reproducibility (locked decision #4): persist seed in
+     quicksave + add a re-seed gesture, OR add a Settings entry for
+     reproducible-vs-evolving randomness.
 
 ---
 
