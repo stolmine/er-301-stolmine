@@ -179,6 +179,25 @@ local function fmtL2Cell(predOp, predColA, predColARow, predVal,
   return string.format("%-5s", s)
 end
 
+-- Non-truncating variant of fmtL2Cell. Used by the shift-held
+-- preview overlay on the sub display where a 5-char field would be
+-- too tight to read the full rule.
+local function fmtL2CellFull(predOp, predColA, predColARow, predVal,
+                              actOp, actTgt, actTgtRow, actVal)
+  if predOp == 0 then return "-" end
+  local p = colRefText(predColA, predColARow) .. (kPredSymbolMap[predOp] or "?")
+  if kPredHasVal[predOp] then p = p .. fmtNum(predVal) end
+  local a = ""
+  if actOp ~= 0 then
+    if kActHasTgt[actOp] then
+      a = colRefText(actTgt, actTgtRow)
+    end
+    a = a .. (kActSymbolMap[actOp] or "?")
+    if kActHasVal[actOp] then a = a .. fmtNum(actVal) end
+  end
+  return (#a > 0) and (p .. ":" .. a) or p
+end
+
 function GridView:init(chain)
   Window.init(self)
   self:setClassName("Sequencer.GridView")
@@ -382,6 +401,19 @@ function GridView:init(chain)
   self.bpmLabel:setJustification(app.justifyLeft)
   self:addSubGraphic(self.bpmLabel)
 
+  -- Shift-held preview overlay. Empty when shift is not held. While
+  -- held: shows the clipboard contents (when occupied), otherwise
+  -- shows the current L2 cell's expanded rule when on L2 and the
+  -- cell is present. Positioned centered between the S2 and S3 sub
+  -- plies horizontally, mid-vertical, so it doesn't crowd the title
+  -- / status / BPM labels stacked along the left.
+  self.previewLabel = app.Label("", kFontSub)
+  self.previewLabel:setJustification(app.justifyCenter)
+  self.previewLabel:setCenter(
+    (app.BUTTON2_CENTER + app.BUTTON3_CENTER) // 2,
+    app.GRID4_LINE2)
+  self:addSubGraphic(self.previewLabel)
+
   -- Edit-step indicator (FINE / COARSE / SUPER FINE / SUPER COARSE).
   -- Blank when not editing.
   self.editStepLabel = app.Label("", kFontSub)
@@ -556,6 +588,31 @@ local function columnCategory(col)
   if col == 3 or col == 5             then return "time" end
   if col == 4                         then return "amp"  end
   return "unknown"
+end
+
+-- Render a compact text view of the current clipboard for the
+-- shift-held preview overlay. L1 form: "<col>: v1 v2 v3 ..".
+-- L2 form: "<col> L2: N rules" (sparse contents don't fit cleanly
+-- in one line; full inspection happens via the modal). Returns "".
+-- when clipboard is empty.
+local function clipboardPreviewText()
+  if not clipboard then return "" end
+  local letter = (clipboard.col and (kColLetters[clipboard.col + 1])) or "?"
+  if clipboard.layer == "L2" then
+    local n = 0
+    for _ in pairs(clipboard.cells or {}) do n = n + 1 end
+    return string.format("%s L2: %d rule%s", letter, n, n == 1 and "" or "s")
+  end
+  if not clipboard.values then return "" end
+  local s = letter .. ":"
+  local n = math.min(5, #clipboard.values)
+  for i = 1, n do
+    s = s .. " " .. ((clipboard.values[i] == math.floor(clipboard.values[i]))
+                       and tostring(math.floor(clipboard.values[i]))
+                       or string.format("%.1f", clipboard.values[i]))
+  end
+  if #clipboard.values > n then s = s .. " .." end
+  return s
 end
 
 -- Per-column random value generator for the RANDOMIZE action. The
@@ -903,6 +960,32 @@ function GridView:refresh()
   self.statusLabel:setText(self.runningPerSlot[self.slot] and "running" or "stopped")
   self.slotIndicator:setText(string.format("S%d", self.slot + 1))
 
+  -- Shift-held preview overlay: clipboard preview wins (paste-target
+  -- preview), else current L2 cell expanded when on L2 with a present
+  -- cell. Hidden when shift is not held or in a modal / selection.
+  local previewText = ""
+  if app.isShiftButtonPushed()
+     and not self.selectionActive
+     and not self.editingL1
+     and self.markingMode == "idle"
+     and not self.bpmHeld then
+    if clipboard then
+      previewText = "clip " .. clipboardPreviewText()
+    elseif self.layer == "L2"
+           and seq:l2Present(self.slot, self.columnCursor, self.focusHeadRow) then
+      previewText = "here " .. fmtL2CellFull(
+        seq:l2PredOp(self.slot, self.columnCursor, self.focusHeadRow),
+        seq:l2PredColA(self.slot, self.columnCursor, self.focusHeadRow),
+        seq:l2PredColARow(self.slot, self.columnCursor, self.focusHeadRow),
+        seq:l2PredVal(self.slot, self.columnCursor, self.focusHeadRow),
+        seq:l2ActOp(self.slot, self.columnCursor, self.focusHeadRow),
+        seq:l2ActTgt(self.slot, self.columnCursor, self.focusHeadRow),
+        seq:l2ActTgtRow(self.slot, self.columnCursor, self.focusHeadRow),
+        seq:l2ActVal(self.slot, self.columnCursor, self.focusHeadRow))
+    end
+  end
+  self.previewLabel:setText(previewText)
+
   -- Edit-step indicator. Shown only while in edit mode.
   if self.editingL1 then
     self.editStepLabel:setText(self.editStepMode == "coarse" and "COARSE" or "FINE")
@@ -1017,21 +1100,52 @@ end
 -- paste would run past kMaxRow it truncates at the boundary.
 function GridView:_pasteAtFocus()
   if clipboard == nil then return false end
-  -- Clipboard is L1 cell values only; refuse paste on L2 layer.
-  if self.layer ~= "L1" then return false end
   local seq = app.AudioThread.getSequencerTask()
   if not seq then return false end
-  if columnCategory(clipboard.col) ~= columnCategory(self.columnCursor) then
-    return false
-  end
+  -- Cross-layer paste refuses (clipboard layer must match current).
+  if clipboard.layer ~= self.layer then return false end
+
   local startR = self.focusHeadRow
-  local n = #clipboard.values
-  for i, v in ipairs(clipboard.values) do
-    local r = startR + i - 1
-    if r > kMaxRow then break end
-    seq:setL1(self.slot, self.columnCursor, r, v)
+
+  if clipboard.layer == "L1" then
+    -- Type-checked by column category so a CV clipboard doesn't
+    -- silently paste into a time column.
+    if columnCategory(clipboard.col) ~= columnCategory(self.columnCursor) then
+      return false
+    end
+    local n = #clipboard.values
+    for i, v in ipairs(clipboard.values) do
+      local r = startR + i - 1
+      if r > kMaxRow then break end
+      seq:setL1(self.slot, self.columnCursor, r, v)
+    end
+    self.focusHeadRow = clamp(startR + n, 0, kMaxRow)
+  else
+    -- L2 paste: sparse map keyed by row offset relative to selMin
+    -- at capture time. Reproduce the same sparse pattern starting
+    -- at the current focusHead. Advances focusHead past the highest
+    -- offset committed so consecutive pastes stitch contiguously.
+    local maxOffset = -1
+    for off, cell in pairs(clipboard.cells or {}) do
+      local r = startR + off
+      if r > kMaxRow then
+        -- Skip cells that fall past the column max.
+      else
+        seq:setL2(self.slot, self.columnCursor, r,
+                  cell.predOp,
+                  cell.predColA, cell.predColARow,
+                  cell.predVal,
+                  cell.actOp,
+                  cell.actTgt, cell.actTgtRow,
+                  cell.actVal)
+        if off > maxOffset then maxOffset = off end
+      end
+    end
+    if maxOffset >= 0 then
+      self.focusHeadRow = clamp(startR + maxOffset + 1, 0, kMaxRow)
+    end
   end
-  self.focusHeadRow = clamp(startR + n, 0, kMaxRow)
+
   self:refresh()
   return true
 end
@@ -1072,25 +1186,75 @@ function GridView:subReleased(i, shifted)
     local selMin = math.min(self.selectionAnchor, self.selectionEnd)
     local selMax = math.max(self.selectionAnchor, self.selectionEnd)
     local col    = self.selectionColumn
-    if i == 1 then
-      local values = {}
-      for r = selMin, selMax do
-        values[#values + 1] = seq:l1Value(self.slot, col, r)
-      end
-      clipboard = { col = col, values = values }
-    elseif i == 2 then
-      local values = {}
-      for r = selMin, selMax do
-        values[#values + 1] = seq:l1Value(self.slot, col, r)
-        seq:setL1(self.slot, col, r, 0.0)
-      end
-      clipboard = { col = col, values = values }
-    elseif i == 3 then
-      for r = selMin, selMax do
-        seq:setL1(self.slot, col, r, randomForColumn(col))
+    if self.layer == "L1" then
+      -- L1: clipboard stores dense array of cell values.
+      if i == 1 then
+        local values = {}
+        for r = selMin, selMax do
+          values[#values + 1] = seq:l1Value(self.slot, col, r)
+        end
+        clipboard = { layer = "L1", col = col, values = values }
+      elseif i == 2 then
+        local values = {}
+        for r = selMin, selMax do
+          values[#values + 1] = seq:l1Value(self.slot, col, r)
+          seq:setL1(self.slot, col, r, 0.0)
+        end
+        clipboard = { layer = "L1", col = col, values = values }
+      elseif i == 3 then
+        for r = selMin, selMax do
+          seq:setL1(self.slot, col, r, randomForColumn(col))
+        end
+      else
+        return false
       end
     else
-      return false
+      -- L2: clipboard stores sparse map of L2 rule tuples keyed by
+      -- offset from selMin so paste can reproduce the same sparse
+      -- pattern at a new focusHead. Random L2 is deferred to the
+      -- coherent-randomization sub-item; unconstrained random L2
+      -- rules don't produce musically useful output.
+      if i == 1 then
+        local cells = {}
+        for r = selMin, selMax do
+          if seq:l2Present(self.slot, col, r) then
+            cells[r - selMin] = {
+              predOp      = seq:l2PredOp(self.slot, col, r),
+              predColA    = seq:l2PredColA(self.slot, col, r),
+              predColARow = seq:l2PredColARow(self.slot, col, r),
+              predVal     = seq:l2PredVal(self.slot, col, r),
+              actOp       = seq:l2ActOp(self.slot, col, r),
+              actTgt      = seq:l2ActTgt(self.slot, col, r),
+              actTgtRow   = seq:l2ActTgtRow(self.slot, col, r),
+              actVal      = seq:l2ActVal(self.slot, col, r),
+            }
+          end
+        end
+        clipboard = { layer = "L2", col = col, cells = cells }
+      elseif i == 2 then
+        local cells = {}
+        for r = selMin, selMax do
+          if seq:l2Present(self.slot, col, r) then
+            cells[r - selMin] = {
+              predOp      = seq:l2PredOp(self.slot, col, r),
+              predColA    = seq:l2PredColA(self.slot, col, r),
+              predColARow = seq:l2PredColARow(self.slot, col, r),
+              predVal     = seq:l2PredVal(self.slot, col, r),
+              actOp       = seq:l2ActOp(self.slot, col, r),
+              actTgt      = seq:l2ActTgt(self.slot, col, r),
+              actTgtRow   = seq:l2ActTgtRow(self.slot, col, r),
+              actVal      = seq:l2ActVal(self.slot, col, r),
+            }
+            seq:clearL2(self.slot, col, r)
+          end
+        end
+        clipboard = { layer = "L2", col = col, cells = cells }
+      elseif i == 3 then
+        -- Random L2 deferred (see Step 9 item 6: coherent random).
+        -- Cleaner to no-op than to dump chaotic rules.
+      else
+        return false
+      end
     end
     self.preEditValues   = {}
     self.editedCells     = {}
@@ -1227,11 +1391,12 @@ function GridView:encoder(change, shifted)
       moved = true
     end
     if moved then self:_updateMarkingLive() end
-  elseif shifted and self.layer == "L1" then
-    -- Nav mode + shift: extend selection. Anchor on first activation;
-    -- selection mechanic is L1-only in Phase 1 (the bulk-edit semantics
-    -- don't translate cleanly to L2 cell rules). On L2, shift+encoder
-    -- falls through to plain scroll below.
+  elseif shifted then
+    -- Nav mode + shift: extend selection on either layer. The
+    -- selection mechanic itself is layer-agnostic (just a row-range
+    -- on a column); only the sub-bar actions (copy / cut / rand)
+    -- differ between L1 floats and L2 rule tuples (handled in
+    -- subReleased below).
     -- focusHeadRow tracks the moving end. Selection range =
     -- [min(anchor, end), max(anchor, end)]. The cursor box renders
     -- at min(anchor, end) (= master) per Chunk B; the focusHeadRow
@@ -1252,12 +1417,16 @@ function GridView:encoder(change, shifted)
       moved = true
     end
     if moved then self.selectionEnd = self.focusHeadRow end
-  elseif self.selectionActive and self.selectionColumn == self.columnCursor then
-    -- Bulk edit on selection. Top of selection (= min(anchor, end))
-    -- is master. Each encoder tick reads master's current value,
-    -- adds the column's fine/coarse step, and writes the result to
-    -- every cell in [selMin, selMax]. After the first tick, all
-    -- selected cells share the master's value; subsequent ticks
+  elseif self.selectionActive and self.selectionColumn == self.columnCursor
+         and self.layer == "L1" then
+    -- Bulk edit on selection (L1 only). L2 cells are pred:action
+    -- tuples, not numeric values, so bulk-nudge doesn't translate;
+    -- encoder during L2 selection falls through to a no-op below.
+    -- Top of selection (= min(anchor, end)) is master. Each encoder
+    -- tick reads master's current value, adds the column's fine /
+    -- coarse step, and writes the result to every cell in [selMin,
+    -- selMax]. After the first tick, all selected cells share the
+    -- master's value; subsequent ticks
     -- step them together.
     --
     -- Pre-edit snapshot: the first time a tick mutates a given cell,
@@ -1294,6 +1463,11 @@ function GridView:encoder(change, shifted)
       self.encoderAccum = self.encoderAccum + kEncoderThreshold
       moved = true
     end
+  elseif self.selectionActive and self.layer == "L2" then
+    -- L2 selection: encoder during selection is a no-op (L2 cells
+    -- aren't numerically bulk-editable). User acts via S1 / S2 / S3
+    -- (copy / cut / rand) or extends further via shift+encoder.
+    self.encoderAccum = 0
   else
     -- Nav mode no shift, no selection: plain focus-head scroll.
     while self.encoderAccum >= kEncoderThreshold do
