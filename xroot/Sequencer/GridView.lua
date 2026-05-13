@@ -143,17 +143,32 @@ local function fmtNum(v)
   return string.format("%.1f", v)
 end
 
-local function fmtL2Cell(predOp, predColA, predVal, actOp, actTgt, actVal)
+-- Column letter + optional 2-digit row pin for the compact preview.
+-- Empty string when col == -1 AND row == -1 (host + playhead -- the
+-- legacy form that needs no decoration). "h" host marker is omitted
+-- to keep simple rules short ("%2:+1" rather than "%2:h+1").
+local function colRefText(col, row)
+  local s = ""
+  if col >= 0 then
+    s = kColLetters[col + 1] or "?"
+  end
+  if row and row >= 0 then
+    s = s .. string.format("%02d", row)
+  end
+  return s
+end
+
+local function fmtL2Cell(predOp, predColA, predColARow, predVal,
+                          actOp, actTgt, actTgtRow, actVal)
   if predOp == 0 then return "  -  " end
-  local p = kPredSymbolMap[predOp] or "?"
-  if predColA >= 0 then p = kColLetters[predColA + 1] .. p end
+  local p = colRefText(predColA, predColARow) .. (kPredSymbolMap[predOp] or "?")
   if kPredHasVal[predOp] then p = p .. fmtNum(predVal) end
   local a = ""
   if actOp ~= 0 then
-    a = kActSymbolMap[actOp] or "?"
-    if kActHasTgt[actOp] and actTgt >= 0 then
-      a = kColLetters[actTgt + 1] .. a
+    if kActHasTgt[actOp] then
+      a = colRefText(actTgt, actTgtRow)
     end
+    a = a .. (kActSymbolMap[actOp] or "?")
     if kActHasVal[actOp] then a = a .. fmtNum(actVal) end
   end
   local s = (#a > 0) and (p .. ":" .. a) or p
@@ -248,6 +263,21 @@ function GridView:init(chain)
   self.dirtyDrawing:add(self.dirtyInstr)
   self:addMainGraphic(self.dirtyDrawing)
   self.dirtyDrawing:hide()
+
+  -- L2 fire-indicator overlay. Rendered only when on the L2 layer.
+  -- Each refresh, polls seq:l2LastFiredRow(slot, col) per column. When
+  -- the value changes, captures the current frame counter against
+  -- (col, row); subsequent frames check elapsed time and render a
+  -- small dot until the decay window expires (~10 frames at 55 Hz ~=
+  -- 180 ms blink). Decay state lives in `self.l2FireDecay` as a per-
+  -- column { row, framesLeft } table.
+  self.l2FireDrawing  = app.Drawing(0, 0, 256, 64)
+  self.l2FireInstr    = app.DrawingInstructions()
+  self.l2FireDrawing:add(self.l2FireInstr)
+  self:addMainGraphic(self.l2FireDrawing)
+  self.l2FireDrawing:hide()
+  self.l2FireDecay    = {}   -- [col] = { row = N, framesLeft = K }
+  self.l2FireLastSeen = {}   -- [col] = last seen lastL2FiredRow value
 
   -- ---- navigation state ----
   -- focusHeadRow: shared "global scroll" row, encoder-driven.
@@ -464,6 +494,16 @@ local kDirtyDotW    = 2
 local kDirtyDotH    = 2
 local kDirtyDotXOff = 38           -- right edge of column (column ends at 42)
 
+-- L2 fire-indicator dot: same size + right-edge position as the L1
+-- dirty dot, since L1 / L2 are mutually-exclusive views (only one of
+-- the two dot kinds renders at a time). Decay window in frames at
+-- 55 Hz; 10 frames is ~180 ms, fast enough to read as a tick-paced
+-- blink at typical 4-8 Hz engine rates.
+local kFireDotW        = 2
+local kFireDotH        = 2
+local kFireDotXOff     = kDirtyDotXOff   -- right edge of column
+local kFireDecayFrames = 10
+
 -- Single-slot ephemeral clipboard for L1 row-range selections. Stored
 -- as { col = integer, values = {float, float, ...} }. Module-local
 -- so it persists across GridView reopens during one session but does
@@ -620,9 +660,11 @@ function GridView:refresh()
           text = fmtL2Cell(
             seq:l2PredOp(kSlot, col, absRow),
             seq:l2PredColA(kSlot, col, absRow),
+            seq:l2PredColARow(kSlot, col, absRow),
             seq:l2PredVal(kSlot, col, absRow),
             seq:l2ActOp(kSlot, col, absRow),
             seq:l2ActTgt(kSlot, col, absRow),
+            seq:l2ActTgtRow(kSlot, col, absRow),
             seq:l2ActVal(kSlot, col, absRow))
         else
           text = fmtCellByCol(col, seq:l1Value(kSlot, col, absRow))
@@ -779,6 +821,45 @@ function GridView:refresh()
     self.dirtyDrawing:show()
   else
     self.dirtyDrawing:hide()
+  end
+
+  -- L2 fire indicator. Only relevant on the L2 layer. For each column,
+  -- compare the engine's lastL2FiredRow to our last-seen value; when
+  -- they differ, a new firing happened -- start a fresh decay window
+  -- on (col, row). Each refresh, decrement framesLeft; render a small
+  -- dot on the left edge of any column whose decay is still active.
+  self.l2FireInstr:clear()
+  local anyFire = false
+  if self.layer == "L2" then
+    for col = 0, kNumColumns - 1 do
+      local engineRow = seq:l2LastFiredRow(kSlot, col)
+      if engineRow >= 0 and engineRow ~= self.l2FireLastSeen[col] then
+        self.l2FireDecay[col] = { row = engineRow, framesLeft = kFireDecayFrames }
+      end
+      self.l2FireLastSeen[col] = engineRow
+      local d = self.l2FireDecay[col]
+      if d and d.framesLeft > 0 then
+        local visR = d.row - startRow + 1
+        if visR >= 1 and visR <= kVisibleRows + 1 then
+          local labelY = kHeaderY - visR * kRowHeight + subPx
+          if labelY <= kCellHideY then
+            if not anyFire then
+              self.l2FireInstr:color(app.WHITE)
+              anyFire = true
+            end
+            local dotX = col * kColPly + kFireDotXOff
+            local dotY = math.floor(labelY + 6 + 0.5)
+            self.l2FireInstr:fill(dotX, dotY, kFireDotW, kFireDotH)
+          end
+        end
+        d.framesLeft = d.framesLeft - 1
+      end
+    end
+  end
+  if anyFire then
+    self.l2FireDrawing:show()
+  else
+    self.l2FireDrawing:hide()
   end
 
   self.bpmLabel:setText(string.format("BPM %d", math.floor(seq:getBpm() + 0.5)))
@@ -1171,9 +1252,23 @@ end
 -- Entering edit mode clears any active selection (mutually exclusive).
 function GridView:enterReleased(shifted)
   if shifted then return false end
-  -- Phase 1: ENTER on the L2 layer is a no-op (the L2 cell editor
-  -- modal is Phase 2). L1 inline edit only opens on the L1 layer.
-  if self.layer == "L2" and not self.editingL1 then return false end
+  -- L2 layer: open the cell editor modal. Commit / advance / cancel
+  -- are handled by the modal; we only need to refresh on close so
+  -- the grid picks up any newly written L2 cell. shift+ENTER inside
+  -- the modal advances focusHead and reloads the editor for the
+  -- next row via the commitAndAdvance signal below.
+  if self.layer == "L2" and not self.editingL1 then
+    local CellEditor = require "Sequencer.CellEditor"
+    local editor = CellEditor(kSlot, self.columnCursor, self.focusHeadRow)
+    editor:subscribe("done", function() self:refresh() end)
+    editor:subscribe("commitAndAdvance", function()
+      self.focusHeadRow = clamp(self.focusHeadRow + 1, 0, kMaxRow)
+      editor:reloadForCell(self.columnCursor, self.focusHeadRow)
+      self:refresh()
+    end)
+    editor:show()
+    return true
+  end
   if self.editingL1 then
     self.focusHeadRow = clamp(self.focusHeadRow + 1, 0, kMaxRow)
   else

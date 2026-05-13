@@ -10,7 +10,14 @@ void apply(Slot& slot, const Action& a, int hostCol)
     return;
   }
   Column& tc = slot.columns[target];
-  const int row = tc.playhead;  // act at target column's current playhead row
+  // Row pin: when targetRow >= 0, the action writes to that specific
+  // cell of `target`; otherwise (-1) it writes to `target`'s current
+  // playhead row. JUMP* actions use a.operand as the row to jump TO
+  // (not a cell to write at), so they reach for `row` here only when
+  // they'd need to touch L1 cells (they don't).
+  const int row = (a.targetRow >= 0 && a.targetRow < kMaxStepsPerColumn)
+                  ? a.targetRow
+                  : tc.playhead;
 
   switch (a.op) {
     case ACTION_ADD:

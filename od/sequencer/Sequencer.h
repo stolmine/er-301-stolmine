@@ -94,12 +94,16 @@ enum ActionOp : uint8_t {
 struct Predicate {
   PredicateOp op = PRED_NONE;
   int8_t      colA = -1;    // referenced column for comparators (-1 = host col)
+  int8_t      colARow = -1; // row pin within colA: -1 = use colA's playhead;
+                            // 0..kMaxStepsPerColumn-1 = read this exact row
   float       operand = 0.0f;
 };
 
 struct Action {
   ActionOp op       = ACTION_NONE;
   int8_t   targetCol = -1;   // column the action mutates / fires
+  int8_t   targetRow = -1;   // row pin within targetCol: -1 = use playhead;
+                             // 0..kMaxStepsPerColumn-1 = write this exact row
   float    operand   = 0.0f;
 };
 
@@ -136,6 +140,14 @@ public:
   // NaN sentinel means "no prior tick" -- PRED_CHANGED returns false
   // on the first tick after init/reset.
   float lastTickValue = std::numeric_limits<float>::quiet_NaN();
+
+  // Last row where this column's L2 cell evaluated true and applied
+  // its action. -1 = never fired (or reset). Set in fireTick step 3
+  // when the L2 cell at the playhead row fires. UI side uses this to
+  // render a "fired" indicator dot that decays Lua-side after a few
+  // frames. Survives across ticks (engine only writes when a fire
+  // actually happens); the UI handles decay timing.
+  int lastL2FiredRow = -1;
 
   // Loop-region helpers (direction-tolerant per locked decision #2).
   int loopMin() const;

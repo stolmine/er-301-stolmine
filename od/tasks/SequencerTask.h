@@ -79,9 +79,13 @@ namespace od {
     // predOp / actionOp values correspond to the integer values of the
     // sequencer::PredicateOp / sequencer::ActionOp enums in Sequencer.h.
     // predColA / actionTargetCol: -1 means "host column" / "self".
+    // predColARow / actionTargetRow: -1 means "use that column's
+    // playhead row" (original behaviour); >=0 pins the rule to that
+    // specific cell of the column.
     void setL2(int slot, int col, int row,
-               int predOp, int predColA, float predOperand,
-               int actionOp, int actionTargetCol, float actionOperand);
+               int predOp, int predColA, int predColARow, float predOperand,
+               int actionOp, int actionTargetCol, int actionTargetRow,
+               float actionOperand);
     void clearL2(int slot, int col, int row);
     void startSlot(int slot);
     void stopSlot(int slot);
@@ -103,10 +107,18 @@ namespace od {
     bool  l2Present(int slot, int col, int row) const;
     int   l2PredOp(int slot, int col, int row) const;
     int   l2PredColA(int slot, int col, int row) const;
+    int   l2PredColARow(int slot, int col, int row) const;
     float l2PredVal(int slot, int col, int row) const;
     int   l2ActOp(int slot, int col, int row) const;
     int   l2ActTgt(int slot, int col, int row) const;
+    int   l2ActTgtRow(int slot, int col, int row) const;
     float l2ActVal(int slot, int col, int row) const;
+
+    // Most recent row on which this column's L2 cell fired (predicate
+    // evaluated true and action ran). -1 = no L2 cell has fired on
+    // this column since init / reset. UI side reads this each refresh
+    // and decays its own indicator timestamp Lua-side.
+    int   l2LastFiredRow(int slot, int col) const;
 
     // Bench-only synchronous tick (do not call on running slots).
     void tickOnce(int slot);

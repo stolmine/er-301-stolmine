@@ -13,7 +13,14 @@ bool evaluate(Slot& slot, const Predicate& p, int hostCol)
     return false;
   }
   const Column& tc = slot.columns[testCol];
-  const float v = tc.l1[tc.playhead].value;
+  // Row pin: when colARow >= 0, the predicate inspects that specific
+  // cell of testCol; otherwise (-1) it inspects testCol's current
+  // playhead row. Lets users author rules that fire based on a fixed
+  // cell rather than a moving target.
+  const int inspectRow = (p.colARow >= 0 && p.colARow < kMaxStepsPerColumn)
+                         ? p.colARow
+                         : tc.playhead;
+  const float v = tc.l1[inspectRow].value;
 
   switch (p.op) {
     case PRED_MODULO: {
@@ -60,6 +67,13 @@ bool evaluate(Slot& slot, const Predicate& p, int hostCol)
       // the value captured at the end of last fireTick. NaN sentinel
       // means "no prior tick" -> never fires on the first tick after
       // init / reset.
+      //
+      // Row pin is intentionally ignored here -- tc.lastTickValue only
+      // tracks the playhead row's prior value; pinned-row CHANGED
+      // would need per-row history (multiplying state by
+      // kMaxStepsPerColumn). PRED_CHANGED with colARow set silently
+      // falls back to playhead-row behaviour; revisit if real
+      // authoring patterns need it.
       const float prev = tc.lastTickValue;
       if (prev != prev) return false;        // NaN-safe
       return tc.l1[tc.playhead].value != prev;

@@ -52,7 +52,8 @@ void Slot::init(int slotIdx)
     col.playhead    = 0;
     col.passCount   = 0;
     col.pendingJump = -1;
-    col.lastTickValue = std::numeric_limits<float>::quiet_NaN();
+    col.lastTickValue  = std::numeric_limits<float>::quiet_NaN();
+    col.lastL2FiredRow = -1;
   }
 
   // Seed step-len column with a sane default so a fresh slot's first tick
@@ -121,10 +122,11 @@ int Slot::fireTick()
   //    Evaluation order: column index ascending. Documented as the v0.1
   //    ordering; revisit if jump actions interact poorly.
   for (int c = 0; c < kNumColumns; ++c) {
-    const Column& col = columns[c];
+    Column& col = columns[c];
     const int row = col.playhead;
     if (col.l2[row].present) {
       if (od::sequencer::evaluate(*this, col.l2[row].pred, c)) {
+        col.lastL2FiredRow = row;
         od::sequencer::apply(*this, col.l2[row].action, c);
       }
     }
@@ -304,7 +306,8 @@ void Slot::reset()
     columns[c].pendingJump = -1;
     // Clear PRED_CHANGED's tick-over-tick comparator so the first
     // tick after reset can never "change" against a stale value.
-    columns[c].lastTickValue = std::numeric_limits<float>::quiet_NaN();
+    columns[c].lastTickValue  = std::numeric_limits<float>::quiet_NaN();
+    columns[c].lastL2FiredRow = -1;
   }
   samplesUntilTick = 0;
   heldCV1 = heldCV2 = heldCV3 = 0.0f;

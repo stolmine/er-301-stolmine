@@ -98,17 +98,22 @@ namespace od {
   }
 
   void SequencerTask::setL2(int slot, int col, int row,
-                            int predOp, int predColA, float predOperand,
-                            int actionOp, int actionTargetCol, float actionOperand)
+                            int predOp, int predColA, int predColARow,
+                            float predOperand,
+                            int actionOp, int actionTargetCol,
+                            int actionTargetRow,
+                            float actionOperand)
   {
     sequencer::Predicate p;
     p.op      = static_cast<sequencer::PredicateOp>(predOp);
     p.colA    = static_cast<int8_t>(predColA);
+    p.colARow = static_cast<int8_t>(predColARow);
     p.operand = predOperand;
 
     sequencer::Action a;
     a.op        = static_cast<sequencer::ActionOp>(actionOp);
     a.targetCol = static_cast<int8_t>(actionTargetCol);
+    a.targetRow = static_cast<int8_t>(actionTargetRow);
     a.operand   = actionOperand;
 
     mSlots[clampSlot(slot)].setL2(col, row, p, a);
@@ -196,6 +201,13 @@ namespace od {
     return cell.present ? static_cast<int>(cell.pred.colA) : -1;
   }
 
+  int SequencerTask::l2PredColARow(int slot, int col, int row) const
+  {
+    if (!inL2Range(col, row)) return -1;
+    const auto& cell = mSlots[clampSlot(slot)].columns[col].l2[row];
+    return cell.present ? static_cast<int>(cell.pred.colARow) : -1;
+  }
+
   float SequencerTask::l2PredVal(int slot, int col, int row) const
   {
     if (!inL2Range(col, row)) return 0.0f;
@@ -217,11 +229,24 @@ namespace od {
     return cell.present ? static_cast<int>(cell.action.targetCol) : -1;
   }
 
+  int SequencerTask::l2ActTgtRow(int slot, int col, int row) const
+  {
+    if (!inL2Range(col, row)) return -1;
+    const auto& cell = mSlots[clampSlot(slot)].columns[col].l2[row];
+    return cell.present ? static_cast<int>(cell.action.targetRow) : -1;
+  }
+
   float SequencerTask::l2ActVal(int slot, int col, int row) const
   {
     if (!inL2Range(col, row)) return 0.0f;
     const auto& cell = mSlots[clampSlot(slot)].columns[col].l2[row];
     return cell.present ? cell.action.operand : 0.0f;
+  }
+
+  int SequencerTask::l2LastFiredRow(int slot, int col) const
+  {
+    if (col < 0 || col >= sequencer::kNumColumns) return -1;
+    return mSlots[clampSlot(slot)].columns[col].lastL2FiredRow;
   }
 
   void SequencerTask::tickOnce(int slot)

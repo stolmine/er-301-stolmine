@@ -153,10 +153,11 @@ local function test_l2_destructive_write()
   seq:setL1(SLOT, COL_CV2, 0, 5.0)
 
   -- L2 cell on col 0 row 0: predicate %2 (every 2 passes of host),
-  -- action +1 to col 1 at col 1's current playhead.
+  -- action +1 to col 1 at col 1's current playhead. -1 for both row
+  -- pins so the rule keeps its original playhead-relative semantics.
   seq:setL2(SLOT, COL_CV1, 0,
-            PRED_MODULO, -1, 2,         -- predicate: %2 on host column
-            ACTION_ADD,  COL_CV2, 1.0)  -- action: +1 to col 1
+            PRED_MODULO, -1, -1, 2,         -- predicate: %2 on host column
+            ACTION_ADD,  COL_CV2, -1, 1.0)  -- action: +1 to col 1
 
   for _ = 1, 5 do seq:tickOnce(SLOT) end
 
@@ -207,18 +208,20 @@ local function test_l2_phase15_polish()
   seq:setL1(SLOT, COL_GATE_AMP, 3, 0.0)
   seq:seedRng(SLOT, 0xCAFE)
 
+  -- All rules use -1 for both row pins (predColARow / actTargetRow)
+  -- so behaviour matches pre-row-pin semantics.
   seq:setL2(SLOT, COL_CV1, 0,
-            PRED_PROBABILITY, -1, 100.0,
-            ACTION_ADD, COL_CV2, 1.0)
+            PRED_PROBABILITY, -1, -1, 100.0,
+            ACTION_ADD, COL_CV2, -1, 1.0)
   seq:setL2(SLOT, COL_CV1, 1,
-            PRED_FIRE, -1, 0.0,
-            ACTION_SET, COL_CV2, 5.0)
+            PRED_FIRE, -1, -1, 0.0,
+            ACTION_SET, COL_CV2, -1, 5.0)
   seq:setL2(SLOT, COL_CV1, 2,
-            PRED_CHANGED, -1, 0.0,
-            ACTION_ADD, COL_CV2, 1.0)
+            PRED_CHANGED, -1, -1, 0.0,
+            ACTION_ADD, COL_CV2, -1, 1.0)
   seq:setL2(SLOT, COL_CV1, 3,
-            PRED_APPROX, -1, 0.0,
-            ACTION_MUTE, COL_CV2, 0.0)
+            PRED_APPROX, -1, -1, 0.0,
+            ACTION_MUTE, COL_CV2, -1, 0.0)
 
   -- Tick 1: PROB 100 -> ADD +1 -> CV2 = 1.
   seq:tickOnce(SLOT)
