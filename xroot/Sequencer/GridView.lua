@@ -1076,7 +1076,7 @@ function GridView:refresh()
   elseif self.markingMode == "marking_end" then
     self.s1Button:setText(self.running and "stop" or "start")
     self.s2Button:setText("end")
-    self.s3Button:setText("")
+    self.s3Button:setText("unify")
   elseif app.isShiftButtonPushed() then
     self.s1Button:setText(clipboard ~= nil and "paste" or "")
     self.s2Button:setText("BPM")
@@ -1379,6 +1379,24 @@ function GridView:subReleased(i, shifted)
     self:refresh()
     return true
   elseif i == 3 then
+    if self.markingMode == "marking_end" then
+      -- Unify: apply the in-flight marker pair the user is defining
+      -- on the active column to ALL six columns at once, then exit
+      -- the modal. Immediate-apply (no confirm) for now -- the
+      -- confirmation toggle lands with the admin Sequencer section
+      -- (plan item 16, Tier 3). Destructive: the other columns'
+      -- prior markers are overwritten with no per-column backup.
+      local lo = math.min(self.markFirstMark, self.focusHeadRow)
+      local hi = math.max(self.markFirstMark, self.focusHeadRow)
+      for c = 0, kNumColumns - 1 do
+        seq:setMarkers(self.slot, c, lo, hi)
+      end
+      self.markingMode   = "idle"
+      self.markBackup    = nil
+      self.markFirstMark = nil
+      self:refresh()
+      return true
+    end
     -- Layer toggle: same gesture whether shift is held or not (see
     -- shifted path above), so the bar's S3 label is the discoverable
     -- always-on affordance.
