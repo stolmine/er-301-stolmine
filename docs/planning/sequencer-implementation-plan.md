@@ -913,6 +913,21 @@ implementation phase (step 5).
      builds a row-range; clipboard distinguishes L1 vs L2 content;
      cross-layer paste refuses. ~0.25w.
 
+   - **(13) L2 col-5 cell truncation tighter than other columns.**
+     `fmtL2Cell` (in `xroot/Sequencer/GridView.lua`) truncates at 5
+     chars for all columns. Column 5 (stL) sits at x=210..251 and
+     the row ruler labels start at x=244 (text glyphs from x=248).
+     A "wide" 5-char rule like `A07c:` rendered in proportional
+     font 9 can have glyphs extending past x=246, spilling into
+     ruler-text territory and producing visual collision against
+     "S1" / row digits.
+     Fix: pass the column index into the formatter and use a tighter
+     truncation (3-4 chars + "...") for col 5 only. OR measure the
+     rendered text width via the label's bounding box and re-truncate
+     dynamically when it would overflow the column boundary
+     (245-px-ish hard limit). Cheaper to just hardcode a smaller cap
+     for col 5. ~0.1w.
+
    ### Engine + audio refinement
 
    - **(8) Audio-thread priority audit for clock stability.**
