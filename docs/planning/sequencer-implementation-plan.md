@@ -964,6 +964,30 @@ implementation phase (step 5).
      branch + `_commitMark`-adjacent helper to fan the pair across
      columns.
 
+   - **(17) Settings toggle: quicksave restores transport state.**
+     Step 3's locked decision force-stops all slots on quicksave
+     load -- the running state is NOT serialized. Add an opt-in:
+     a Settings entry `quickSaveRestoresSequencerTransport`
+     (yes / no, default **no**), sitting alongside the existing
+     `quickSaveRestoresRecorder` / `quickSaveRestoresClipboard`
+     entries in `xroot/Settings/init.lua` -- no dependency on the
+     v2 admin Sequencer page.
+     Plumbing needed:
+       - Engine: a `SequencerTask::isSlotRunning(slot)` getter
+         (`Slot::running` is currently write-only from Lua's POV).
+       - `xroot/Sequencer/Persist.lua` serialize: capture per-slot
+         running flags into the `data.sequencer` table.
+       - `Persist.deserialize`: when the Setting is "yes", call
+         `startSlot` for the slots that were saved running instead
+         of the unconditional `stopSlot`. When "no" (default),
+         keep the current force-stop behaviour.
+       - Bench: extend `test_persistence_roundtrip` to cover the
+         running-state field.
+     Note transport is unified (one S1 toggles all 4) -- a single
+     global bool would suffice today, but serializing per-slot
+     flags keeps the door open for future per-slot transport
+     without a format bump. ~0.15w.
+
    ### Engine + audio refinement
 
    - **(8) Audio-thread priority audit for clock stability.**
