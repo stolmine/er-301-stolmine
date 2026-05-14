@@ -171,9 +171,22 @@ local function colRefText(col, row)
   return s
 end
 
-local function fmtL2Cell(predOp, predColA, predColARow, predVal,
+-- Per-column character cap for the compact L2 grid render. Column 5
+-- (stL, rightmost) sits hard against the row ruler at x=244; a wide
+-- 5-char rule's proportional-font glyphs can spill into ruler-text
+-- territory, so col 5 truncates one char earlier than the rest.
+local function l2CellWidth(col)
+  return (col == kNumColumns - 1) and 4 or 5
+end
+
+local function fmtL2Cell(col, predOp, predColA, predColARow, predVal,
                           actOp, actTgt, actTgtRow, actVal)
-  if predOp == 0 then return "  -  " end
+  local width = l2CellWidth(col)
+  if predOp == 0 then
+    -- Absent cell: centered dash.
+    local pad = math.floor((width - 1) / 2)
+    return string.rep(" ", pad) .. "-" .. string.rep(" ", width - 1 - pad)
+  end
   local p = colRefText(predColA, predColARow) .. (kPredSymbolMap[predOp] or "?")
   if kPredHasVal[predOp] then p = p .. fmtNum(predVal) end
   local a = ""
@@ -185,8 +198,8 @@ local function fmtL2Cell(predOp, predColA, predColARow, predVal,
     if kActHasVal[actOp] then a = a .. fmtNum(actVal) end
   end
   local s = (#a > 0) and (p .. ":" .. a) or p
-  if #s > 5 then s = s:sub(1, 4) .. ":" end
-  return string.format("%-5s", s)
+  if #s > width then s = s:sub(1, width - 1) .. ":" end
+  return string.format("%-" .. width .. "s", s)
 end
 
 -- Non-truncating variant of fmtL2Cell. Used by the shift-held
@@ -293,7 +306,11 @@ function GridView:init(chain)
   -- and bottom. Empirically tuned: mBottom = labelY + 3, mHeight = 10.
   self.cursorBox = app.Graphic(0, 0, kColPly, 10)
   self.cursorBox:setBorder(1)
-  self.cursorBox:setBorderColor(app.GRAY10)
+  -- Dim border in nav mode (GRAY5) so the WHITE "will-mutate" border
+  -- (edit / selection / mark active) is unmistakably brighter -- the
+  -- old GRAY10 nav border was close enough to WHITE that the two
+  -- states were hard to tell apart at a glance.
+  self.cursorBox:setBorderColor(app.GRAY5)
   self:addMainGraphic(self.cursorBox)
 
   -- Selection box: a dotted-edge rectangle wrapping the active row-range
@@ -477,9 +494,9 @@ end
 
 -- Brightness ramp (4bpp display, 0=black .. 15=white). Modelled on
 -- monome/teletype's pattern_mode.c (dim=1, normal=6, playhead=11,
--- selected=15), with dim bumped to 3 for legibility and a focus-only
--- level inserted between normal and playhead.
-local kBrightDim       = 3   -- out-of-loop cells
+-- selected=15). dim sits at 2 (was 3) so out-of-loop cells read as
+-- clearly secondary at-a-glance against the in-loop normal level.
+local kBrightDim       = 2   -- out-of-loop cells
 local kBrightNormal    = 6   -- in-loop cells, no focus or playhead
 local kBrightFocus     = 9   -- focus head row, not playhead
 local kBrightPlayhead  = 11  -- playhead row of a column, not focus
@@ -783,6 +800,7 @@ function GridView:refresh()
         local text
         if self.layer == "L2" then
           text = fmtL2Cell(
+            col,
             seq:l2PredOp(self.slot, col, absRow),
             seq:l2PredColA(self.slot, col, absRow),
             seq:l2PredColARow(self.slot, col, absRow),
@@ -878,7 +896,7 @@ function GridView:refresh()
       math.floor(self.cursorAnimY + 0.5))
     local active = self.editingL1 or self.selectionActive
                     or self.markingMode == "marking_end"
-    self.cursorBox:setBorderColor(active and app.WHITE or app.GRAY10)
+    self.cursorBox:setBorderColor(active and app.WHITE or app.GRAY5)
     self.cursorBox:show()
   else
     self.cursorBox:hide()

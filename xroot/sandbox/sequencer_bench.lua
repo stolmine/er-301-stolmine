@@ -342,8 +342,142 @@ local function test_persistence_roundtrip()
   pass(name)
 end
 
+-- Full slot wipe: resetSlot only rewinds playheads, so this helper
+-- additionally restores default column lengths / markers and zeroes
+-- every L1 / L2 cell. Used by the row-pin + multi-slot tests (which
+-- need a known-blank starting state) and by the end-of-bench cleanup
+-- so the bench leaves NO trace -- including on slot 0 which the UI
+-- shows by default.
+local function fullClearSlot(s)
+  for c = 0, 5 do
+    seq:setColumnLength(s, c, 16)
+    seq:setMarkers(s, c, 0, 15)
+    for r = 0, 63 do
+      seq:setL1(s, c, r, 0.0)
+      seq:clearL2(s, c, r)
+    end
+  end
+  -- Step-len needs a non-zero default or fireTick would divide by
+  -- zero; 0.25 beats = 1 tick at 4 PPQN.
+  for r = 0, 63 do
+    seq:setL1(s, COL_STEP_LEN, r, 0.25)
+  end
+  seq:resetSlot(s)
+end
+
 -- ---------------------------------------------------------------------------
--- Run all tests, then reset the slot state so the bench leaves no trace.
+-- Test 6: row-pinned predicate. An L2 cell inspects a column PINNED
+-- to a specific row (predColARow >= 0) rather than that column's
+-- playhead. CV2's playhead never reaches the pinned row, so the test
+-- only passes if the pin is honored.
+-- ---------------------------------------------------------------------------
+local function test_l2_row_pinned_predicate()
+  local name = "l2-row-pinned-predicate"
+  fullClearSlot(SLOT)
+  -- CV1: 1-step loop -- its L2 cell fires every tick.
+  seq:setColumnLength(SLOT, COL_CV1, 1)
+  seq:setMarkers(SLOT, COL_CV1, 0, 0)
+  -- CV2: 3-step loop -- playhead cycles 0,1,2; never visits row 5.
+  seq:setColumnLength(SLOT, COL_CV2, 3)
+  seq:setMarkers(SLOT, COL_CV2, 0, 2)
+  seq:setL1(SLOT, COL_CV2, 5, 3.0)   -- the pinned cell
+  -- CV3: 1-step accumulator.
+  seq:setColumnLength(SLOT, COL_CV3, 1)
+  seq:setMarkers(SLOT, COL_CV3, 0, 0)
+  -- L2 on CV1 row 0: PRED_EQ inspecting CV2 PINNED to row 5 == 3.0;
+  -- action +1 to CV3 (playhead-relative).
+  seq:setL2(SLOT, COL_CV1, 0,
+            PRED_EQ, COL_CV2, 5, 3.0,
+            ACTION_ADD, COL_CV3, -1, 1.0)
+  for _ = 1, 3 do seq:tickOnce(SLOT) end
+  -- Without the pin, evaluate() would read CV2[playhead] = 0 != 3.0
+  -- and never fire -> CV3[0] would stay 0.
+  local v = seq:l1Value(SLOT, COL_CV3, 0)
+  if not approxEq(v, 3.0) then
+    fail(name, string.format("expected CV3[0]=3.0 (pinned pred fires each tick), got %.3f", v))
+    return
+  end
+  pass(name)
+end
+
+-- ---------------------------------------------------------------------------
+-- Test 7: row-pinned action. An L2 action writes to a column PINNED
+-- to a specific row (actTargetRow >= 0). The target's playhead never
+-- reaches that row, so only a working pin updates it -- and the
+-- playhead rows must stay untouched.
+-- ---------------------------------------------------------------------------
+local function test_l2_row_pinned_action()
+  local name = "l2-row-pinned-action"
+  fullClearSlot(SLOT)
+  seq:setColumnLength(SLOT, COL_CV1, 1)
+  seq:setMarkers(SLOT, COL_CV1, 0, 0)
+  -- CV2: 3-step loop; playhead cycles 0,1,2; never visits row 7.
+  seq:setColumnLength(SLOT, COL_CV2, 3)
+  seq:setMarkers(SLOT, COL_CV2, 0, 2)
+  -- L2 on CV1 row 0: always-fire (PRED_PROBABILITY 100); ACTION_SET
+  -- on CV2 PINNED to row 7, value 9.0.
+  seq:setL2(SLOT, COL_CV1, 0,
+            PRED_PROBABILITY, -1, -1, 100.0,
+            ACTION_SET, COL_CV2, 7, 9.0)
+  seq:tickOnce(SLOT)
+  if not approxEq(seq:l1Value(SLOT, COL_CV2, 7), 9.0) then
+    fail(name, string.format("expected CV2[7]=9.0 (pinned action), got %.3f",
+                              seq:l1Value(SLOT, COL_CV2, 7)))
+    return
+  end
+  for r = 0, 2 do
+    if not approxEq(seq:l1Value(SLOT, COL_CV2, r), 0.0) then
+      fail(name, string.format("CV2[%d] should be untouched by pinned action, got %.3f",
+                                r, seq:l1Value(SLOT, COL_CV2, r)))
+      return
+    end
+  end
+  pass(name)
+end
+
+-- ---------------------------------------------------------------------------
+-- Test 8: multi-slot independence. Author a distinct CV1 pattern on
+-- each of the 4 slots, tick them all in lockstep, verify each slot
+-- still holds ITS OWN values (no cross-slot bleed) and each playhead
+-- stays within its own loop bounds. Guards against array-indexing /
+-- shared-state regressions in the per-slot engine state.
+-- ---------------------------------------------------------------------------
+local function test_multislot_independence()
+  local name = "multislot-independence"
+  for s = 0, 3 do
+    fullClearSlot(s)
+    seq:setColumnLength(s, COL_CV1, 2 + s)        -- lengths 2,3,4,5
+    seq:setMarkers(s, COL_CV1, 0, 1 + s)
+    for r = 0, 1 + s do
+      seq:setL1(s, COL_CV1, r, (s + 1) * 10 + r)  -- slot 0: 10,11 ; slot 1: 20,21,22 ; ...
+    end
+  end
+  for _ = 1, 10 do
+    for s = 0, 3 do seq:tickOnce(s) end
+  end
+  for s = 0, 3 do
+    for r = 0, 1 + s do
+      local expected = (s + 1) * 10 + r
+      local got = seq:l1Value(s, COL_CV1, r)
+      if not approxEq(got, expected) then
+        fail(name, string.format("slot %d CV1[%d] expected %.1f, got %.1f -- cross-slot bleed",
+                                  s, r, expected, got))
+        return
+      end
+    end
+    local ph = seq:playhead(s, COL_CV1)
+    if ph < 0 or ph > 1 + s then
+      fail(name, string.format("slot %d playhead %d outside loop bounds [0,%d]",
+                                s, ph, 1 + s))
+      return
+    end
+  end
+  pass(name)
+end
+
+-- ---------------------------------------------------------------------------
+-- Run all tests, then full-clear every slot so the bench leaves no
+-- trace (cells, lengths, markers, L2 -- not just playheads).
 -- ---------------------------------------------------------------------------
 app.logInfo("sequencer_bench: starting Step-1 bench tests")
 
@@ -352,6 +486,9 @@ test_polymetric_5_7()
 test_l2_destructive_write()
 test_l2_phase15_polish()
 test_persistence_roundtrip()
+test_l2_row_pinned_predicate()
+test_l2_row_pinned_action()
+test_multislot_independence()
 
 local total = #results
 local pass_count = 0
@@ -360,5 +497,5 @@ for _, r in ipairs(results) do
 end
 app.logInfo("sequencer_bench: %d/%d PASS", pass_count, total)
 
--- Leave all slots clean
-for s = 0, 3 do seq:resetSlot(s) end
+-- Leave all slots fully clean (including slot 0, which the UI shows).
+for s = 0, 3 do fullClearSlot(s) end
