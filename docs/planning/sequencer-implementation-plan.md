@@ -928,6 +928,23 @@ implementation phase (step 5).
      (245-px-ish hard limit). Cheaper to just hardcode a smaller cap
      for col 5. ~0.1w.
 
+   - **(14) Out-of-loop cells one level dimmer.** Current
+     `kBrightDim = 3` (out-of-loop) vs `kBrightNormal = 6` (in-loop).
+     The 3-level gap is subtle; the user's eye doesn't immediately
+     pick up the loop boundary at-a-glance. Drop kBrightDim to 1 or
+     2 so out-of-loop cells read as visibly secondary. Affects both
+     L1 and L2 since `cellBrightness()` is layer-agnostic. ~0.05w.
+
+   - **(15) Cursor box dimmer when not in a "will-mutate" state.**
+     Cursor border is `app.GRAY10` in nav mode and `app.WHITE` when
+     editing / selecting / marking. The user reports the unfocused
+     border is bright enough that distinguishing "I'm just looking
+     at this cell" from "I have a live selection here" requires a
+     close look. Drop the nav-mode border to `app.GRAY5` (or even
+     `app.GRAY3`) so the WHITE active-state border pops as visibly
+     different. ~0.05w. File: `xroot/Sequencer/GridView.lua` where
+     `self.cursorBox:setBorderColor(active and app.WHITE or app.GRAY10)`.
+
    ### Engine + audio refinement
 
    - **(8) Audio-thread priority audit for clock stability.**
