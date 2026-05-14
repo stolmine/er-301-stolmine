@@ -740,6 +740,134 @@ Lua side adds:
 
 ---
 
+## Fill / generators (v2 spec)
+
+Supersedes Step 9 item 6 ("coherent random"). The randomize gesture
+gains three behaviors selected by a single **admin toggle** (the UI
+is out of softkey space, so the mode lives in settings, not on a
+button):
+
+| Random mode | Behaviour of the randomize gesture |
+|---|---|
+| `simple` (default, shipped) | Unconstrained per-column-typed random fill (`randomForColumn`). |
+| `coherent` | Constrained random: draws only from values already present in the column / selection -- keeps the user's authored palette. ~0.2w on its own. |
+| `fill` | Opens a **fill modal** (below) instead of immediately randomizing. |
+
+Setting `sequencerRandomMode` lives in `xroot/Settings/init.lua`
+alongside the other sequencer settings; persisted via the standard
+Settings path. The selection-mode S3 (and L2 ACTION_RAND) read it
+to decide which behaviour to run.
+
+### Fill modal
+
+A procedural pattern generator that operates on the **current
+selection** (a row-range on one column). Forked from
+`xroot/Sequencer/CellEditor.lua` -- same six tap-to-focus M-slot
+layout, same encoder / dial / shift conventions. The generator's
+output fills the selected rows.
+
+Reference designs researched 2026-05-14:
+
+- **Westlicht PER|FORMER** generators (`engine/generators/`):
+  - *Euclidean*: 3 params -- `steps` (1..N pattern length),
+    `beats` (1..N active hits), `offset` (0..N-1 rotation).
+  - *Random*: 4 params -- `seed` (0..1000), `smooth` (0..10,
+    inter-value smoothing), `bias` (-10..10, distribution shift),
+    `scale` (0..100, spread).
+  - UI: a generator page shows up to 5 params on F0-F4 + encoder,
+    applied to a step selection picked via a first/second-step
+    range selector. Our 6-slot modal maps cleanly onto this -- one
+    extra slot of headroom vs. their 5.
+- **Polyend Tracker** fill: per-parameter randomization *ranges*
+  (Random Note, Random Volume +/-0..100, Random Fx +/-value)
+  applied across a selection, plus probability. Confirms the
+  "range + probability over a selection" model.
+
+### Slot layout (fill modal)
+
+```
++--M1---+--M2---+--M3---+--M4---+--M5---+--M6---+
+|  gen  | p1    | p2    | p3    | p4    | p5    |
+| type  |       |       |       |       |       |
++-------+-------+-------+-------+-------+-------+
+```
+
+M1 = generator type; M2-M6 = type-dependent params with the same
+slot-skip rule the L2 editor uses (irrelevant slots render `-`).
+
+Generator types + params, interpreted per the selected column's
+type:
+
+| Generator | M2 | M3 | M4 | M5 | M6 |
+|---|---|---|---|---|---|
+| **Euclidean** (gate-amp esp.) | steps | beats/hits | offset | on-value | off-value |
+| **Random** | seed | smooth | bias | range-lo | range-hi |
+| **Ramp** | start | end | curve (lin/exp/log) | -- | -- |
+| **Pulse** (every-N) | interval N | offset | on-value | off-value | -- |
+| **Clear / Init** | -- | -- | -- | -- | -- |
+
+- Euclidean is the headline gate-amp generator -- `steps` / `beats`
+  / `offset` produces classic euclidean rhythms; `on-value` /
+  `off-value` set the gate-amp emitted on hit vs. non-hit rows.
+- Random with smooth/bias/scale matches the Performer's CV-random
+  feel; on a CV column it produces musical drift, on gate-amp a
+  density-controlled scatter.
+- Ramp fills a CV column with a linear/curved sweep across the
+  selection -- handy for slides / glissandi authored as L1 data.
+- Pulse is the simple "every Nth row" gate generator.
+- Clear/Init zeroes the selection (parallel to the Performer's
+  InitLayer generator; also reachable via selection-mode CUT).
+
+### Per-column-type generator availability
+
+The generator-type list on M1 is filtered by the selection's
+column type so the user never sees a nonsensical option:
+- **CV columns** (cv1/cv2/cv3): Random, Ramp, Clear.
+- **gate-amp** (col 4): Euclidean, Pulse, Random, Clear.
+- **gate-len / step-len** (col 3 / 5): Random, Ramp, Clear.
+  (Step-len Random draws integer ticks per the Step 9 step-len
+  work; Ramp produces an accelerando / ritardando.)
+
+### Engine / plumbing
+
+Generators run **Lua-side** -- they just call `seq:setL1` across
+the selected rows. No engine changes needed for the generators
+themselves; the euclidean bit-pattern + random distributions are
+cheap to compute in Lua at author time (not audio-rate). The only
+engine touch is the `sequencerRandomMode` Setting read.
+
+Sub-display in the fill modal: S1 live preview of the resulting
+pattern shape (a tiny sparkline / dot-density render), S2/S3 NL
+gloss ("8-step euclidean, 3 hits, offset 2").
+
+### Effort estimate
+
+~1.0 week focused:
+- `sequencerRandomMode` Setting + wiring the 3-way branch into the
+  randomize gesture: ~0.15w.
+- Coherent-random implementation: ~0.2w.
+- Fill modal skeleton (fork CellEditor): ~0.2w.
+- Euclidean + Random + Ramp + Pulse + Clear generators (Lua): ~0.3w.
+- Per-column-type filtering + sub preview/gloss: ~0.15w.
+
+### Open design questions
+
+- **Selection requirement.** Fill needs an active selection to
+  define the row range. If the user invokes fill with no selection,
+  do we (a) refuse, (b) default to the whole column length, or
+  (c) default to the loop region? Loop region is probably the most
+  musical default.
+- **Euclidean on CV columns?** Euclidean naturally produces a
+  binary on/off pattern. On a CV column it'd alternate between
+  `on-value` and `off-value` -- usable for two-level CV patterns
+  but maybe better gated to gate-amp only. Decide in mockup.
+- **Seed exposure.** The Performer exposes `seed` as a dialable
+  param so a random pattern is reproducible. Worth doing -- pairs
+  with the deferred RNG-reproducibility item (#12) for a coherent
+  "deterministic randomness" story.
+
+---
+
 ## Deferred ambiguities (surfaced 2026-05-12)
 
 These were noticed during the v1 lock-in pass. None block engine work
@@ -900,13 +1028,14 @@ implementation phase (step 5).
      ~0.15w. Reuses `CellEditor.compactPreview()` (factor out into
      a shared `Sequencer/Format.lua` or duplicate).
 
-   - **(6) Coherent / "musical" randomization.** Today RANDOMIZE
-     draws from fixed per-column distributions. Add a constrained
-     variant that picks only from values already present in the
-     column / selection. Placement: **shift+S3 in selection mode =
-     coherent random**, unshifted S3 = unconstrained. Extends to
-     ACTION_RAND once item 7 lands; may add `ACTION_RAND_COHERENT`
-     to keep the Action struct from growing. ~0.2w.
+   - **(6) Coherent random + fill generators.** _Superseded by the
+     "Fill / generators (v2 spec)" section above._ The original
+     shift+S3 placement is dropped in favour of a single
+     `sequencerRandomMode` admin toggle (simple / coherent / fill);
+     coherent random is one of the three modes, the fill modal is
+     the third. v2 work, ~1.0w total. See the v2 spec for the slot
+     layout, generator types (euclidean / random / ramp / pulse /
+     clear), and per-column-type filtering.
 
    - **(7) Enable L2 selection (Phase 3-lite).** Lift the Phase 1
      block on L2 selection/copy/cut/paste/random. Selection on L2
