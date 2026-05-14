@@ -945,6 +945,25 @@ implementation phase (step 5).
      different. ~0.05w. File: `xroot/Sequencer/GridView.lua` where
      `self.cursorBox:setBorderColor(active and app.WHITE or app.GRAY10)`.
 
+   - **(16) Mark modal: S3 = "unify" -- snap all columns to the
+     marked region.** During the mark modal (1st S2 press through
+     2nd-press commit), S3 is currently blank. Use it for a "unify"
+     gesture: apply the in-flight `(lo, hi)` marker pair the user is
+     defining on the active column to ALL six columns at once. Lets
+     a user lock every ply to a shared loop without re-marking each.
+     Destructive (overwrites the other columns' existing markers),
+     so it gates on a **confirmation toggle in the Sequencer admin
+     settings section** (see the "External clock + reset" v2 spec --
+     the admin Sequencer page is the natural home for this toggle):
+       - toggle ON  -> S3-unify prompts a confirm dialog first
+       - toggle OFF -> S3-unify applies immediately
+     The bare gesture (immediate-apply) can ship in v1.1 ahead of
+     the admin section; the toggle is the v2 refinement. ~0.1w for
+     the gesture, +~0.05w for the toggle once the admin page exists.
+     File: `xroot/Sequencer/GridView.lua` mark-modal subReleased
+     branch + `_commitMark`-adjacent helper to fan the pair across
+     columns.
+
    ### Engine + audio refinement
 
    - **(8) Audio-thread priority audit for clock stability.**
