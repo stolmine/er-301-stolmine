@@ -560,7 +560,8 @@ now settled. Engine and UI code should reference these directly.
 4. **Tempo source.** Single global internal BPM, admin-set, applies to all
    4 slots. Engine runs at **4 PPQN** (1/16-note base tick). External
    clock-in is explicitly deferred to v2; v1 keeps slots output-only (no
-   per-slot clock input).
+   per-slot clock input). The v2 admin UX + engine wiring is sketched
+   under **External clock + reset (v2 spec)** below.
 
 5. **Clock granularity.** N/A for v1 (no external clock). Internal master
    tick = 1/16 note. Triplets and 1/32 are not supported in v1; would
@@ -607,6 +608,135 @@ now settled. Engine and UI code should reference these directly.
     shift+HOME retains its prior "zero this cell" behaviour. The S3
     softkey is now unused (reserved for future per-state-machine
     needs). Shipped in `0b47789`.
+
+---
+
+## External clock + reset (v2 spec)
+
+v0.1 ships internal-clock-only (locked decision #4). The v2 path lets
+the user drive the sequencer from an external clock signal and an
+external reset signal, both routed through the standard jack picker.
+Single global tempo source (= matches the BPM model -- one source for
+all 4 slots).
+
+### Admin menu surface
+
+Add a **Sequencer** section to the admin menu (alongside Settings,
+Quicksaves, etc.). Inside, a **Clock settings** entry opens a
+sub-page laid out like the system-settings menu (one row per option):
+
+```
++--- Clock settings ----------------------------+
+| Clock source          [ internal | external ] |
+| External clock jack   [ none / G1 / G2 / ... ]|
+| External clock div    [ 1 / 2 / 3 / 4 / 6 / 8]|
+| Reset jack            [ none / G1 / G2 / ... ]|
++-----------------------------------------------+
+```
+
+- **Clock source** -- toggle between `internal` (BPM-driven) and
+  `external` (rising-edge driven). When external, the BPM Settings
+  entry can stay visible but is informational only.
+- **External clock jack** -- jack picker entry. Reuses the existing
+  `Source.ExternalChooser` flow (`xroot/Source/ExternalChooser/`); a
+  user picks G1..G4, IN1..IN4, or any other gate-class external
+  source. None = clock disabled.
+- **External clock div** -- integer divisor (1..8 or so). The
+  sequencer fires one tick every Nth external rising edge. Useful
+  when the upstream clock is at a higher PPQN than our 4 PPQN.
+- **Reset jack** -- separate jack picker. On rising edge: all
+  playheads return to their loop minimums (equivalent of pressing
+  shift+HOME to reset playheads, applied to every slot).
+
+### Engine wiring
+
+`Sequencer.h` gets a few new fields on `Slot` (or hoisted to
+`SequencerTask` since they're slot-shared):
+
+```cpp
+// Clock source mode -- the sequencer either runs on internal BPM
+// scheduling (samplesUntilTick countdown driven by setBpm) or on
+// rising-edge detection from an external gate input.
+enum ClockSource : uint8_t {
+  CLOCK_INTERNAL = 0,
+  CLOCK_EXTERNAL = 1,
+};
+ClockSource clockSource = CLOCK_INTERNAL;
+
+// External clock input edge detection. The Lua side hands us an
+// Inlet pointer when the user picks a jack; processFrame samples it
+// and counts rising edges. extClockDiv = N means we fire one tick
+// every N edges.
+od::Inlet* extClockInlet = nullptr;
+int        extClockDiv   = 1;
+int        extClockEdgeCounter = 0;
+float      extClockLastSample  = 0.0f;
+
+// External reset input.
+od::Inlet* extResetInlet      = nullptr;
+float      extResetLastSample = 0.0f;
+```
+
+`processFrame` adds an external-clock branch:
+
+- For each sample in the frame, read `extClockInlet`'s value at
+  that sample.
+- Detect rising edge: previous < 0.5 && current >= 0.5 (gate
+  threshold).
+- On edge: increment `extClockEdgeCounter`; if `>= extClockDiv`, fire
+  `fireTick()` and reset counter.
+- Detect rising edge on `extResetInlet` similarly: on edge, call
+  `reset()` on every slot.
+
+The existing sample-accurate processFrame loop (item 9 from Step 9)
+naturally accommodates this: the frame is already being split at
+tick boundaries; external-clock just becomes another tick-emit
+trigger.
+
+### SequencerTask + Lua surface
+
+- `SequencerTask::setClockSource(int mode)` / `clockSource()` getters.
+- `SequencerTask::setExtClockInlet(od::Inlet*)` /
+  `setExtResetInlet(od::Inlet*)` -- accept SWIG-bound inlet pointers
+  from the picker.
+- `SequencerTask::setExtClockDiv(int)` / `extClockDiv()`.
+
+Lua side adds:
+- `xroot/Sequencer/AdminMenu.lua` -- the Clock settings page. Forks
+  the MondrianMenu pattern used by system settings.
+- Settings entries persisted via the standard `Settings` module so
+  the clock-source pick survives reboot. Jack picks may need a
+  bespoke serializer (storing the source name rather than the
+  pointer).
+- `xroot/AdminMode/Menu.lua` -- add the **Sequencer** section entry
+  pointing at the new menu.
+
+### Effort estimate
+
+~1.0 week focused:
+- Admin menu wiring + Clock settings sub-page: ~0.2w.
+- Jack-picker integration for clock + reset (reusing
+  `Source.ExternalChooser`): ~0.2w.
+- Engine rising-edge detection + reset wiring + division logic: ~0.3w.
+- Settings persistence + boot-time restore of clock config: ~0.1w.
+- Listen test + interop verification with common external clock
+  sources (modular gate at 1/16, 1/8, 1/4 etc.): ~0.2w.
+
+### Open design questions
+
+- **Should the internal BPM display be dimmed when external clock
+  is active?** Probably yes -- BPM is moot in external mode.
+  Alternative: display "extBPM" computed from edge intervals so the
+  user sees the effective tempo.
+- **External clock jitter handling.** A modular gate clock is not
+  sample-accurate (jitter from analog source). Should we add a
+  smoothing/PLL to stabilize tick intervals, or run "as-is" so the
+  sequencer follows the source faithfully (warts and all)?
+  Probably as-is for v2.0; PLL is a v2.1+ refinement.
+- **Reset behavior during a running pattern.** Hard-reset to
+  loop-min on rising edge, or queue the reset for the next tick
+  boundary? Hard-reset is closer to user expectation but can
+  produce audible clicks if the gate is mid-envelope.
 
 ---
 
