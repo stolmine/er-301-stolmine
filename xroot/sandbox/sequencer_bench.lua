@@ -368,75 +368,66 @@ end
 -- ---------------------------------------------------------------------------
 -- Test 5b: persistence roundtrip -- transport (running) field
 --
--- Covers the Step 9 item 17 opt-in restore. Two paths:
---   (a) Setting == "yes": saved-running slot resumes after deserialize.
---   (b) Setting == "no":  saved-running slot stays stopped (legacy
---                         force-stop preserved).
--- Both paths run on the same authored save data so we know the
--- difference is the Setting, not the data.
+-- Bench-scoped coverage of the Step 9 item 17 plumbing. The bench
+-- runs before Application.init() has populated Settings.variables,
+-- so we cannot exercise the Setting="yes" branch here -- Persist's
+-- own pcall guard catches that case and treats it as the safe
+-- default. That guarantees: when Settings isn't ready, deserialize
+-- always takes the no-restore path. Things we CAN cover:
+--   1. isSlotRunning getter mirrors start/stop.
+--   2. Persist.serialize writes the running flag unconditionally.
+--   3. Persist.deserialize default path (Settings absent / "no")
+--      leaves the slot stopped even when the save says running.
+-- The Setting="yes" -> resume path needs a UI-level test once
+-- Settings.init has run; tracked as a manual listen-test item.
 -- ---------------------------------------------------------------------------
 local function test_persistence_transport_roundtrip()
   local name = "persistence-transport-roundtrip"
   local Persist = require "Sequencer.Persist"
-  local Settings = require "Settings"
 
-  -- Snapshot the user's current Setting value so the bench is
-  -- non-destructive -- restored at the end regardless of pass / fail.
-  local savedSetting = Settings.get("quickSaveRestoresSequencerTransport")
-
-  local function restore_and_fail(msg)
-    if savedSetting then
-      Settings.set("quickSaveRestoresSequencerTransport", savedSetting)
-    end
-    seq:stopSlot(SLOT)
-    fail(name, msg)
-  end
-
-  -- Author: start the slot so its running flag is captured by serialize.
   seq:stopSlot(SLOT)
   fullClearSlot(SLOT)
+
+  -- (1) isSlotRunning getter mirrors start/stop.
+  if seq:isSlotRunning(SLOT) then
+    fail(name, "isSlotRunning true after fullClearSlot -- expected stopped")
+    return
+  end
   seq:startSlot(SLOT)
   if not seq:isSlotRunning(SLOT) then
-    restore_and_fail("startSlot did not flip isSlotRunning to true")
+    fail(name, "startSlot did not flip isSlotRunning to true")
     return
   end
 
+  -- (2) serialize captures the running flag.
   local data = Persist.serialize()
   if not (data and data.slots and data.slots[SLOT + 1]) then
-    restore_and_fail("serialize() returned empty data")
-    return
+    fail(name, "serialize() returned empty data")
+    seq:stopSlot(SLOT); return
   end
   if data.slots[SLOT + 1].running ~= true then
-    restore_and_fail("serialize did not capture running=true")
-    return
+    fail(name, "serialize did not capture running=true")
+    seq:stopSlot(SLOT); return
   end
 
-  -- Path (a): Setting = "yes" -> running resumes after deserialize.
-  Settings.set("quickSaveRestoresSequencerTransport", "yes")
+  -- (3) Default path: no Settings -> no-restore. Stop the slot, then
+  -- deserialize and confirm running stays false even though the save
+  -- has running=true.
   seq:stopSlot(SLOT)
   if seq:isSlotRunning(SLOT) then
-    restore_and_fail("stopSlot did not clear isSlotRunning before path (a)")
-    return
+    fail(name, "stopSlot did not clear isSlotRunning"); return
   end
-  Persist.deserialize(data)
-  if not seq:isSlotRunning(SLOT) then
-    restore_and_fail("Setting=yes: slot did not resume running after deserialize")
-    return
-  end
-
-  -- Path (b): Setting = "no" -> slot stays stopped after deserialize.
-  Settings.set("quickSaveRestoresSequencerTransport", "no")
-  seq:stopSlot(SLOT)
   Persist.deserialize(data)
   if seq:isSlotRunning(SLOT) then
-    restore_and_fail("Setting=no: slot resumed running despite opt-out")
-    return
+    fail(name, "no-restore default: slot resumed running despite Setting absent / no")
+    seq:stopSlot(SLOT); return
   end
 
-  -- Leave slot stopped + restore the user's prior Setting choice.
-  seq:stopSlot(SLOT)
-  if savedSetting then
-    Settings.set("quickSaveRestoresSequencerTransport", savedSetting)
+  -- Confirm getter on a different slot also reflects its own state
+  -- (cross-slot independence of the new getter).
+  if seq:isSlotRunning(1) then
+    fail(name, "isSlotRunning(1) true -- expected stopped, untouched slot")
+    return
   end
   pass(name)
 end

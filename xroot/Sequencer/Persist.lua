@@ -90,9 +90,15 @@ function M.deserialize(data)
   -- load force-stops all slots. Read once outside the slot loop so
   -- the answer is consistent across slots even if Settings changes
   -- mid-load (unlikely, but defensive).
+  --
+  -- pcall: Settings.get crashes if invoked before Settings.init()
+  -- has populated `variables` (e.g. the boot-time sequencer bench
+  -- in xroot/sandbox runs before Application.init). When Settings
+  -- isn't ready, fall back to the safe default "no" so the bench
+  -- and other early callers exercise the legacy force-stop path.
   local Settings = require "Settings"
-  local restoreTransport =
-    (Settings.get("quickSaveRestoresSequencerTransport") == "yes")
+  local ok, val = pcall(Settings.get, "quickSaveRestoresSequencerTransport")
+  local restoreTransport = ok and (val == "yes")
 
   for s = 0, kNumSlots - 1 do
     local slot = data.slots[s + 1]
