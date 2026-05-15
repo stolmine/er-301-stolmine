@@ -930,6 +930,38 @@ Grid headers swap globally to the new schema: `cv1 cv2 g1L g2L stL tr`.
   random (Step 9 item 6) draws from the column's distinct values
   as usual.
 
+### L2 grammar additions for dual gates
+
+With two independent gate-length columns (g1L, g2L), the existing
+slot-level `PRED_FIRE` (`!`) is no longer expressive enough -- a rule
+that wants to detect "gate 1 fired this tick" can't distinguish it
+from "gate 2 fired this tick" via the slot-level firedThisTick flag.
+v2 introduces two new predicate ops:
+
+| op | symbol | meaning |
+|---|---|---|
+| `PRED_FIRE1` | `!1` | gate 1 (g1L) retriggered this tick |
+| `PRED_FIRE2` | `!2` | gate 2 (g2L) retriggered this tick |
+
+`PRED_FIRE` (`!`) stays as the slot-level "any gate fired this tick"
+detector -- backward-compatible alias for v0.1 quicksaves and a useful
+"any-gate" trigger in its own right.
+
+Engine surface:
+
+```cpp
+// Slot.h additions alongside the existing firedThisTick:
+bool firedGate1ThisTick = false;
+bool firedGate2ThisTick = false;
+// Set inside fireTick when the corresponding gate retriggers.
+// firedThisTick stays the OR of these two for the legacy PRED_FIRE.
+```
+
+Cell editor: `kPredSymbol` gains entries for `PRED_FIRE1` /
+`PRED_FIRE2` (rendered as `!1` and `!2`); the predicate-op cycle
+on M2 includes them between `!` and `~`. No new operand needed
+(both are detectors, like `!`).
+
 ### L2 column-letter remap
 
 L2 cell editor's column-letter cycle (S3-hold + encoder):
@@ -983,9 +1015,11 @@ this happens.
   blank? Leaning toward `" +0"` for visual consistency with non-
   zero rows -- otherwise a fresh tr column is indistinguishable
   from "this slot has no transpose lane at all."
-- **L2 detector predicates per-gate.** PRED_FIRE is slot-level
-  ("any gate fired this tick"). A v2.1 refinement could add
-  PRED_FIRE1 / PRED_FIRE2 for cross-gate authoring. Punt for v2.0.
+- **L2 detector predicates per-gate.** _Resolved -- promoted to
+  v2.0 spec._ PRED_FIRE1 (`!1`) and PRED_FIRE2 (`!2`) are part of
+  the v2 grammar. PRED_FIRE (`!`) stays as the slot-level
+  "any-gate" detector. See "L2 grammar additions for dual gates"
+  above.
 - **Picker output naming.** `seqN.gate1` / `seqN.gate2`, or keep
   `seqN.gate` for gate1 (back-compat) and add `seqN.gate2`?
   Leaning rename to gate1/gate2 since v2 is a planned breaking
@@ -1318,37 +1352,19 @@ implementation phase (step 5).
      builds a row-range; clipboard distinguishes L1 vs L2 content;
      cross-layer paste refuses. ~0.25w.
 
-   - **(13) L2 col-5 cell truncation tighter than other columns.**
-     `fmtL2Cell` (in `xroot/Sequencer/GridView.lua`) truncates at 5
-     chars for all columns. Column 5 (stL) sits at x=210..251 and
-     the row ruler labels start at x=244 (text glyphs from x=248).
-     A "wide" 5-char rule like `A07c:` rendered in proportional
-     font 9 can have glyphs extending past x=246, spilling into
-     ruler-text territory and producing visual collision against
-     "S1" / row digits.
-     Fix: pass the column index into the formatter and use a tighter
-     truncation (3-4 chars + "...") for col 5 only. OR measure the
-     rendered text width via the label's bounding box and re-truncate
-     dynamically when it would overflow the column boundary
-     (245-px-ish hard limit). Cheaper to just hardcode a smaller cap
-     for col 5. ~0.1w.
+   - **(13) L2 col-5 cell truncation tighter than other columns.** ✅
+     Shipped in `b92c87f`. `fmtL2Cell` now takes the column index;
+     col 5 (stL) truncates one char earlier so glyphs stay inside the
+     245-px boundary and don't collide with the ruler text.
 
-   - **(14) Out-of-loop cells one level dimmer.** Current
-     `kBrightDim = 3` (out-of-loop) vs `kBrightNormal = 6` (in-loop).
-     The 3-level gap is subtle; the user's eye doesn't immediately
-     pick up the loop boundary at-a-glance. Drop kBrightDim to 1 or
-     2 so out-of-loop cells read as visibly secondary. Affects both
-     L1 and L2 since `cellBrightness()` is layer-agnostic. ~0.05w.
+   - **(14) Out-of-loop cells one level dimmer.** ✅ Shipped in
+     `b92c87f`. `kBrightDim` dropped from 3 to 2 -- out-of-loop cells
+     read as visibly secondary against the 6-level in-loop normal.
 
-   - **(15) Cursor box dimmer when not in a "will-mutate" state.**
-     Cursor border is `app.GRAY10` in nav mode and `app.WHITE` when
-     editing / selecting / marking. The user reports the unfocused
-     border is bright enough that distinguishing "I'm just looking
-     at this cell" from "I have a live selection here" requires a
-     close look. Drop the nav-mode border to `app.GRAY5` (or even
-     `app.GRAY3`) so the WHITE active-state border pops as visibly
-     different. ~0.05w. File: `xroot/Sequencer/GridView.lua` where
-     `self.cursorBox:setBorderColor(active and app.WHITE or app.GRAY10)`.
+   - **(15) Cursor box dimmer when not in a "will-mutate" state.** ✅
+     Shipped in `b92c87f`. Nav-mode border = `app.GRAY5` (was
+     `GRAY10`); active-state border = `app.WHITE`. The brightness gap
+     now reads at a glance.
 
    - **(16) Mark modal: S3 = "unify" -- snap all columns to the
      marked region.** _Bare gesture shipped 2026-05-14 (`7097dfa`)._
@@ -1402,6 +1418,19 @@ implementation phase (step 5).
      of gate columns is unaffected.
      File: `xroot/Sequencer/GridView.lua` enterReleased + encoder
      edit-branch when columnCursor is in {3, 4}. ~0.1w.
+
+   - **(23) Hide modal `col` S3 hint on non-cellref slots.** The
+     L2 cell editor's persistent S3 hint chip ("col", item 1) is
+     only meaningful when the focused slot is one of the **cellref**
+     kinds -- M1 (predColA) and M4 (actTarget). On the op slots (M2
+     predOp, M5 actOp) and number slots (M3 predVal, M6 actVal),
+     S3-held + encoder does nothing useful since those slots have no
+     column to cycle. The hint chip should hide on those slots so
+     the user isn't misled into thinking S3 has an effect there.
+     Implementation: subscribe the s3Hint's visibility to slot focus
+     -- show when `kSlotKind[self.slot].kind == "cellref"`, hide
+     otherwise. Refresh on slot-focus changes (M-key press). ~0.05w.
+     File: `xroot/Sequencer/CellEditor.lua`.
 
    - **(21) Shift+S3 = clear / zero on the focused cell.** ✅
      Shipped 2026-05-14. Both layers, single-cell clear at
