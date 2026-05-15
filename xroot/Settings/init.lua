@@ -389,7 +389,7 @@ local defaults = {
     -- predictable state). "yes" opts into resuming whichever slots
     -- were saved running -- consult Persist.lua's deserialize path.
     category = "Sequencer",
-    description = "QuickSave restores sequencer transport state?",
+    description = "QuickSave restores transport state?",
     value = "no",
     choices = {
       "yes",
