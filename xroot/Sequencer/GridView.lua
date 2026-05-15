@@ -1104,7 +1104,11 @@ function GridView:refresh()
   elseif app.isShiftButtonPushed() then
     self.s1Button:setText(clipboard ~= nil and "paste" or "")
     self.s2Button:setText("BPM")
-    self.s3Button:setText(otherLayer)
+    -- S3 reads "clr" under shift -- the cell-clear gesture. The
+    -- layer toggle label on unshifted S3 still tells the user where
+    -- they are; under shift we surface the destructive single-cell
+    -- action that replaces the redundant shifted layer-toggle.
+    self.s3Button:setText("clr")
   else
     self.s1Button:setText(self.running and "stop" or "start")
     self.s2Button:setText("mark")
@@ -1360,12 +1364,25 @@ function GridView:subReleased(i, shifted)
   -- Shift-overlay bindings:
   --   shift+S1 = paste (only when clipboard is non-empty; see refresh
   --              for the matching label swap on S1)
-  --   shift+S3 = reserved for cell-clear (Step 9 item 21, not yet
-  --              wired). Layer toggle lives on UNSHIFTED S3 only --
-  --              the bar's always-on S3 label is the discoverable
-  --              affordance, so the shifted duplicate is removed.
+  --   shift+S3 = clear / zero the focused cell at
+  --              (focusHeadRow, columnCursor). On L1 writes 0.0; on L2
+  --              clears the rule (L2Cell.present = false). Lives only
+  --              on the default sub bar -- if we're mid-marking, the
+  --              modal owns S3 (unify) and we should not smuggle a
+  --              clear past it. Selection's shift+S3 stays as
+  --              coherent-rand (gated upstream by the selectionActive
+  --              branch above, which returns before we reach here).
   if shifted then
     if i == 1 then return self:_pasteAtFocus() end
+    if i == 3 and self.markingMode == "idle" then
+      if self.layer == "L1" then
+        seq:setL1(self.slot, self.columnCursor, self.focusHeadRow, 0.0)
+      else
+        seq:clearL2(self.slot, self.columnCursor, self.focusHeadRow)
+      end
+      self:refresh()
+      return true
+    end
     return false
   end
 

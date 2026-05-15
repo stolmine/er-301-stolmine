@@ -1403,30 +1403,21 @@ implementation phase (step 5).
      File: `xroot/Sequencer/GridView.lua` enterReleased + encoder
      edit-branch when columnCursor is in {3, 4}. ~0.1w.
 
-   - **(21) Shift+S3 = clear / zero on the focused cell.** Both
-     layers. Today shift+S3 is unbound on the default sub bar (and
-     was previously the layer-toggle shortcut, freed by item 2). Use
-     it for a single-cell clear gesture at `(focusHeadRow,
-     columnCursor)`:
-       - **L1:** writes 0.0 to the cell. Bypasses `setL1`'s edit
-         tracking so the cell doesn't flicker as "dirty" -- it's a
-         zero-write, not a nudge.
-       - **L2:** clears the cell (`L2Cell.present = false`). Same
-         effect as authoring an empty rule via the cell editor's
-         clear gesture, but without entering the modal.
-     Selection-mode overlay rules: when selection is active, shift+S3
-     stays as "coherent rand" (per the post-Step-9 sub-bar table) --
-     the clear-cell gesture only lives on the default sub bar (no
-     selection, no marking). When clipboard non-empty, shift+S3 is
-     still unbound (shift+S1 is paste); clear-cell takes that slot.
-     Distinguishing this from `=0` ACTION on L2: this is a layer-1
-     authoring gesture, not a rule. Authoring an L2 cell as "clear"
-     would mean `present=true, action=ACTION_NONE` -- a no-op rule.
-     Shift+S3 instead removes the cell entirely (sets `present=false`).
-     ~0.05w each layer, ~0.1w total. File:
-     `xroot/Sequencer/GridView.lua` -- add `subPressed` shift+S3
-     branch alongside the existing shift+S1 paste handler; new sub
-     label "clr" when the gesture is active.
+   - **(21) Shift+S3 = clear / zero on the focused cell.** ✅
+     Shipped 2026-05-14. Both layers, single-cell clear at
+     `(focusHeadRow, columnCursor)`:
+       - **L1:** writes 0.0 to the cell via `setL1`.
+       - **L2:** clears the cell (`L2Cell.present = false`) via
+         `clearL2` -- distinct from authoring a no-op rule
+         (`present=true, action=ACTION_NONE`); the cell is removed
+         entirely.
+     Gated on `markingMode == "idle"` so the modal's S3 unify
+     gesture is not overridden mid-mark. Selection-mode shift+S3
+     stays as coherent-rand (gated upstream by the
+     `selectionActive` branch returning early). Sub-label swaps to
+     "clr" when shift is held on the default bar.
+     File: `xroot/Sequencer/GridView.lua` subReleased shifted
+     branch + refresh sub-label swap.
 
    - **(20) TIE value at the top of the gate-length step parameter.**
      The first entry in the L1 inline-edit value list for gate-len
