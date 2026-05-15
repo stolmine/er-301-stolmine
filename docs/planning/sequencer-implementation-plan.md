@@ -818,6 +818,202 @@ Lua side adds:
 
 ---
 
+## v2 column layout -- 2 CV + 2 gate + transpose meta (locked-in for v2)
+
+This replaces the previously-drafted per-slot 1-gate/2-gate toggle.
+After working with the v0.1 layout on hardware and considering
+modular conventions, the v2 layout drops gate-amp as a column and
+trades cv3 for a second independent gate, plus a per-row transpose
+meta column. There is **no per-slot mode toggle**: every slot uses
+the same new schema.
+
+### Layout
+
+```
+col0   col1   col2   col3   col4   col5
+ cv1    cv2    g1L    g2L    stL    tr
+ V/o    raw    len    len   step   semi
+```
+
+| col | symbol | type | units | role |
+|---|---|---|---|---|
+| 0 | cv1 | CV | V/oct (transpose pre-applied) | primary pitch lane |
+| 1 | cv2 | CV | raw float | secondary modulator |
+| 2 | g1L | GATE_LEN | beats | gate 1 length (amp fixed = 1.0) |
+| 3 | g2L | GATE_LEN | beats | gate 2 length (amp fixed = 1.0) |
+| 4 | stL | STEP_LEN | beats | per-tick spacing (host-only) |
+| 5 | tr  | TRANSPOSE | semitones (int) | meta: shifts cv1 only |
+
+The slot exposes exactly **4 picker outputs** -- `seqN.cv1`,
+`seqN.cv2`, `seqN.gate1`, `seqN.gate2` -- matching the 4-channel-
+per-group picker constraint (commit 763296b). `tr` and `stL` are
+internal / meta and do not appear in the picker.
+
+### Why this shape
+
+- **Modular convention favors 2 gates over 1 gate w/ amp.** In a
+  hardware patch, variable gate amplitude is rarely the choice
+  vector you reach for; a second independent gate (envelope
+  trigger, drum hit, layered rhythm) almost always is. Gate-amp
+  is dropped entirely -- not parked behind a toggle.
+- **Picker stays at 4 outputs per slot.** Adding a 5th source per
+  slot (e.g. cv3 + gate2) would have required rewriting picker
+  page graphics that were trimmed back from 6 to 4 outputs per
+  group in commit 763296b. Going 2 CV + 2 gate fits the existing
+  picker without graphic work.
+- **Transpose buys back per-row octave/pentatonic variation.** Cv3
+  was historically a free CV lane and rarely a melody-driver;
+  surfacing per-row transpose pre-applied to cv1 is a stronger
+  default for the lead voice and keeps the meta lane authorable
+  in the grid like any other column.
+
+### Engine surface
+
+`Sequencer.h` column-index constants update:
+
+```cpp
+constexpr int kColCV1       = 0;
+constexpr int kColCV2       = 1;
+constexpr int kColGate1Len  = 2;
+constexpr int kColGate2Len  = 3;
+constexpr int kColStepLen   = 4;
+constexpr int kColTranspose = 5;
+```
+
+New `ColumnType` value: `CT_TRANSPOSE` (semantically: int
+semitones, stored as float for uniformity with other lanes; UI
+clamps to integer step on edit).
+
+`fireTick` semantics:
+
+```cpp
+// pre-apply transpose to cv1 sample-and-hold
+float trSemis = columns[kColTranspose].l1[columns[kColTranspose].playhead].value;
+heldCV1 = columns[kColCV1].l1[columns[kColCV1].playhead].value + trSemis / 12.0f;
+
+// gate1 / gate2 are both length-only; amp is constant 1.0
+float g1Beats = columns[kColGate1Len].l1[columns[kColGate1Len].playhead].value;
+float g2Beats = columns[kColGate2Len].l1[columns[kColGate2Len].playhead].value;
+if (g1Beats > 0.0f) {
+  heldGate1Amp = 1.0f;
+  gate1RemainingSamples = (int)(g1Beats * samplesPerBeat);
+  firedThisTick = true;
+}
+if (g2Beats > 0.0f) {
+  heldGate2Amp = 1.0f;
+  gate2RemainingSamples = (int)(g2Beats * samplesPerBeat);
+  firedThisTick = true;  // PRED_FIRE = either gate fired
+}
+```
+
+`Slot` gains `heldGate1Amp / heldGate2Amp` + `gate1RemainingSamples /
+gate2RemainingSamples`; the old single `heldGateAmp /
+gateRemainingSamples` go away. `processFrame` writes both `gate1` and
+`gate2` audio buffers each frame.
+
+Buffer additions to SequencerTask: replace `mSeqNGateAmp` with
+`mSeqNGate1Amp` + `mSeqNGate2Amp` (* 4 slots).
+
+### UI
+
+Grid headers swap globally to the new schema: `cv1 cv2 g1L g2L stL tr`.
+
+- Column 5 (transpose) value formatter: `fmtTranspose` --
+  prints `"+0"`, `"+12"`, `" -5"` (right-aligned 3 chars).
+- Cell-edit step values for `tr`:
+  - fine = 1 semitone
+  - coarse = 12 (octave)
+  - super-coarse = 24
+- Random distribution for `tr` (selection RAND, ACTION_RAND):
+  biased palette `{0, 0, 0, 0, 0, -12, -7, -5, 0, 5, 7, 12}`
+  (zero-weighted, then perfect-5th + octave shifts). Coherent
+  random (Step 9 item 6) draws from the column's distinct values
+  as usual.
+
+### L2 column-letter remap
+
+L2 cell editor's column-letter cycle (S3-hold + encoder):
+
+| letter | column |
+|---|---|
+| A | cv1 |
+| B | cv2 |
+| C | g1L |
+| D | g2L |
+| E | stL |
+| F | tr |
+
+Existing L2 rules referencing letters A/B retain their meaning
+(col index unchanged for A/B); references to C/D/E/F need a
+migration pass on load since the old column at those indices was
+cv3/gtL/gtA/stL (see quicksave migration below).
+
+### Quicksave migration (v0.1 -> v2)
+
+Slot column state is keyed by column index. Migration rules on load
+of a v0.1 quicksave:
+
+1. col 0 (cv1), col 1 (cv2) -- unchanged.
+2. col 2 (old cv3) -- DROPPED. Values discarded. Document this
+   in the v2 changelog.
+3. col 3 (old gtL) -- moves to col 2 (g1L). Length / markers /
+   L1 / L2 transferred verbatim.
+4. col 4 (old gtA, gate-amp) -- becomes col 3 (g2L). Reinterpret
+   each non-zero amp value as 0.25 beats (= 1 tick of gate length).
+   A row with amp = 0 stays 0 (no gate). This preserves "where the
+   user wanted a gate" semantics without inheriting amplitude as
+   length (which would be surprising for big amp values).
+5. col 5 (stL) -- unchanged in role; index shifts to col 4.
+6. col 5 (new tr) -- absent in v0.1; zero-initialized.
+
+L2 rules: `colA` / `targetCol` indices remap 3->2, 4->3, 5->4
+(old gate-amp ACTIONs/PREDs become gate2-length ACTIONs/PREDs, which
+is musically the closest available mapping). Old `colA = 2` (cv3)
+references are neutered -- rewrite to `colA = -1` (host col) and
+leave the user to re-author. Log a one-line notice during load when
+this happens.
+
+### Open design questions
+
+- **Transpose application target.** v2 spec pre-applies tr to cv1
+  only. Should cv2 also be transposable? Default: no -- cv2 is
+  the "raw modulator" lane and semantic conflation hurts. Could
+  expose as a per-slot Setting if users ask.
+- **Transpose grid display when value is 0.** Render as `" +0"` or
+  blank? Leaning toward `" +0"` for visual consistency with non-
+  zero rows -- otherwise a fresh tr column is indistinguishable
+  from "this slot has no transpose lane at all."
+- **L2 detector predicates per-gate.** PRED_FIRE is slot-level
+  ("any gate fired this tick"). A v2.1 refinement could add
+  PRED_FIRE1 / PRED_FIRE2 for cross-gate authoring. Punt for v2.0.
+- **Picker output naming.** `seqN.gate1` / `seqN.gate2`, or keep
+  `seqN.gate` for gate1 (back-compat) and add `seqN.gate2`?
+  Leaning rename to gate1/gate2 since v2 is a planned breaking
+  bump anyway.
+
+### Reconciling Step 9 backlog item 18 (auto-gate fill)
+
+Item 18 in the Step 9 polish backlog -- "auto-gate fill that
+populates the gate-amp column based on user-set density" -- becomes
+obsolete in this v2 layout: gate-amp is gone, both g1L and g2L are
+length-only with constant amp 1.0. Auto-gate fill in v2 should
+instead target **gate-length columns** (g1L and g2L independently),
+with the density parameter controlling how many rows get a non-zero
+length value (default 0.25 beats = 1 tick). Range still drives
+length-variation around the chosen default. Item 18 is retained in
+the backlog with this revised meaning; the old gate-amp formulation
+is dropped.
+
+### Effort estimate
+
+~1.0 week focused. Engine column-index + struct rename (~0.2w),
+gate1/gate2 buffer plumbing in SequencerTask (~0.2w), grid header +
+fmtTranspose + L2 letter remap (~0.2w), quicksave migration logic +
+bench coverage (~0.3w), picker source rename + Lua source-list
+update (~0.1w).
+
+---
+
 ## Fill / generators (v2 spec)
 
 Supersedes Step 9 item 6 ("coherent random"). The randomize gesture
@@ -1188,6 +1384,45 @@ implementation phase (step 5).
      global bool would suffice today, but serializing per-slot
      flags keeps the door open for future per-slot transport
      without a format bump. ~0.15w.
+
+   - **(18) Auto-gate fill setting.** When the user authors a value
+     in one of the two gate columns (gate-len col 3 / gate-amp col 4)
+     on a row, the OTHER gate column on that same row is
+     auto-populated with a sensible default (gate-amp default = 1.0,
+     gate-len default = 1 tick = 0.25 beats). Avoids the common
+     mistake of dialing in gate-amp on a row but leaving gate-len at
+     zero (= silent gate) or vice-versa.
+     New Setting under the Sequencer subheading: `autoGateFill`
+     (yes / no, default **yes**). Hooked into the L1 inline-edit
+     setL1 path only -- bulk-edit, copy/paste, and random ops are
+     not auto-completed (those are intentional batch operations and
+     the user expects exact-write semantics). The L2 modal's view
+     of gate columns is unaffected.
+     File: `xroot/Sequencer/GridView.lua` enterReleased + encoder
+     edit-branch when columnCursor is in {3, 4}. ~0.1w.
+
+   - **(20) TIE value at the top of the gate-length step parameter.**
+     The first entry in the L1 inline-edit value list for gate-len
+     (or below the smallest fractional value if we don't use a
+     fixed list) is a **TIE** sentinel: the gate stays held for the
+     full duration of the step (= legato across that step). When
+     the next gate row fires, the held gate is released and the new
+     one triggers.
+     Encoding: a dedicated sentinel value in the L1 cell (proposed
+     `-1.0` -- negative beats is otherwise meaningless on gate-len).
+     fmtBeats renders the sentinel as `TIE`; the engine's gate
+     envelope logic checks for the sentinel before computing
+     `gateRemainingSamples` and sets the gate to hold-forever (or
+     more practically, to one full samplesPerStep window so the
+     next tick naturally retriggers).
+     Engine: `Slot::fireTick` step 2 already reads `heldGateLen` --
+     special-case the sentinel by setting `gateRemainingSamples` to
+     `samplesPerTick` (i.e. the same value as the upcoming
+     `spt` -- the gate runs the full step). Lua: fmtBeats returns
+     "TIE  " when v < 0, encoder edit clamps at -1 so dialing past
+     zero lands on TIE, randomForColumn doesn't include the
+     sentinel (random gate-lens are positive only).
+     ~0.15w (engine + UI + bench).
 
    ### Engine + audio refinement
 
