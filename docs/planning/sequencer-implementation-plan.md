@@ -1269,12 +1269,10 @@ implementation phase (step 5).
 
    ### UI affordances
 
-   - **(1) L2 cell editor: persistent S3 hint on sub.** Inside the
-     modal, S3 has no on-screen label, so the user has no signal that
-     S3 does anything. Add a persistent text chip near the S3 ply
-     position ("col" or "↔ col", ASCII-safe). Always visible in the
-     modal regardless of held state. ~0.05w. File:
-     `xroot/Sequencer/CellEditor.lua`.
+   - **(1) L2 cell editor: persistent S3 hint on sub.** ✅
+     Shipped in `eea1e71`. `s3Hint = app.SubButton("col", 3)` lives
+     in the modal sub layout; always-on label regardless of S3 held
+     state. File: `xroot/Sequencer/CellEditor.lua`.
 
    - **(2) Free shift+S3 from the layer toggle.** ✅ Unshifted S3
      already does the layer toggle (bar always reads the OTHER
@@ -1290,10 +1288,12 @@ implementation phase (step 5).
      stepping. Applies in both L1 and L2 default views (NOT inside
      selection or modal). Uniform value across all four slots. ~0.15w.
 
-   - **(4) Multi-slot grid view + picker.** GridView hardcodes
-     `kSlot = 0`. **Gesture: shift+M2, M3, M4, M5 = slots 0..3**
-     (M1 and M6 reserved). Replace constant with `self.slot`; refresh
-     updates the "seq{N}.{layer}" title naturally. ~0.2w.
+   - **(4) Multi-slot grid view + picker.** ✅ Shipped in `eea1e71`.
+     `kDefaultSlot = 0` seeds `self.slot`; shift+M2..M5 picks slots
+     0..3 (M1 and M6 reserved). Slot indicator label refreshes live;
+     all `seq:`-prefixed calls in GridView read `self.slot`. The cell
+     editor modal takes `slot` as a ctor arg so it honors the active
+     slot on ENTER.
 
    - **(5) L2 grid expanded-rule preview on shift+S1.** ✅
      Shipped in `c32bdab` (alongside item 7). `previewLabel` on the
