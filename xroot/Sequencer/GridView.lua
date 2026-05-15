@@ -399,11 +399,16 @@ function GridView:init(chain)
   -- L2 layer targets the right slot.
   self.slot = kDefaultSlot
 
-  -- BPM fader gesture state. Set on shift+S2 press, cleared on S2
-  -- release. While held, the encoder routes to BPM nudge instead of
-  -- focus-head scroll / selection extend / etc.
-  self.bpmHeld  = false
-  self.bpmAccum = 0
+  -- BPM fader gesture state. shift+S2 TOGGLES the latch (tap once
+  -- to grab, tap again to release) -- one-handed BPM adjustment
+  -- without needing to keep shift+S2 held while turning the encoder.
+  -- While latched, the encoder routes to BPM nudge; bpmStepMode is
+  -- dial-toggled fine/coarse (0.1 / 1.0 BPM per encoder tick, with
+  -- shift = super = 10.0 on coarse). On release we persist the
+  -- final value via Settings.set so it survives reboot.
+  self.bpmLatched  = false
+  self.bpmAccum    = 0
+  self.bpmStepMode = "fine"   -- "fine" | "coarse"
 
   -- Active grid layer: "L1" shows L1 cell values (per-column formatters);
   -- "L2" shows compact pred:action rules from the L2 grammar layer.
@@ -1011,7 +1016,14 @@ function GridView:refresh()
     self.l2FireDrawing:hide()
   end
 
-  self.bpmLabel:setText(string.format("BPM %d", math.floor(seq:getBpm() + 0.5)))
+  -- BPM display shows the fader resolution: integer when on a whole
+  -- BPM, one decimal when the user has dialed to a fractional value.
+  local bpm = seq:getBpm()
+  if math.abs(bpm - math.floor(bpm + 0.5)) < 0.05 then
+    self.bpmLabel:setText(string.format("BPM %d", math.floor(bpm + 0.5)))
+  else
+    self.bpmLabel:setText(string.format("BPM %.1f", bpm))
+  end
   -- Persistent layer indicator: "seq1.L1" or "seq1.L2" on the sub
   -- title line, so the user always knows which layer the grid view
   -- is showing without having to hold shift. Status mirrors the
@@ -1028,7 +1040,7 @@ function GridView:refresh()
      and not self.selectionActive
      and not self.editingL1
      and self.markingMode == "idle"
-     and not self.bpmHeld then
+     and not self.bpmLatched then
     if clipboard then
       previewText = "clip " .. clipboardPreviewText()
     elseif self.layer == "L2"
@@ -1047,8 +1059,12 @@ function GridView:refresh()
   end
   self.previewLabel:setText(previewText)
 
-  -- Edit-step indicator. Shown only while in edit mode.
-  if self.editingL1 then
+  -- Fine/coarse step indicator. Shown while editing an L1 cell OR
+  -- while the BPM latch is engaged so the user sees the dial-toggle
+  -- state for both kinds of fader.
+  if self.bpmLatched then
+    self.editStepLabel:setText(self.bpmStepMode == "coarse" and "COARSE" or "FINE")
+  elseif self.editingL1 then
     self.editStepLabel:setText(self.editStepMode == "coarse" and "COARSE" or "FINE")
   else
     self.editStepLabel:setText("")
@@ -1069,7 +1085,14 @@ function GridView:refresh()
   -- OTHER layer's name ("L2" while on L1, "L1" while on L2), so the
   -- gesture is discoverable without holding shift first.
   local otherLayer = (self.layer == "L1") and "L2" or "L1"
-  if self.selectionActive then
+  if self.bpmLatched then
+    -- BPM latch overrides every other sub-bar mode: encoder is
+    -- locked to BPM and the label persists so the user knows the
+    -- grab is engaged. dial chip on the right shows fine/coarse.
+    self.s1Button:setText("")
+    self.s2Button:setText("BPM*")
+    self.s3Button:setText("")
+  elseif self.selectionActive then
     self.s1Button:setText("copy")
     self.s2Button:setText("cut")
     self.s3Button:setText("rand")
@@ -1211,15 +1234,26 @@ function GridView:_pasteAtFocus()
   return true
 end
 
--- subPressed: captures shift+S2 to enter BPM-nudge mode. While S2
--- stays held, encoder routes to BPM regardless of shift state on
--- the encoder gesture itself; release of S2 (any shift state) drops
--- out. The press is otherwise a no-op so the rest of the sub stack
--- (paste, mark, layer toggle) sees nothing.
+-- shift+S2 PRESS toggles BPM-latch mode: tap once to grab the
+-- fader (encoder now routes to BPM), tap again to release. Persists
+-- the final value to Settings on release so the new BPM survives
+-- reboot. While latched the press is consumed here so the regular
+-- S2-release path (mark modal entry) doesn't fire.
 function GridView:subPressed(i, shifted)
   if i == 2 and shifted then
-    self.bpmHeld  = true
-    self.bpmAccum = 0
+    if self.bpmLatched then
+      -- Releasing the latch: persist final value to Settings.
+      self.bpmLatched = false
+      self.bpmAccum   = 0
+      local seq = app.AudioThread.getSequencerTask()
+      if seq then
+        local Settings = require "Settings"
+        Settings.set("bpm", string.format("%.2f", seq:getBpm()))
+      end
+    else
+      self.bpmLatched = true
+      self.bpmAccum   = 0
+    end
     self:refresh()
     return true
   end
@@ -1227,12 +1261,10 @@ function GridView:subPressed(i, shifted)
 end
 
 function GridView:subReleased(i, shifted)
-  -- BPM release: claim regardless of shift state, since the press
-  -- could have been shifted but release after shift was let go.
-  if i == 2 and self.bpmHeld then
-    self.bpmHeld  = false
-    self.bpmAccum = 0
-    self:refresh()
+  -- Suppress the S2-release-as-mark-entry path while the BPM latch
+  -- is engaged on shift+S2 (the latch is owned by subPressed; the
+  -- subsequent release shouldn't double-fire into the mark modal).
+  if i == 2 and shifted then
     return true
   end
 
@@ -1434,15 +1466,21 @@ function GridView:encoder(change, shifted)
   local seq = app.AudioThread.getSequencerTask()
   if not seq then return false end
 
-  -- BPM nudge has top priority: while shift+S2 is held, the encoder
-  -- routes here regardless of other modal state. Step is integer
-  -- BPM; shift on the encoder gesture itself picks the super step.
-  -- Clamped 20..300 (musical range covering most use cases).
-  if self.bpmHeld then
+  -- BPM nudge has top priority: while the shift+S2 latch is engaged
+  -- the encoder routes here regardless of other modal state. Step
+  -- is dial-toggled fine (0.1 BPM) / coarse (1.0 BPM), with shift on
+  -- the encoder picking the super variant of whichever mode is
+  -- active. Clamped 20..300 (musical range covering most use cases).
+  if self.bpmLatched then
     self.bpmAccum = self.bpmAccum + change
-    local step = shifted and 5 or 1
+    local step
+    if self.bpmStepMode == "coarse" then
+      step = shifted and 10.0 or 1.0
+    else
+      step = shifted and 1.0 or 0.1
+    end
     local cur = seq:getBpm()
-    local function clamp(v) return math.max(20, math.min(300, v)) end
+    local function clamp(v) return math.max(20.0, math.min(300.0, v)) end
     while self.bpmAccum >= kEncoderThreshold do
       cur = clamp(cur + step)
       self.bpmAccum = self.bpmAccum - kEncoderThreshold
@@ -1679,6 +1717,24 @@ function GridView:enterReleased(shifted)
 end
 
 function GridView:cancelReleased(shifted)
+  -- BPM latch exit -- CANCEL bails out without persisting the
+  -- pending value. Useful escape hatch if the user dialed somewhere
+  -- they didn't mean and want to abandon. We DO persist however,
+  -- because by the time the user gets to CANCEL the engine already
+  -- reflects the dialed value (live setBpm during the latch); not
+  -- saving would just lose the same value on reboot. Mirrors the
+  -- toggle-off path in subPressed.
+  if self.bpmLatched then
+    self.bpmLatched = false
+    self.bpmAccum   = 0
+    local seq = app.AudioThread.getSequencerTask()
+    if seq then
+      local Settings = require "Settings"
+      Settings.set("bpm", string.format("%.2f", seq:getBpm()))
+    end
+    self:refresh()
+    return true
+  end
   -- Edit mode takes priority -- CANCEL exits edit first.
   if self.editingL1 then
     self.editingL1 = false
@@ -1785,6 +1841,13 @@ end
 -- behavior can run (encoder Fine/Coarse global state). Shift selects
 -- the "super" variant of whichever mode is current.
 function GridView:dialPressed(shifted)
+  -- BPM-latch fine/coarse toggle takes precedence over L1 edit so
+  -- the user can flip step size mid-fade without exiting the latch.
+  if self.bpmLatched then
+    self.bpmStepMode = (self.bpmStepMode == "fine") and "coarse" or "fine"
+    self:refresh()
+    return true
+  end
   if not self.editingL1 then return false end
   self.editStepMode = (self.editStepMode == "fine") and "coarse" or "fine"
   self:refresh()

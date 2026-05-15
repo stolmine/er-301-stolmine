@@ -95,10 +95,10 @@ menuItems[#menuItems + 1] = {
   "addCategory",
   "Sequencer"
 }
-menuItems[#menuItems + 1] = {
-  "addVariable",
-  "bpm"
-}
+-- BPM is intentionally NOT exposed here -- it's settable only inside
+-- the sequencer takeover (shift+S2 latch + encoder) so the user can
+-- adjust it one-handed while watching the grid. The bpm entry in
+-- init.lua's defaults still drives persistence across reboots.
 menuItems[#menuItems + 1] = {
   "addVariable",
   "unifyConfirm"

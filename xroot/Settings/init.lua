@@ -359,13 +359,14 @@ local defaults = {
     }
   },
   bpm = {
+    -- Hidden from the System Settings UI (see Settings/Interface.lua)
+    -- since BPM is set inside the sequencer takeover via shift+S2
+    -- latch + encoder. The entry still exists in defaults so the
+    -- saved BPM persists across reboot via the standard Settings
+    -- load path -- onSet pushes it into the engine on boot.
     category = "Sequencer",
     description = "Global BPM:",
     value = "120",
-    choices = {
-      "60", "70", "80", "90", "100", "110", "120",
-      "130", "140", "150", "160", "180", "200"
-    },
     onSet = function(value)
       local n = tonumber(value)
       if n then
