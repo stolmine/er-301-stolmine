@@ -611,6 +611,84 @@ now settled. Engine and UI code should reference these directly.
 
 ---
 
+## Sequencer settings (System Settings subheading)
+
+Non-clock sequencer settings live as **flat entries under a
+"Sequencer" subheading in the existing System Settings menu** -- no
+new admin infrastructure. Only the clock settings (which need
+jack-picker integration + a richer layout) get the dedicated admin
+Sequencer section in the "External clock + reset" v2 spec below.
+
+### How the Settings menu works (studied 2026-05-14)
+
+- `xroot/Settings/init.lua` -- a flat `defaults` table. Each entry:
+  `category` (string), `description` (string), `value` (default),
+  optional `choices` (for String type), optional `onSet(value)`
+  callback fired on change. Three Variable types in
+  `Settings/Variable.lua`: `Boolean`, `String` (choice list),
+  `Number` (min/max).
+- `xroot/Settings/Interface.lua` -- a `menuItems` array drives the
+  *display*. `{"addCategory","Foo"}` renders an `o Foo:` subheading;
+  `{"addVariable","name"}` renders `  + description` + value under
+  it. **The `category` field in init.lua is decorative** -- the
+  Interface.lua array is what actually groups and orders entries.
+- Persistence: `Settings.save()` writes `/rear/settings.lua`;
+  `Settings.load()` restores on boot and fires each `onSet`.
+
+### Orphaned `bpm` entry -- fix while we're here
+
+`bpm` is already defined in `init.lua` (`category = "Sequencer"`,
+choices 60..200, `onSet` calls `setBpm`) but is **NOT** in
+Interface.lua's `menuItems` array -- so it never renders in the
+Settings UI. It's effectively unreachable from System Settings
+today (only the in-takeover shift+S2 fader from Step 9 item 3 can
+change BPM). When we add the Sequencer subheading, wire `bpm` into
+it as the first entry -- a one-line fix to a pre-existing oversight.
+
+### Entries under the "Sequencer" subheading
+
+| Setting | Type | Default | Notes |
+|---|---|---|---|
+| `bpm` | String | "120" | Already defined; just needs the Interface wiring (orphan fix). |
+| `sequencerRandomMode` | String | "simple" | choices: simple / coherent / fill. Read by the randomize gesture (see Fill / generators v2 spec). |
+| `quickSaveRestoresSequencerTransport` | String | "no" | choices: yes / no. Step 9 item 17. `onSet` not needed -- Persist.deserialize reads it directly. |
+| `unifyConfirm` | String | "yes" | choices: yes / no. Mark-modal S3 "unify" confirmation gate (Step 9 item 16). Supersedes the earlier "lives in the admin Sequencer section" note -- a flat Setting is simpler and doesn't block on the admin section. |
+
+### Implementation
+
+1. `xroot/Settings/init.lua` -- add the three new entries
+   (`sequencerRandomMode`, `quickSaveRestoresSequencerTransport`,
+   `unifyConfirm`) to the `defaults` table with `category =
+   "Sequencer"`. `bpm` already exists.
+2. `xroot/Settings/Interface.lua` -- add a `menuItems` block:
+   ```lua
+   menuItems[#menuItems + 1] = { "addCategory", "Sequencer" }
+   menuItems[#menuItems + 1] = { "addVariable", "bpm" }
+   menuItems[#menuItems + 1] = { "addVariable", "sequencerRandomMode" }
+   menuItems[#menuItems + 1] = { "addVariable", "quickSaveRestoresSequencerTransport" }
+   menuItems[#menuItems + 1] = { "addVariable", "unifyConfirm" }
+   ```
+   Placed after the QuickSaves block (natural neighbour -- the
+   transport-restore entry pairs conceptually with the other
+   quicksave-restore toggles).
+3. Consumers read via `Settings.get("name")`:
+   - `quickSaveRestoresSequencerTransport` -> `Persist.deserialize`
+     (Step 9 item 17).
+   - `sequencerRandomMode` -> the selection-mode randomize branch in
+     `GridView.lua` (+ later the fill modal router).
+   - `unifyConfirm` -> the mark-modal S3 handler in `GridView.lua`:
+     "yes" -> show a confirm dialog before fanning markers across
+     columns; "no" -> immediate-apply (current Tier-1 behaviour).
+
+### Effort estimate
+
+~0.2w. No new files, no engine changes -- defaults-table additions
++ a menuItems block + three `Settings.get` call sites. Each consumer
+(items 16 confirm, 17, randomMode) is wired as its own feature lands;
+the subheading + `bpm` orphan fix can ship immediately on their own.
+
+---
+
 ## External clock + reset (v2 spec)
 
 v0.1 ships internal-clock-only (locked decision #4). The v2 path lets
@@ -1075,32 +1153,26 @@ implementation phase (step 5).
      `self.cursorBox:setBorderColor(active and app.WHITE or app.GRAY10)`.
 
    - **(16) Mark modal: S3 = "unify" -- snap all columns to the
-     marked region.** During the mark modal (1st S2 press through
-     2nd-press commit), S3 is currently blank. Use it for a "unify"
-     gesture: apply the in-flight `(lo, hi)` marker pair the user is
-     defining on the active column to ALL six columns at once. Lets
-     a user lock every ply to a shared loop without re-marking each.
-     Destructive (overwrites the other columns' existing markers),
-     so it gates on a **confirmation toggle in the Sequencer admin
-     settings section** (see the "External clock + reset" v2 spec --
-     the admin Sequencer page is the natural home for this toggle):
-       - toggle ON  -> S3-unify prompts a confirm dialog first
-       - toggle OFF -> S3-unify applies immediately
-     The bare gesture (immediate-apply) can ship in v1.1 ahead of
-     the admin section; the toggle is the v2 refinement. ~0.1w for
-     the gesture, +~0.05w for the toggle once the admin page exists.
+     marked region.** _Bare gesture shipped 2026-05-14 (`7097dfa`)._
+     During the mark modal, S3 applies the in-flight `(lo, hi)`
+     marker pair the user is defining on the active column to ALL
+     six columns at once, then exits the modal. Immediate-apply
+     today (no confirm).
+     **Remaining:** the `unifyConfirm` gate -- a flat Setting under
+     the "Sequencer" subheading (see the "Sequencer settings"
+     section above), NOT the admin Sequencer section. "yes" -> S3
+     prompts a confirm dialog before fanning markers; "no" ->
+     current immediate-apply. ~0.05w once the subheading exists.
      File: `xroot/Sequencer/GridView.lua` mark-modal subReleased
-     branch + `_commitMark`-adjacent helper to fan the pair across
-     columns.
+     S3 branch reads `Settings.get("unifyConfirm")`.
 
    - **(17) Settings toggle: quicksave restores transport state.**
      Step 3's locked decision force-stops all slots on quicksave
      load -- the running state is NOT serialized. Add an opt-in:
-     a Settings entry `quickSaveRestoresSequencerTransport`
-     (yes / no, default **no**), sitting alongside the existing
-     `quickSaveRestoresRecorder` / `quickSaveRestoresClipboard`
-     entries in `xroot/Settings/init.lua` -- no dependency on the
-     v2 admin Sequencer page.
+     `quickSaveRestoresSequencerTransport` (yes / no, default
+     **no**) as a flat entry under the "Sequencer" subheading (see
+     the "Sequencer settings" section above) -- no dependency on
+     the v2 admin Sequencer page.
      Plumbing needed:
        - Engine: a `SequencerTask::isSlotRunning(slot)` getter
          (`Slot::running` is currently write-only from Lua's POV).
