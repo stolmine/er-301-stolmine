@@ -1295,14 +1295,14 @@ implementation phase (step 5).
      (M1 and M6 reserved). Replace constant with `self.slot`; refresh
      updates the "seq{N}.{layer}" title naturally. ~0.2w.
 
-   - **(5) L2 grid expanded-rule preview on shift+S1.** Cells in the
-     L2 grid render abbreviated rules with "…" truncation. On L2,
-     no modal, no selection: hold shift → S1 shows the full
-     pred:action of the cell at `(focusHeadRow, columnCursor)`.
-     Conditional: when clipboard non-empty, the same gesture
-     previews the clipboard contents (paste-target preview) instead.
-     ~0.15w. Reuses `CellEditor.compactPreview()` (factor out into
-     a shared `Sequencer/Format.lua` or duplicate).
+   - **(5) L2 grid expanded-rule preview on shift+S1.** ✅
+     Shipped in `c32bdab` (alongside item 7). `previewLabel` on the
+     sub display renders one of two contents while shift is held:
+     `clip <...>` (paste-target preview when clipboard non-empty)
+     or `here <...>` (expanded L2 cell at the cursor when on L2 and
+     the cell is present). Clipboard preview wins when both apply.
+     Format helper is `fmtL2CellFull` in GridView (not factored to
+     a shared Format.lua module -- duplication accepted).
 
    - **(6) Coherent random + fill generators.** _Superseded by the
      "Fill / generators (v2 spec)" section above._ The original
