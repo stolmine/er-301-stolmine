@@ -36,6 +36,8 @@ local PRED_PROBABILITY = 5
 local PRED_APPROX      = 6
 local PRED_FIRE        = 7
 local PRED_CHANGED     = 8
+local PRED_FIRE1       = 10
+local PRED_FIRE2       = 11
 
 local ACTION_ADD   = 1
 local ACTION_SUB   = 2
@@ -44,13 +46,13 @@ local ACTION_FIRE  = 6
 local ACTION_RAND  = 7
 local ACTION_MUTE  = 8
 
--- Column indices, mirroring od/sequencer/Sequencer.h
-local COL_CV1      = 0
-local COL_CV2      = 1
-local COL_CV3      = 2
-local COL_GATE_LEN = 3
-local COL_GATE_AMP = 4
-local COL_STEP_LEN = 5
+-- Column indices (v2 layout), mirroring od/sequencer/Sequencer.h
+local COL_CV1        = 0
+local COL_CV2        = 1
+local COL_GATE1_LEN  = 2
+local COL_GATE2_LEN  = 3
+local COL_STEP_LEN   = 4
+local COL_TRANSPOSE  = 5
 
 -- Slot used by all bench tests. Anything but 0 (the UI's default).
 local SLOT = 3
@@ -186,7 +188,8 @@ end
 --   CV1 row 1: !     : B=5   (fires on slot gate retrigger -> CV2 := 5)
 --   CV1 row 2: c     : B+1   (CV1's value didn't change -> skip)
 --   CV1 row 3: ~0    : BM    (CV1[3]=0 approx 0 -> MUTE CV2)
--- Gate-amp[1] = 1.0 so tick 2 retriggers the slot gate; other rows = 0.
+-- v2 fire mechanism: g1L[1] = 0.25 so tick 2 retriggers gate1 (and
+-- therefore the slot-level firedThisTick). g1L other rows = 0 (no fire).
 -- ---------------------------------------------------------------------------
 local function test_l2_phase15_polish()
   local name = "l2-phase15-polish"
@@ -205,11 +208,12 @@ local function test_l2_phase15_polish()
   seq:setColumnLength(SLOT, COL_CV2, 1)
   seq:setMarkers(SLOT, COL_CV2, 0, 0)
   seq:setL1(SLOT, COL_CV2, 0, 0.0)
-  -- Gate-amp pattern: only row 1 is non-zero so tick 2 retriggers gate.
-  seq:setL1(SLOT, COL_GATE_AMP, 0, 0.0)
-  seq:setL1(SLOT, COL_GATE_AMP, 1, 1.0)
-  seq:setL1(SLOT, COL_GATE_AMP, 2, 0.0)
-  seq:setL1(SLOT, COL_GATE_AMP, 3, 0.0)
+  -- gate1-len pattern: only row 1 is non-zero, so tick 2 fires gate1
+  -- (and the slot-level firedThisTick OR). gate2 stays silent.
+  seq:setL1(SLOT, COL_GATE1_LEN, 0, 0.0)
+  seq:setL1(SLOT, COL_GATE1_LEN, 1, 0.25)
+  seq:setL1(SLOT, COL_GATE1_LEN, 2, 0.0)
+  seq:setL1(SLOT, COL_GATE1_LEN, 3, 0.0)
   seq:seedRng(SLOT, 0xCAFE)
 
   -- All rules use -1 for both row pins (predColARow / actTargetRow)
@@ -436,66 +440,63 @@ end
 -- Test 5c: TIE on gate-len -- legato (extend held gate, no edge).
 --
 -- gate-len 4.0 is the TIE sentinel. A TIE row WITH a gate already in
--- flight extends gateRemainingSamples to the upcoming step's length
--- without producing a new edge: heldGateAmp is preserved and
--- firedThisTick stays false. This is the legato case -- audio output
--- stays continuous across the TIE row.
+-- flight extends gate1RemainingSamples to the upcoming step's length
+-- without producing a new edge: heldGate1Amp is preserved and
+-- firedGate1ThisTick stays false. This is the legato case -- audio
+-- output stays continuous across the TIE row. v2 gate amp is constant
+-- 1.0 so the test asserts heldGate1Amp == 1.0 throughout the legato run.
 -- ---------------------------------------------------------------------------
 local function test_tie_legato()
   local name = "tie-legato"
   fullClearSlot(SLOT)
-  -- 4-step loop on every column. Gate-amp pattern: fire on rows 0/1/2,
-  -- skip row 3. Gate-len pattern: row 0 short, row 1 TIE, row 2 short,
-  -- row 3 zero. Step-len uniform 0.25 so each tick is one /16 note.
+  -- 4-step loop on every column. gate1-len pattern: row 0 short fire,
+  -- row 1 TIE, row 2 short fire, row 3 zero (skip). gate2 stays 0
+  -- across all rows (silent). Step-len uniform 0.25 -- one /16 per tick.
   for c = 0, 5 do
     seq:setColumnLength(SLOT, c, 4)
     seq:setMarkers(SLOT, c, 0, 3)
   end
-  seq:setL1(SLOT, COL_GATE_AMP, 0, 1.0)
-  seq:setL1(SLOT, COL_GATE_AMP, 1, 1.0)
-  seq:setL1(SLOT, COL_GATE_AMP, 2, 1.0)
-  seq:setL1(SLOT, COL_GATE_AMP, 3, 0.0)
-  seq:setL1(SLOT, COL_GATE_LEN, 0, 0.25)
-  seq:setL1(SLOT, COL_GATE_LEN, 1, 4.0)    -- TIE
-  seq:setL1(SLOT, COL_GATE_LEN, 2, 0.25)
-  seq:setL1(SLOT, COL_GATE_LEN, 3, 0.0)
+  seq:setL1(SLOT, COL_GATE1_LEN, 0, 0.25)
+  seq:setL1(SLOT, COL_GATE1_LEN, 1, 4.0)    -- TIE
+  seq:setL1(SLOT, COL_GATE1_LEN, 2, 0.25)
+  seq:setL1(SLOT, COL_GATE1_LEN, 3, 0.0)
   for r = 0, 3 do seq:setL1(SLOT, COL_STEP_LEN, r, 0.25) end
   seq:resetSlot(SLOT)
 
-  -- Tick 0 -- normal fire. Edge expected.
+  -- Tick 0 -- normal fire on gate1. Edge expected.
   seq:tickOnce(SLOT)
-  if not seq:firedThisTick(SLOT) then
-    fail(name, "tick 0: firedThisTick false -- expected fresh fire edge")
+  if not seq:firedGate1ThisTick(SLOT) then
+    fail(name, "tick 0: firedGate1ThisTick false -- expected fresh fire edge")
     return
   end
-  local amp_after_t0 = seq:heldGateAmp(SLOT)
-  if not approxEq(amp_after_t0, 1.0) then
-    fail(name, string.format("tick 0: heldGateAmp expected 1.0, got %f", amp_after_t0))
+  if not approxEq(seq:heldGate1Amp(SLOT), 1.0) then
+    fail(name, string.format("tick 0: heldGate1Amp expected 1.0, got %f",
+                              seq:heldGate1Amp(SLOT)))
     return
   end
 
-  -- Tick 1 -- TIE row, gate in flight from tick 0. Extend, no edge.
+  -- Tick 1 -- TIE row, gate1 in flight from tick 0. Extend, no edge.
   seq:tickOnce(SLOT)
-  if seq:firedThisTick(SLOT) then
-    fail(name, "tick 1 (TIE extend): firedThisTick true -- expected no edge")
+  if seq:firedGate1ThisTick(SLOT) then
+    fail(name, "tick 1 (TIE extend): firedGate1ThisTick true -- expected no edge")
     return
   end
-  if not approxEq(seq:heldGateAmp(SLOT), 1.0) then
-    fail(name, "tick 1 (TIE extend): heldGateAmp drifted -- should be preserved")
+  if not approxEq(seq:heldGate1Amp(SLOT), 1.0) then
+    fail(name, "tick 1 (TIE extend): heldGate1Amp drifted -- should be preserved")
     return
   end
 
   -- Tick 2 -- normal fire. Edge expected.
   seq:tickOnce(SLOT)
-  if not seq:firedThisTick(SLOT) then
-    fail(name, "tick 2: firedThisTick false -- expected fresh fire edge")
+  if not seq:firedGate1ThisTick(SLOT) then
+    fail(name, "tick 2: firedGate1ThisTick false -- expected fresh fire edge")
     return
   end
 
-  -- Tick 3 -- gate-amp 0, no fire.
+  -- Tick 3 -- gate-len 0, no fire.
   seq:tickOnce(SLOT)
-  if seq:firedThisTick(SLOT) then
-    fail(name, "tick 3 (amp 0): firedThisTick true -- expected skip")
+  if seq:firedGate1ThisTick(SLOT) then
+    fail(name, "tick 3 (gate-len 0): firedGate1ThisTick true -- expected skip")
     return
   end
   pass(name)
@@ -516,29 +517,183 @@ local function test_tie_start_no_prior()
     seq:setColumnLength(SLOT, c, 2)
     seq:setMarkers(SLOT, c, 0, 1)
   end
-  -- Row 0: no fire (gate-amp 0). Row 1: TIE.
-  seq:setL1(SLOT, COL_GATE_AMP, 0, 0.0)
-  seq:setL1(SLOT, COL_GATE_AMP, 1, 1.0)
-  seq:setL1(SLOT, COL_GATE_LEN, 0, 0.0)
-  seq:setL1(SLOT, COL_GATE_LEN, 1, 4.0)    -- TIE
+  -- Row 0: no fire (gate1-len 0). Row 1: TIE.
+  seq:setL1(SLOT, COL_GATE1_LEN, 0, 0.0)
+  seq:setL1(SLOT, COL_GATE1_LEN, 1, 4.0)    -- TIE
   for r = 0, 1 do seq:setL1(SLOT, COL_STEP_LEN, r, 0.25) end
   seq:resetSlot(SLOT)
 
-  -- Tick 0 -- skip (gate-amp 0). No gate in flight after this tick.
+  -- Tick 0 -- skip (gate1-len 0). No gate in flight after this tick.
   seq:tickOnce(SLOT)
-  if seq:firedThisTick(SLOT) then
-    fail(name, "tick 0 (amp 0): firedThisTick true -- expected skip")
+  if seq:firedGate1ThisTick(SLOT) then
+    fail(name, "tick 0 (gate-len 0): firedGate1ThisTick true -- expected skip")
     return
   end
 
   -- Tick 1 -- TIE with no prior gate -> fresh full-step fire WITH edge.
   seq:tickOnce(SLOT)
-  if not seq:firedThisTick(SLOT) then
-    fail(name, "tick 1 (TIE fresh): firedThisTick false -- expected edge for full-width gate")
+  if not seq:firedGate1ThisTick(SLOT) then
+    fail(name, "tick 1 (TIE fresh): firedGate1ThisTick false -- expected edge for full-width gate")
     return
   end
-  if not approxEq(seq:heldGateAmp(SLOT), 1.0) then
-    fail(name, "tick 1 (TIE fresh): heldGateAmp not set to row's amp")
+  if not approxEq(seq:heldGate1Amp(SLOT), 1.0) then
+    fail(name, "tick 1 (TIE fresh): heldGate1Amp not set (expected 1.0 constant)")
+    return
+  end
+  pass(name)
+end
+
+-- ---------------------------------------------------------------------------
+-- Test 5e: transpose pre-applied to cv1. heldCV1 should report
+-- cv1Raw + heldTranspose / 12.0 each tick. Authoring 0 V on cv1 and
+-- nudging the tr column lets us verify the pre-application directly
+-- without floating-point noise from cv1 itself.
+-- ---------------------------------------------------------------------------
+local function test_transpose_cv1()
+  local name = "transpose-cv1"
+  fullClearSlot(SLOT)
+  -- 4-step loop on cv1 + tr; cv1 stays at 0 V across all rows.
+  seq:setColumnLength(SLOT, COL_CV1, 4)
+  seq:setMarkers(SLOT, COL_CV1, 0, 3)
+  seq:setColumnLength(SLOT, COL_TRANSPOSE, 4)
+  seq:setMarkers(SLOT, COL_TRANSPOSE, 0, 3)
+  -- tr pattern: -12 (octave down), 0 (no shift), 7 (perfect 5th up), 12 (octave up).
+  seq:setL1(SLOT, COL_TRANSPOSE, 0, -12.0)
+  seq:setL1(SLOT, COL_TRANSPOSE, 1, 0.0)
+  seq:setL1(SLOT, COL_TRANSPOSE, 2, 7.0)
+  seq:setL1(SLOT, COL_TRANSPOSE, 3, 12.0)
+  seq:resetSlot(SLOT)
+
+  local expected = { -1.0, 0.0, 7.0 / 12.0, 1.0 }
+  for r = 0, 3 do
+    seq:tickOnce(SLOT)
+    if not approxEq(seq:heldCV1(SLOT), expected[r + 1], 1e-4) then
+      fail(name, string.format("tick %d: heldCV1 expected %.4f (cv1=0 + tr=%.1f / 12), got %.4f",
+                                r, expected[r + 1],
+                                seq:l1Value(SLOT, COL_TRANSPOSE, r),
+                                seq:heldCV1(SLOT)))
+      return
+    end
+  end
+  pass(name)
+end
+
+-- ---------------------------------------------------------------------------
+-- Test 5f: gate1 + gate2 independence. Author distinct gate1-len /
+-- gate2-len patterns and verify the per-gate firedGateNThisTick flags
+-- flip independently across ticks (no cross-bleed). Slot-level
+-- firedThisTick must mirror the OR of the two flags.
+-- ---------------------------------------------------------------------------
+local function test_gate1_gate2_independent()
+  local name = "gate1-gate2-independent"
+  fullClearSlot(SLOT)
+  for c = 0, 5 do
+    seq:setColumnLength(SLOT, c, 4)
+    seq:setMarkers(SLOT, c, 0, 3)
+  end
+  -- gate1 fires on rows 0 + 2; gate2 fires on rows 1 + 3.
+  seq:setL1(SLOT, COL_GATE1_LEN, 0, 0.25)
+  seq:setL1(SLOT, COL_GATE1_LEN, 1, 0.0)
+  seq:setL1(SLOT, COL_GATE1_LEN, 2, 0.25)
+  seq:setL1(SLOT, COL_GATE1_LEN, 3, 0.0)
+  seq:setL1(SLOT, COL_GATE2_LEN, 0, 0.0)
+  seq:setL1(SLOT, COL_GATE2_LEN, 1, 0.25)
+  seq:setL1(SLOT, COL_GATE2_LEN, 2, 0.0)
+  seq:setL1(SLOT, COL_GATE2_LEN, 3, 0.25)
+  seq:resetSlot(SLOT)
+
+  local expected = {
+    -- {gate1, gate2}
+    { true,  false },  -- tick 0
+    { false, true  },  -- tick 1
+    { true,  false },  -- tick 2
+    { false, true  },  -- tick 3
+  }
+  for i = 1, 4 do
+    seq:tickOnce(SLOT)
+    local g1, g2 = seq:firedGate1ThisTick(SLOT), seq:firedGate2ThisTick(SLOT)
+    if g1 ~= expected[i][1] or g2 ~= expected[i][2] then
+      fail(name, string.format("tick %d: expected gate1=%s gate2=%s, got %s/%s",
+                                i - 1,
+                                tostring(expected[i][1]), tostring(expected[i][2]),
+                                tostring(g1), tostring(g2)))
+      return
+    end
+    local slot = seq:firedThisTick(SLOT)
+    if slot ~= (g1 or g2) then
+      fail(name, string.format("tick %d: firedThisTick (%s) != gate1 OR gate2 (%s)",
+                                i - 1, tostring(slot), tostring(g1 or g2)))
+      return
+    end
+  end
+  pass(name)
+end
+
+-- ---------------------------------------------------------------------------
+-- Test 5g: PRED_FIRE1 + PRED_FIRE2 -- per-gate detector predicates.
+-- L2 rules anchored on CV1 row 0 use PRED_FIRE1 to count gate1 fires
+-- and PRED_FIRE2 to count gate2 fires (each into separate cv2 cells).
+-- After a 4-tick run with the alternating pattern above, gate1 should
+-- have fired exactly twice and gate2 exactly twice.
+-- ---------------------------------------------------------------------------
+local function test_pred_fire1_fire2()
+  local name = "pred-fire1-fire2"
+  fullClearSlot(SLOT)
+  -- CV1: 1-step loop so its L2 cell fires every tick.
+  seq:setColumnLength(SLOT, COL_CV1, 1)
+  seq:setMarkers(SLOT, COL_CV1, 0, 0)
+  -- gate1/gate2: 4-step loops with alternating fire pattern.
+  for _, c in ipairs({ COL_GATE1_LEN, COL_GATE2_LEN }) do
+    seq:setColumnLength(SLOT, c, 4)
+    seq:setMarkers(SLOT, c, 0, 3)
+  end
+  seq:setL1(SLOT, COL_GATE1_LEN, 0, 0.25)
+  seq:setL1(SLOT, COL_GATE1_LEN, 2, 0.25)
+  seq:setL1(SLOT, COL_GATE2_LEN, 1, 0.25)
+  seq:setL1(SLOT, COL_GATE2_LEN, 3, 0.25)
+  -- CV2 pinned 1-step accumulator. Two L2 rules on CV1 row 0:
+  --   PRED_FIRE1 -> ACTION_ADD +1 to CV2[row 0]
+  --   PRED_FIRE2 -> ACTION_ADD +1 to CV2[row 1]
+  -- Since CV1 has length 1, only one L2 cell on CV1 row 0 fires per
+  -- tick. We use CV2 rows 0 and 1 as separate counters by pinning the
+  -- action target row. Set CV2 length 2 to give us two distinct cells.
+  seq:setColumnLength(SLOT, COL_CV2, 2)
+  seq:setMarkers(SLOT, COL_CV2, 0, 1)
+  seq:setL1(SLOT, COL_CV2, 0, 0.0)
+  seq:setL1(SLOT, COL_CV2, 1, 0.0)
+  -- Engine evaluates one L2 cell per (col, row); to count both gates
+  -- we need separate L2 host rows. Park PRED_FIRE2 on CV1 row 0 too
+  -- by hosting it on a different column. Use gate1 row 0 as the host
+  -- for the gate2 counter (gate1 fires every other tick, so this rule
+  -- only evaluates on gate1-fire ticks -- not what we want).
+  -- Simpler: separate L2 hosts via a multi-row CV1 + multi-row CV2
+  -- with explicit targets.
+  -- Instead: collapse to a single-host L2 via two passes. Re-author
+  -- with CV1 length 2 so we get two distinct L2 evals per cycle.
+  seq:clearL2(SLOT, COL_CV1, 0)
+  seq:setColumnLength(SLOT, COL_CV1, 2)
+  seq:setMarkers(SLOT, COL_CV1, 0, 1)
+  seq:setL2(SLOT, COL_CV1, 0,
+            PRED_FIRE1, -1, -1, 0.0,
+            ACTION_ADD, COL_CV2, 0, 1.0)   -- count gate1 fires into CV2[0]
+  seq:setL2(SLOT, COL_CV1, 1,
+            PRED_FIRE2, -1, -1, 0.0,
+            ACTION_ADD, COL_CV2, 1, 1.0)   -- count gate2 fires into CV2[1]
+  seq:resetSlot(SLOT)
+
+  -- Tick 4 times. Pattern: g1=(0,1,2,3), g2=(0,1,2,3).
+  --   tick 0: cv1 row 0 -> PRED_FIRE1; gate1[0]=0.25 fires -> CV2[0]+=1
+  --   tick 1: cv1 row 1 -> PRED_FIRE2; gate2[1]=0.25 fires -> CV2[1]+=1
+  --   tick 2: cv1 row 0 -> PRED_FIRE1; gate1[2]=0.25 fires -> CV2[0]+=1
+  --   tick 3: cv1 row 1 -> PRED_FIRE2; gate2[3]=0.25 fires -> CV2[1]+=1
+  for _ = 1, 4 do seq:tickOnce(SLOT) end
+  local v0, v1 = seq:l1Value(SLOT, COL_CV2, 0), seq:l1Value(SLOT, COL_CV2, 1)
+  if not approxEq(v0, 2.0) then
+    fail(name, string.format("CV2[0] (gate1 count) expected 2.0, got %.3f", v0))
+    return
+  end
+  if not approxEq(v1, 2.0) then
+    fail(name, string.format("CV2[1] (gate2 count) expected 2.0, got %.3f", v1))
     return
   end
   pass(name)
@@ -560,20 +715,24 @@ local function test_l2_row_pinned_predicate()
   seq:setColumnLength(SLOT, COL_CV2, 3)
   seq:setMarkers(SLOT, COL_CV2, 0, 2)
   seq:setL1(SLOT, COL_CV2, 5, 3.0)   -- the pinned cell
-  -- CV3: 1-step accumulator.
-  seq:setColumnLength(SLOT, COL_CV3, 1)
-  seq:setMarkers(SLOT, COL_CV3, 0, 0)
+  -- g1L: 1-step accumulator -- v2 has no cv3, so the test uses g1L's
+  -- numeric storage as the accumulator. Gate semantics still run on
+  -- this column each tick (length-1 g1L value 1.0 = fire gate every
+  -- tick), but the assertion only reads l1Value at row 0.
+  seq:setColumnLength(SLOT, COL_GATE1_LEN, 1)
+  seq:setMarkers(SLOT, COL_GATE1_LEN, 0, 0)
+  seq:setL1(SLOT, COL_GATE1_LEN, 0, 0.0)
   -- L2 on CV1 row 0: PRED_EQ inspecting CV2 PINNED to row 5 == 3.0;
-  -- action +1 to CV3 (playhead-relative).
+  -- action +1 to g1L (playhead-relative).
   seq:setL2(SLOT, COL_CV1, 0,
             PRED_EQ, COL_CV2, 5, 3.0,
-            ACTION_ADD, COL_CV3, -1, 1.0)
+            ACTION_ADD, COL_GATE1_LEN, -1, 1.0)
   for _ = 1, 3 do seq:tickOnce(SLOT) end
   -- Without the pin, evaluate() would read CV2[playhead] = 0 != 3.0
-  -- and never fire -> CV3[0] would stay 0.
-  local v = seq:l1Value(SLOT, COL_CV3, 0)
+  -- and never fire -> g1L[0] would stay 0.
+  local v = seq:l1Value(SLOT, COL_GATE1_LEN, 0)
   if not approxEq(v, 3.0) then
-    fail(name, string.format("expected CV3[0]=3.0 (pinned pred fires each tick), got %.3f", v))
+    fail(name, string.format("expected g1L[0]=3.0 (pinned pred fires each tick), got %.3f", v))
     return
   end
   pass(name)
@@ -668,6 +827,9 @@ test_persistence_roundtrip()
 test_persistence_transport_roundtrip()
 test_tie_legato()
 test_tie_start_no_prior()
+test_transpose_cv1()
+test_gate1_gate2_independent()
+test_pred_fire1_fire2()
 test_l2_row_pinned_predicate()
 test_l2_row_pinned_action()
 test_multislot_independence()

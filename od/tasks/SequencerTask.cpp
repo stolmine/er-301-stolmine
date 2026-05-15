@@ -7,14 +7,18 @@ namespace od {
 
   SequencerTask::SequencerTask() : Task("SequencerTask")
   {
-    own(mSeq1Cv1); own(mSeq1Cv2); own(mSeq1Cv3);
-    own(mSeq1GateLen); own(mSeq1GateAmp); own(mSeq1StepLen);
-    own(mSeq2Cv1); own(mSeq2Cv2); own(mSeq2Cv3);
-    own(mSeq2GateLen); own(mSeq2GateAmp); own(mSeq2StepLen);
-    own(mSeq3Cv1); own(mSeq3Cv2); own(mSeq3Cv3);
-    own(mSeq3GateLen); own(mSeq3GateAmp); own(mSeq3StepLen);
-    own(mSeq4Cv1); own(mSeq4Cv2); own(mSeq4Cv3);
-    own(mSeq4GateLen); own(mSeq4GateAmp); own(mSeq4StepLen);
+    own(mSeq1Cv1); own(mSeq1Cv2);
+    own(mSeq1Gate1Amp); own(mSeq1Gate2Amp);
+    own(mSeq1StepLen); own(mSeq1Transpose);
+    own(mSeq2Cv1); own(mSeq2Cv2);
+    own(mSeq2Gate1Amp); own(mSeq2Gate2Amp);
+    own(mSeq2StepLen); own(mSeq2Transpose);
+    own(mSeq3Cv1); own(mSeq3Cv2);
+    own(mSeq3Gate1Amp); own(mSeq3Gate2Amp);
+    own(mSeq3StepLen); own(mSeq3Transpose);
+    own(mSeq4Cv1); own(mSeq4Cv2);
+    own(mSeq4Gate1Amp); own(mSeq4Gate2Amp);
+    own(mSeq4StepLen); own(mSeq4Transpose);
 
     for (int i = 0; i < sequencer::kNumSlots; ++i) {
       mSlots[i].init(i);
@@ -31,11 +35,14 @@ namespace od {
     const float sampleRate = static_cast<float>(globalConfig.sampleRate);
     const float bpm = sBpm;
 
+    // v2 outlet plumbing. Index order matches the v2 column layout:
+    //   [0] cv1, [1] cv2, [2] gate1Amp, [3] gate2Amp,
+    //   [4] stepLen, [5] transpose.
     Outlet *outs[sequencer::kNumSlots][sequencer::kNumColumns] = {
-      {&mSeq1Cv1, &mSeq1Cv2, &mSeq1Cv3, &mSeq1GateLen, &mSeq1GateAmp, &mSeq1StepLen},
-      {&mSeq2Cv1, &mSeq2Cv2, &mSeq2Cv3, &mSeq2GateLen, &mSeq2GateAmp, &mSeq2StepLen},
-      {&mSeq3Cv1, &mSeq3Cv2, &mSeq3Cv3, &mSeq3GateLen, &mSeq3GateAmp, &mSeq3StepLen},
-      {&mSeq4Cv1, &mSeq4Cv2, &mSeq4Cv3, &mSeq4GateLen, &mSeq4GateAmp, &mSeq4StepLen}
+      {&mSeq1Cv1, &mSeq1Cv2, &mSeq1Gate1Amp, &mSeq1Gate2Amp, &mSeq1StepLen, &mSeq1Transpose},
+      {&mSeq2Cv1, &mSeq2Cv2, &mSeq2Gate1Amp, &mSeq2Gate2Amp, &mSeq2StepLen, &mSeq2Transpose},
+      {&mSeq3Cv1, &mSeq3Cv2, &mSeq3Gate1Amp, &mSeq3Gate2Amp, &mSeq3StepLen, &mSeq3Transpose},
+      {&mSeq4Cv1, &mSeq4Cv2, &mSeq4Gate1Amp, &mSeq4Gate2Amp, &mSeq4StepLen, &mSeq4Transpose}
     };
 
     for (int s = 0; s < sequencer::kNumSlots; ++s) {
@@ -43,10 +50,10 @@ namespace od {
         frameLen,
         outs[s][sequencer::kColCV1]->buffer(),
         outs[s][sequencer::kColCV2]->buffer(),
-        outs[s][sequencer::kColCV3]->buffer(),
-        outs[s][sequencer::kColGateLen]->buffer(),
-        outs[s][sequencer::kColGateAmp]->buffer(),
+        outs[s][sequencer::kColGate1Len]->buffer(),
+        outs[s][sequencer::kColGate2Len]->buffer(),
         outs[s][sequencer::kColStepLen]->buffer(),
+        outs[s][sequencer::kColTranspose]->buffer(),
         bpm, sampleRate);
     }
   }
@@ -147,6 +154,16 @@ namespace od {
   bool SequencerTask::firedThisTick(int slot) const
   {
     return mSlots[clampSlot(slot)].firedThisTick;
+  }
+
+  bool SequencerTask::firedGate1ThisTick(int slot) const
+  {
+    return mSlots[clampSlot(slot)].firedGate1ThisTick;
+  }
+
+  bool SequencerTask::firedGate2ThisTick(int slot) const
+  {
+    return mSlots[clampSlot(slot)].firedGate2ThisTick;
   }
 
   void SequencerTask::seedRng(int slot, unsigned int seed)
@@ -286,24 +303,34 @@ namespace od {
     return mSlots[clampSlot(slot)].heldCV2;
   }
 
-  float SequencerTask::heldCV3(int slot) const
+  float SequencerTask::heldGate1Len(int slot) const
   {
-    return mSlots[clampSlot(slot)].heldCV3;
+    return mSlots[clampSlot(slot)].heldGate1Len;
   }
 
-  float SequencerTask::heldGateLen(int slot) const
+  float SequencerTask::heldGate2Len(int slot) const
   {
-    return mSlots[clampSlot(slot)].heldGateLen;
+    return mSlots[clampSlot(slot)].heldGate2Len;
   }
 
-  float SequencerTask::heldGateAmp(int slot) const
+  float SequencerTask::heldGate1Amp(int slot) const
   {
-    return mSlots[clampSlot(slot)].heldGateAmp;
+    return mSlots[clampSlot(slot)].heldGate1Amp;
+  }
+
+  float SequencerTask::heldGate2Amp(int slot) const
+  {
+    return mSlots[clampSlot(slot)].heldGate2Amp;
   }
 
   float SequencerTask::heldStepLen(int slot) const
   {
     return mSlots[clampSlot(slot)].heldStepLen;
+  }
+
+  float SequencerTask::heldTranspose(int slot) const
+  {
+    return mSlots[clampSlot(slot)].heldTranspose;
   }
 
 } // namespace od

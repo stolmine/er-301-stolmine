@@ -26,21 +26,27 @@ constexpr int kNumColumns        = 6;
 constexpr int kMaxStepsPerColumn = 64;
 constexpr int kPpqn              = 4;  // 1/16-note base tick (locked decision #4)
 
-// Column indices — fixed assignment per the plan's grid layout:
-//   ply1 = cv1, ply2 = cv2, ply3 = cv3,
-//   ply4 = gate-len, ply5 = gate-amp, ply6 = step-len.
-constexpr int kColCV1     = 0;
-constexpr int kColCV2     = 1;
-constexpr int kColCV3     = 2;
-constexpr int kColGateLen = 3;
-constexpr int kColGateAmp = 4;
-constexpr int kColStepLen = 5;
+// Column indices — v2 layout (Milestone B, 2026-05-15):
+//   ply1 = cv1 (V/oct, transpose pre-applied),
+//   ply2 = cv2 (raw modulator),
+//   ply3 = g1L (gate-1 length; amp constant 1.0),
+//   ply4 = g2L (gate-2 length; amp constant 1.0),
+//   ply5 = stL (step-len, host-only),
+//   ply6 = tr  (transpose semitones, meta -- shifts cv1 only).
+// Drops cv3 and gate-amp from the v0.1 layout in favour of an
+// independent second gate and a per-row transpose lane.
+constexpr int kColCV1       = 0;
+constexpr int kColCV2       = 1;
+constexpr int kColGate1Len  = 2;
+constexpr int kColGate2Len  = 3;
+constexpr int kColStepLen   = 4;
+constexpr int kColTranspose = 5;
 
 enum ColumnType : uint8_t {
-  CT_CV       = 0,  // -1..+1 typical, but accepts any float
-  CT_GATE_LEN = 1,  // stored as beats (1.0 = quarter note)
-  CT_GATE_AMP = 2,  // 0..1 typical
-  CT_STEP_LEN = 3   // stored as beats; defines tick spacing
+  CT_CV        = 0,  // -1..+1 typical, but accepts any float
+  CT_GATE_LEN  = 1,  // stored as beats (1.0 = quarter note)
+  CT_STEP_LEN  = 2,  // stored as beats; defines tick spacing
+  CT_TRANSPOSE = 3   // integer semitones (stored as float); pre-applied to cv1
 };
 
 // ---------------------------------------------------------------------------
@@ -69,9 +75,14 @@ enum PredicateOp : uint8_t {
   // Step-1 polish / Step 5 (declared, not yet evaluated):
   PRED_PROBABILITY = 5,  // ? P : true with P% probability per tick
   PRED_APPROX      = 6,  // ~ N : true when colA approx == N
-  PRED_FIRE        = 7,  // ! : detector — did colA fire this tick?
+  PRED_FIRE        = 7,  // ! : detector — did slot fire (either gate) this tick?
   PRED_CHANGED     = 8,  // detector — did colA's value change this tick?
-  PRED_STEP_RANGE  = 9   // @ [a,b] : current step in inclusive range
+  PRED_STEP_RANGE  = 9,  // @ [a,b] : current step in inclusive range
+  // v2 grammar additions (Milestone B): per-gate detectors. PRED_FIRE
+  // stays as the slot-level OR so v0.1 quicksaves keep meaningful
+  // semantics ("any gate fired") after migration.
+  PRED_FIRE1       = 10, // !1 : did gate1 retrigger this tick?
+  PRED_FIRE2       = 11  // !2 : did gate2 retrigger this tick?
 };
 
 enum ActionOp : uint8_t {
@@ -179,42 +190,51 @@ public:
   bool          running          = false;
 
   // Sample-and-hold of column values, refreshed on every tick:
-  float heldCV1     = 0.0f;
-  float heldCV2     = 0.0f;
-  float heldCV3     = 0.0f;
-  float heldGateLen = 0.0f;  // raw beats (from gate-len column at CV1's row)
-  float heldStepLen = 0.0f;  // raw beats (from step-len column's own row)
+  float heldCV1       = 0.0f;  // cv1Raw + heldTranspose / 12 (pre-applied)
+  float heldCV2       = 0.0f;
+  float heldGate1Len  = 0.0f;  // raw beats (>= 3.999 = TIE sentinel)
+  float heldGate2Len  = 0.0f;  // raw beats (>= 3.999 = TIE sentinel)
+  float heldStepLen   = 0.0f;  // raw beats
+  float heldTranspose = 0.0f;  // semitones (int-valued in practice)
 
-  // Gate-amp output is an ENVELOPE, not a plain S&H:
-  //   on tick fire, if the row's gate-amp value > 0 we retrigger:
-  //     gateEnvelopeAmp     = rowValue
-  //     gateRemainingSamples = gateLenBeats * samplesPerBeat
-  //   else we leave the existing envelope counting down.
-  //   On every output sample, emit gateEnvelopeAmp if remaining > 0 else 0.
-  float heldGateAmp        = 0.0f;
-  int   gateRemainingSamples = 0;
+  // Gate outputs are ENVELOPES, not plain S&H:
+  //   on tick fire, if the row's gate-len > 0 we retrigger:
+  //     heldGateNAmp           = 1.0  (v2 amp is constant)
+  //     gateNRemainingSamples  = gateLenBeats * samplesPerBeat
+  //   else we leave the existing envelope counting down. TIE rows
+  //   (gateLen >= kTieThreshold) extend an in-flight gate without
+  //   re-edging (firedGateNThisTick stays false) or start fresh if
+  //   no gate is in flight.
+  float heldGate1Amp = 0.0f;
+  float heldGate2Amp = 0.0f;
+  int   gate1RemainingSamples = 0;
+  int   gate2RemainingSamples = 0;
 
   // Cached at start of processFrame so fireTick() can reach BPM/SR
   float cachedBpm        = 120.0f;
   float cachedSampleRate = 48000.0f;
 
-  // Set true inside fireTick whenever this tick produces a gate EDGE
-  // (gate-amp > 0 at the gate-amp column's own playhead AND the row
-  // isn't extending an in-flight TIE -- TIE-extend preserves the held
-  // gate without re-edging, so firedThisTick stays false there).
-  // Read by PRED_FIRE. Slot-level: the v0.1 layout has a single gate
-  // per slot. When v2 splits gates into g1L/g2L, the dual-gate
-  // detector predicates PRED_FIRE1 / PRED_FIRE2 land alongside this
-  // slot-level "any gate fired" indicator (see plan doc v2 layout).
-  bool firedThisTick = false;
+  // Per-gate "did this tick produce an EDGE on this gate?" flags.
+  // TIE-extend preserves an in-flight gate without re-edging so the
+  // corresponding firedGateNThisTick stays false. firedThisTick is
+  // the slot-level OR of both -- v0.1 PRED_FIRE keeps its
+  // "any gate fired" semantics for back-compat. PRED_FIRE1 /
+  // PRED_FIRE2 (v2 grammar) read the per-gate flags directly.
+  bool firedThisTick      = false;
+  bool firedGate1ThisTick = false;
+  bool firedGate2ThisTick = false;
 
   // ---- audio-thread API ----
-  // Fill `frameLen` samples into each of the 6 output buffers. May fire
-  // 0 or more ticks during this frame. NOT thread-safe; must run on
-  // the audio thread, called by SequencerTask::process.
+  // Fill `frameLen` samples into each of the output buffers. Four are
+  // picker-exposed (cv1, cv2, gate1Amp, gate2Amp); two are internal
+  // (stepLen, transpose) -- present for debug / future tooling but
+  // not registered as picker sources. May fire 0 or more ticks during
+  // this frame. NOT thread-safe; must run on the audio thread,
+  // called by SequencerTask::process.
   void processFrame(int frameLen,
-                    float* cv1, float* cv2, float* cv3,
-                    float* gateLen, float* gateAmp, float* stepLen,
+                    float* cv1, float* cv2,
+                    float* gate1Amp, float* gate2Amp,
+                    float* stepLen, float* transpose,
                     float bpm, float sampleRate);
 
   // ---- bench / Lua API ----
@@ -252,12 +272,13 @@ private:
   int fireTick();
 };
 
-// gate-row resolution (was: TODO). Each column reads from its OWN
-// playhead row, including gate-len and gate-amp. This makes gate emission
-// polymetric in the same way CV1/2/3 and step-len are -- a 2-step
-// gate-amp loop fires gates on every tick (assuming both cells non-zero)
-// while CV1 runs its own 16-step pattern in parallel. PRED_FIRE checks
-// the slot's firedThisTick flag, which is set when gate-amp at its own
-// playhead is non-zero on the current tick.
+// Gate-row resolution: each column reads from its OWN playhead row
+// (cv1, cv2, g1L, g2L, stL, tr all polymetric). PRED_FIRE reads the
+// slot's firedThisTick (any-gate OR); PRED_FIRE1 / PRED_FIRE2 read
+// the per-gate firedGateNThisTick flags directly. Transpose is
+// pre-applied to cv1's sample-and-hold at the top of fireTick so
+// the cv1 audio buffer carries the transposed value -- the UI grid
+// continues to display the un-transposed cv1 cell value for
+// authoring clarity (transpose is its own column to edit).
 
 }}  // namespace od::sequencer

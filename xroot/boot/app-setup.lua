@@ -102,31 +102,31 @@ do
   externalSources["OUT3"] = Source("OUT3", outputTask.mMonitor3)
   externalSources["OUT4"] = Source("OUT4", outputTask.mMonitor4)
 
-  -- Sequencer slots: 4 slots, 4 externally-patchable outputs per slot
-  -- (cv1, cv2, cv3 bipolar; gate unipolar). gate_len and step_len are
-  -- sequencer-internal -- they exist as Outlet members on the engine
-  -- side (and are written to per frame) but are not registered as
-  -- Source.External entries here, so they cannot be wired into a
-  -- chain. Authoring of those values happens in the takeover grid.
-  externalSources["seq1.cv1"]  = Source("seq1.cv1",  sequencerTask.mSeq1Cv1)
-  externalSources["seq1.cv2"]  = Source("seq1.cv2",  sequencerTask.mSeq1Cv2)
-  externalSources["seq1.cv3"]  = Source("seq1.cv3",  sequencerTask.mSeq1Cv3)
-  externalSources["seq1.gate"] = Source("seq1.gate", sequencerTask.mSeq1GateAmp, true)
+  -- Sequencer slots (v2 layout): 4 slots, 4 externally-patchable outputs
+  -- per slot -- cv1 / cv2 bipolar, gate1 / gate2 unipolar. step_len and
+  -- transpose are sequencer-internal (engine Outlets exist + are written
+  -- per frame, but no Source.External registration here). Authoring of
+  -- those internal values happens in the takeover grid. v0.1 had cv3 +
+  -- a single gate; v2 drops cv3 and gate-amp in favour of dual gates.
+  externalSources["seq1.cv1"]   = Source("seq1.cv1",   sequencerTask.mSeq1Cv1)
+  externalSources["seq1.cv2"]   = Source("seq1.cv2",   sequencerTask.mSeq1Cv2)
+  externalSources["seq1.gate1"] = Source("seq1.gate1", sequencerTask.mSeq1Gate1Amp, true)
+  externalSources["seq1.gate2"] = Source("seq1.gate2", sequencerTask.mSeq1Gate2Amp, true)
 
-  externalSources["seq2.cv1"]  = Source("seq2.cv1",  sequencerTask.mSeq2Cv1)
-  externalSources["seq2.cv2"]  = Source("seq2.cv2",  sequencerTask.mSeq2Cv2)
-  externalSources["seq2.cv3"]  = Source("seq2.cv3",  sequencerTask.mSeq2Cv3)
-  externalSources["seq2.gate"] = Source("seq2.gate", sequencerTask.mSeq2GateAmp, true)
+  externalSources["seq2.cv1"]   = Source("seq2.cv1",   sequencerTask.mSeq2Cv1)
+  externalSources["seq2.cv2"]   = Source("seq2.cv2",   sequencerTask.mSeq2Cv2)
+  externalSources["seq2.gate1"] = Source("seq2.gate1", sequencerTask.mSeq2Gate1Amp, true)
+  externalSources["seq2.gate2"] = Source("seq2.gate2", sequencerTask.mSeq2Gate2Amp, true)
 
-  externalSources["seq3.cv1"]  = Source("seq3.cv1",  sequencerTask.mSeq3Cv1)
-  externalSources["seq3.cv2"]  = Source("seq3.cv2",  sequencerTask.mSeq3Cv2)
-  externalSources["seq3.cv3"]  = Source("seq3.cv3",  sequencerTask.mSeq3Cv3)
-  externalSources["seq3.gate"] = Source("seq3.gate", sequencerTask.mSeq3GateAmp, true)
+  externalSources["seq3.cv1"]   = Source("seq3.cv1",   sequencerTask.mSeq3Cv1)
+  externalSources["seq3.cv2"]   = Source("seq3.cv2",   sequencerTask.mSeq3Cv2)
+  externalSources["seq3.gate1"] = Source("seq3.gate1", sequencerTask.mSeq3Gate1Amp, true)
+  externalSources["seq3.gate2"] = Source("seq3.gate2", sequencerTask.mSeq3Gate2Amp, true)
 
-  externalSources["seq4.cv1"]  = Source("seq4.cv1",  sequencerTask.mSeq4Cv1)
-  externalSources["seq4.cv2"]  = Source("seq4.cv2",  sequencerTask.mSeq4Cv2)
-  externalSources["seq4.cv3"]  = Source("seq4.cv3",  sequencerTask.mSeq4Cv3)
-  externalSources["seq4.gate"] = Source("seq4.gate", sequencerTask.mSeq4GateAmp, true)
+  externalSources["seq4.cv1"]   = Source("seq4.cv1",   sequencerTask.mSeq4Cv1)
+  externalSources["seq4.cv2"]   = Source("seq4.cv2",   sequencerTask.mSeq4Cv2)
+  externalSources["seq4.gate1"] = Source("seq4.gate1", sequencerTask.mSeq4Gate1Amp, true)
+  externalSources["seq4.gate2"] = Source("seq4.gate2", sequencerTask.mSeq4Gate2Amp, true)
 
   externalDestinations["OUT1"] = outputTask.mOut1
   externalDestinations["OUT2"] = outputTask.mOut2

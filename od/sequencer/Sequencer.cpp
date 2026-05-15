@@ -27,7 +27,52 @@ int Column::loopMax() const
 }
 
 // ---------------------------------------------------------------------------
-// Slot — stubs for sub-task A. Real bodies land in sub-task B.
+// Gate retrigger helper (file-local). Applies one gate's TIE / retrigger /
+// skip logic in place. v2 layout: gate amplitude is constant 1.0 -- a
+// gate-len value of 0 means "skip row", any value > 0 (up to but below
+// kTieThreshold) means "fire a gate of that length", and >= kTieThreshold
+// means "TIE": extend an in-flight gate by one step (no edge), or start
+// fresh full-step if no gate is in flight.
+// ---------------------------------------------------------------------------
+
+static constexpr float kTieThreshold = 3.999f;
+
+static void fireGate(float heldGateLen, float heldStepLen,
+                     float samplesPerBeat,
+                     float& heldGateAmp, int& gateRemainingSamples,
+                     bool& firedThisGate)
+{
+  firedThisGate = false;
+  if (heldGateLen <= 0.0f) {
+    // Skip row -- existing envelope continues counting down in processFrame.
+    return;
+  }
+  if (heldGateLen >= kTieThreshold) {
+    // TIE: extend-or-start. Refresh remaining to one step's worth.
+    float stepBeats = (heldStepLen > 0.0f) ? heldStepLen : 0.25f;
+    int spt = static_cast<int>(stepBeats * samplesPerBeat);
+    if (spt < 1) spt = 1;
+    if (gateRemainingSamples > 0) {
+      // Extend; no edge, heldGateAmp untouched.
+      gateRemainingSamples = spt;
+    } else {
+      // Fresh start; edge.
+      firedThisGate = true;
+      heldGateAmp = 1.0f;
+      gateRemainingSamples = spt;
+    }
+    return;
+  }
+  // Normal retrigger.
+  firedThisGate = true;
+  heldGateAmp = 1.0f;
+  int n = static_cast<int>(heldGateLen * samplesPerBeat);
+  if (n < 1) n = 1;
+  gateRemainingSamples = n;
+}
+
+// ---------------------------------------------------------------------------
+// Slot
 // ---------------------------------------------------------------------------
 
 Slot::Slot()
@@ -38,8 +83,6 @@ void Slot::init(int slotIdx)
 {
   rng.seed(0xC0FFEE + static_cast<uint32_t>(slotIdx));
 
-  // Column vectors are pre-sized to kMaxStepsPerColumn by Column ctor;
-  // this just resets values in place (no realloc).
   for (int c = 0; c < kNumColumns; ++c) {
     Column& col = columns[c];
     for (int r = 0; r < kMaxStepsPerColumn; ++r) {
@@ -66,97 +109,60 @@ void Slot::init(int slotIdx)
 
   samplesUntilTick = 0;
   running          = false;
-  heldCV1 = heldCV2 = heldCV3 = 0.0f;
-  heldGateLen      = 0.0f;
+  heldCV1 = heldCV2 = 0.0f;
+  heldGate1Len = heldGate2Len = 0.0f;
   heldStepLen      = 0.25f;
-  heldGateAmp      = 0.0f;
-  gateRemainingSamples = 0;
+  heldTranspose    = 0.0f;
+  heldGate1Amp = heldGate2Amp = 0.0f;
+  gate1RemainingSamples = gate2RemainingSamples = 0;
   cachedBpm        = 120.0f;
   cachedSampleRate = 48000.0f;
-  firedThisTick    = false;
+  firedThisTick = firedGate1ThisTick = firedGate2ThisTick = false;
 }
 
 int Slot::fireTick()
 {
-  // Reset per-tick edge flag. PRED_FIRE reads this during step 3
-  // (L2 eval); it'll be set true below if step 2 retriggers the gate.
-  firedThisTick = false;
+  // Reset per-tick edge flags. Set below by fireGate() helpers if step 2
+  // produces an edge. PRED_FIRE reads firedThisTick (slot-level OR);
+  // PRED_FIRE1 / PRED_FIRE2 read the per-gate flags.
+  firedThisTick = firedGate1ThisTick = firedGate2ThisTick = false;
 
   // Capture currentRow per column before any L1/L2 processing or
   // playhead advance. UI getters read currentRow so the displayed
-  // highlight matches the row being emitted THIS tick (= playhead
-  // at the start of fireTick), not the row scheduled for the next
-  // tick (= playhead after advance at the end).
+  // highlight matches the row being emitted THIS tick.
   for (int c = 0; c < kNumColumns; ++c) {
     columns[c].currentRow = columns[c].playhead;
   }
 
-  Column& cv1c     = columns[kColCV1];
-  Column& cv2c     = columns[kColCV2];
-  Column& cv3c     = columns[kColCV3];
-  Column& gateLenC = columns[kColGateLen];
-  Column& gateAmpC = columns[kColGateAmp];
-  Column& stepLenC = columns[kColStepLen];
+  Column& cv1c       = columns[kColCV1];
+  Column& cv2c       = columns[kColCV2];
+  Column& gate1LenC  = columns[kColGate1Len];
+  Column& gate2LenC  = columns[kColGate2Len];
+  Column& stepLenC   = columns[kColStepLen];
+  Column& transposeC = columns[kColTranspose];
 
   // 1. Sample-and-hold from current playhead positions. Every column
-  //    reads from its OWN playhead -- gate-len and gate-amp included --
-  //    so all six columns stay polymetric. An earlier v0.1 working
-  //    assumption read both gate-* values from CV1's playhead; that
-  //    produced "staggered" gate patterns when the user marked a short
-  //    gate-amp loop because gate emission still tracked CV1's long
-  //    loop. See the "gate-row resolution" block at the bottom of
-  //    Sequencer.h for the locked-in semantics.
-  heldCV1     = cv1c.l1[cv1c.playhead].value;
-  heldCV2     = cv2c.l1[cv2c.playhead].value;
-  heldCV3     = cv3c.l1[cv3c.playhead].value;
-  heldGateLen = gateLenC.l1[gateLenC.playhead].value;
-  heldStepLen = stepLenC.l1[stepLenC.playhead].value;
+  //    reads from its OWN playhead -- cv1, cv2, g1L, g2L, stL, tr all
+  //    polymetric. Transpose is pre-applied to cv1's S&H so the cv1
+  //    audio buffer carries the transposed value. The grid view still
+  //    displays the raw cv1 cell so authoring stays clear (transpose
+  //    is its own column to edit).
+  heldTranspose = transposeC.l1[transposeC.playhead].value;
+  heldCV1       = cv1c.l1[cv1c.playhead].value + heldTranspose / 12.0f;
+  heldCV2       = cv2c.l1[cv2c.playhead].value;
+  heldGate1Len  = gate1LenC.l1[gate1LenC.playhead].value;
+  heldGate2Len  = gate2LenC.l1[gate2LenC.playhead].value;
+  heldStepLen   = stepLenC.l1[stepLenC.playhead].value;
 
-  // 2. Gate envelope retrigger.
-  //    If gate-amp at this row is 0, the row "skips" -- existing envelope
-  //    continues counting down. Otherwise we retrigger: amp = new value,
-  //    duration = gateLenBeats * samplesPerBeat.
-  // gate-amp also reads from its own playhead (see gate-len above).
-  //
-  // TIE encoding: a gate-len value at or above kTieThreshold (= top of
-  // the editor's dial range) means "hold gate for this entire step":
-  //   - extend-or-start: if a gate is in flight from a prior tick,
-  //     refresh gateRemainingSamples to samplesPerTick and DO NOT
-  //     re-edge (heldGateAmp / firedThisTick unchanged) so the audio
-  //     stays continuous. If no gate is in flight, START a fresh
-  //     full-step gate (firedThisTick = true) -- TIE on a row with no
-  //     surrounding steps just reads as a full-width gate.
-  //   - kTieThreshold is set tight (3.999) so only the literal dial
-  //     ceiling (4.0) snaps to TIE; UI clamps reinforce this.
-  //   - When gate-amp becomes a constant 1.0 in the v2 layout, this
-  //     logic ports cleanly -- only the gate-len side determines TIE.
-  static constexpr float kTieThreshold = 3.999f;
-  const float rowGateAmp = gateAmpC.l1[gateAmpC.playhead].value;
-  if (rowGateAmp > 0.0f) {
-    const float samplesPerBeat = 60.0f * cachedSampleRate / cachedBpm;
-    if (heldGateLen >= kTieThreshold) {
-      float stepBeats = (heldStepLen > 0.0f) ? heldStepLen : 0.25f;
-      int spt = static_cast<int>(stepBeats * samplesPerBeat);
-      if (spt < 1) spt = 1;
-      if (gateRemainingSamples > 0) {
-        // Extend the held gate; no edge, leave heldGateAmp +
-        // firedThisTick untouched (= false this tick).
-        gateRemainingSamples = spt;
-      } else {
-        // No prior gate -- start a fresh full-step one. Edge.
-        firedThisTick = true;
-        heldGateAmp = rowGateAmp;
-        gateRemainingSamples = spt;
-      }
-    } else {
-      // Normal retrigger.
-      firedThisTick = true;
-      heldGateAmp = rowGateAmp;
-      int n = static_cast<int>(heldGateLen * samplesPerBeat);
-      if (n < 1) n = 1;
-      gateRemainingSamples = n;
-    }
-  }
+  // 2. Gate envelope retrigger -- each gate independently.
+  //    gate-len > 0 fires (amp constant 1.0); >= kTieThreshold is TIE
+  //    (extend-or-start). See fireGate() comment for the full table.
+  const float samplesPerBeat = 60.0f * cachedSampleRate / cachedBpm;
+  fireGate(heldGate1Len, heldStepLen, samplesPerBeat,
+           heldGate1Amp, gate1RemainingSamples, firedGate1ThisTick);
+  fireGate(heldGate2Len, heldStepLen, samplesPerBeat,
+           heldGate2Amp, gate2RemainingSamples, firedGate2ThisTick);
+  firedThisTick = firedGate1ThisTick || firedGate2ThisTick;
 
   // 3. L2 evaluation. For each column whose current playhead row has an
   //    L2 cell with .present=true, evaluate the predicate; if true, apply
@@ -165,8 +171,7 @@ int Slot::fireTick()
   //    captured above) and may queue deferred jumps applied during the
   //    advance step below.
   //
-  //    Evaluation order: column index ascending. Documented as the v0.1
-  //    ordering; revisit if jump actions interact poorly.
+  //    Evaluation order: column index ascending.
   for (int c = 0; c < kNumColumns; ++c) {
     Column& col = columns[c];
     const int row = col.playhead;
@@ -182,8 +187,7 @@ int Slot::fireTick()
   // 3.5. Capture each column's current playhead-row L1 value into
   //      Column::lastTickValue so the NEXT tick's PRED_CHANGED can
   //      compare against it. Runs AFTER L2 actions (step 3) so that
-  //      same-tick L2 mutations register as a "change" on the next
-  //      tick.
+  //      same-tick L2 mutations register as a "change" on the next tick.
   for (int c = 0; c < kNumColumns; ++c) {
     Column& col = columns[c];
     col.lastTickValue = col.l1[col.playhead].value;
@@ -193,7 +197,6 @@ int Slot::fireTick()
   //    emitted. (Default to 1/16 if 0 to avoid hangs from empty cells.)
   float stepLenBeats = heldStepLen;
   if (stepLenBeats <= 0.0f) stepLenBeats = 0.25f;
-  const float samplesPerBeat = 60.0f * cachedSampleRate / cachedBpm;
   int spt = static_cast<int>(stepLenBeats * samplesPerBeat);
   if (spt < 1) spt = 1;
 
@@ -225,75 +228,62 @@ int Slot::fireTick()
 }
 
 void Slot::processFrame(int frameLen,
-                        float* cv1, float* cv2, float* cv3,
-                        float* gateLen, float* gateAmp, float* stepLen,
+                        float* cv1, float* cv2,
+                        float* gate1Amp, float* gate2Amp,
+                        float* stepLen, float* transpose,
                         float bpm, float sampleRate)
 {
   cachedBpm = bpm;
   cachedSampleRate = sampleRate;
 
-  // Convention: CV cell values are stored in VOLTS. ER-301 audio buffers
-  // are normalized so 1.0 maps to +10V at the output jack, hence we
-  // emit cell_volts * 0.1 to the buffer. CV1 typically uses V/oct (1V
-  // per octave), but the engine stays unit-agnostic; the UI does the
-  // note-name conversion. Gate-len / step-len stay in beats (unit-
-  // agnostic float emitted directly). Gate-amp stays in 0..1.
+  // CV cell values are stored in VOLTS. ER-301 audio buffers are
+  // normalized so 1.0 maps to +10V at the output jack, hence we emit
+  // cell_volts * 0.1 to the buffer. CV1 typically uses V/oct (1V per
+  // octave). Gate amps are constant 1.0 when armed; step-len /
+  // transpose buffers are internal-only (not picker-exposed in v2)
+  // but emitted for debug / future tooling.
   static constexpr float kCvOutScale = 0.1f;
 
   if (!running) {
-    // Hold last values; gate envelope drops to silent.
+    // Hold last values; both gate envelopes drop to silent.
     for (int i = 0; i < frameLen; ++i) {
-      cv1[i]     = heldCV1 * kCvOutScale;
-      cv2[i]     = heldCV2 * kCvOutScale;
-      cv3[i]     = heldCV3 * kCvOutScale;
-      gateLen[i] = heldGateLen;
-      gateAmp[i] = 0.0f;
-      stepLen[i] = heldStepLen;
+      cv1[i]       = heldCV1 * kCvOutScale;
+      cv2[i]       = heldCV2 * kCvOutScale;
+      gate1Amp[i]  = 0.0f;
+      gate2Amp[i]  = 0.0f;
+      stepLen[i]   = heldStepLen;
+      transpose[i] = heldTranspose;
     }
     return;
   }
 
-  // Sample-accurate tick scheduling: split the frame at tick
-  // boundaries so a tick that falls mid-frame fires at the right
-  // sample position instead of being delayed to the next frame.
-  // Previously the whole frame held one set of values (the values
-  // captured at the most recent tick before frame start), so any
-  // tick due during the frame was deferred to the next frame start
-  // -- up to one frameLen (~2.67 ms at 48 kHz / 128 samples) of
-  // jitter, audible at fast tick rates.
-  //
-  // Outer loop runs once per intra-frame tick plus once for the
-  // tail. In typical operation that's one or two iterations -- at
-  // 1/16 @ 120 BPM, ticks are ~6000 samples apart vs. 128-sample
-  // frames, so roughly 1 frame in 47 contains a tick boundary.
-  // Inner fill is the same per-sample cost; we just hit it in two
-  // shorter passes when a tick splits the frame.
+  // Sample-accurate tick scheduling: split the frame at tick boundaries.
+  // See the v0.1 comment retained for context -- behaviour unchanged.
   int filled = 0;
   while (filled < frameLen) {
-    // Fire all due ticks before continuing the fill. `while` (not
-    // `if`) handles the pathological case where samplesPerTick is
-    // smaller than the remaining frame budget -- multiple ticks
-    // within one segment.
     while (samplesUntilTick <= 0) {
       const int spt = fireTick();
       samplesUntilTick += spt;
     }
-    // Fill samples up to the next tick boundary or the frame end,
-    // whichever comes first.
     const int remaining = frameLen - filled;
     const int n = (samplesUntilTick < remaining) ? samplesUntilTick : remaining;
     for (int j = 0; j < n; ++j) {
       const int i = filled + j;
-      cv1[i]     = heldCV1 * kCvOutScale;
-      cv2[i]     = heldCV2 * kCvOutScale;
-      cv3[i]     = heldCV3 * kCvOutScale;
-      gateLen[i] = heldGateLen;
-      stepLen[i] = heldStepLen;
-      if (gateRemainingSamples > 0) {
-        gateAmp[i] = heldGateAmp;
-        --gateRemainingSamples;
+      cv1[i]       = heldCV1 * kCvOutScale;
+      cv2[i]       = heldCV2 * kCvOutScale;
+      stepLen[i]   = heldStepLen;
+      transpose[i] = heldTranspose;
+      if (gate1RemainingSamples > 0) {
+        gate1Amp[i] = heldGate1Amp;
+        --gate1RemainingSamples;
       } else {
-        gateAmp[i] = 0.0f;
+        gate1Amp[i] = 0.0f;
+      }
+      if (gate2RemainingSamples > 0) {
+        gate2Amp[i] = heldGate2Amp;
+        --gate2RemainingSamples;
+      } else {
+        gate2Amp[i] = 0.0f;
       }
     }
     filled += n;
@@ -323,13 +313,6 @@ void Slot::setMarkers(int col, int m1, int m2)
 {
   if (col < 0 || col >= kNumColumns) return;
   Column& c = columns[col];
-  // Clamp to engine maximum (kMaxStepsPerColumn), then auto-grow the
-  // column's logical length so the higher of (m1, m2) fits inside it.
-  // Without the grow, default length = 16 silently clamped any marker
-  // past row 15 -- the UI has no separate length control yet, so the
-  // user's mark gesture would just appear to land at row 15 with no
-  // feedback. Length only grows here; shrinking remains the explicit
-  // job of setColumnLength.
   m1 = std::max(0, std::min(m1, kMaxStepsPerColumn - 1));
   m2 = std::max(0, std::min(m2, kMaxStepsPerColumn - 1));
   const int needed = std::max(m1, m2) + 1;
@@ -379,10 +362,11 @@ void Slot::reset()
     columns[c].lastL2FiredRow = -1;
   }
   samplesUntilTick = 0;
-  heldCV1 = heldCV2 = heldCV3 = 0.0f;
-  heldGateAmp = 0.0f;
-  gateRemainingSamples = 0;
-  firedThisTick = false;
+  heldCV1 = heldCV2 = 0.0f;
+  heldTranspose = 0.0f;
+  heldGate1Amp = heldGate2Amp = 0.0f;
+  gate1RemainingSamples = gate2RemainingSamples = 0;
+  firedThisTick = firedGate1ThisTick = firedGate2ThisTick = false;
 }
 
 void Slot::seedRng(uint32_t seed)

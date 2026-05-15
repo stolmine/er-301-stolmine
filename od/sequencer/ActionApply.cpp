@@ -56,50 +56,63 @@ void apply(Slot& slot, const Action& a, int hostCol)
       break;
 
     case ACTION_FIRE: {
-      // Re-arm the gate envelope. Duration = current heldGateLen *
-      // samplesPerBeat using cached BPM / sample-rate. Amp keeps the
-      // current heldGateAmp, falling back to 1.0 when zero so the
-      // action has audible effect even on rows whose own gate-amp is
-      // zero. No targetCol use (gate is slot-level).
-      const float amp = slot.heldGateAmp > 0.0f ? slot.heldGateAmp : 1.0f;
-      slot.heldGateAmp = amp;
-      const float gateLen = slot.heldGateLen > 0.0f ? slot.heldGateLen : 0.0625f;
+      // Re-arm gate1's envelope (the "primary" gate in the v2 layout).
+      // Duration = current heldGate1Len * samplesPerBeat using cached
+      // BPM / sample-rate, with a 0.0625-beat floor when heldGate1Len
+      // is zero so the action stays audible on rows whose own g1L is
+      // zero. Amp constant 1.0 in v2. gate2 is left alone -- L2 rules
+      // that want to retrigger gate2 specifically should use
+      // ACTION_FIRE2 (v2.1 if added) or write the g2L column.
+      slot.heldGate1Amp = 1.0f;
+      const float gateLen = slot.heldGate1Len > 0.0f ? slot.heldGate1Len : 0.0625f;
       const float samplesPerBeat = 60.0f * slot.cachedSampleRate / slot.cachedBpm;
       int n = static_cast<int>(gateLen * samplesPerBeat);
       if (n < 1) n = 1;
-      slot.gateRemainingSamples = n;
+      slot.gate1RemainingSamples = n;
       break;
     }
 
     case ACTION_RAND: {
-      // Column-typed random per Sequencer's column conventions. Matches
-      // the Lua-side randomForColumn in xroot/Sequencer/GridView.lua so
-      // the L2 rand action and the selection-mode RANDOMIZE softkey draw
-      // from the same distributions.
+      // Column-typed random per Sequencer's v2 column conventions.
+      // Mirrors Lua-side randomForColumn in xroot/Sequencer/GridView.lua
+      // so the L2 rand action and the selection-mode RANDOMIZE softkey
+      // draw from matching distributions.
       switch (target) {
-        case 0: {  // CV1 V/oct -- semitone-stepped, -5..+5 octaves
+        case 0: {  // cv1 V/oct -- semitone-stepped, -5..+5 octaves
           std::uniform_int_distribution<int> semi(-60, 60);
           tc.l1[row].value = semi(slot.rng) / 12.0f;
           break;
         }
-        case 1:
-        case 2: {  // CV2 / CV3 raw volts, 0.1 V step in -5..+5 V
+        case 1: {  // cv2 raw volts, 0.1 V step in -5..+5 V
           std::uniform_int_distribution<int> v(-50, 50);
           tc.l1[row].value = v(slot.rng) * 0.1f;
           break;
         }
-        case 3:
-        case 5: {  // gate-len / step-len from the common-fraction set
+        case 2:
+        case 3: {  // g1L / g2L: gate-len common fractions; 4.0 is TIE,
+                   // excluded from the random pool (Step 9 item 20).
           static const float beats[] = {
-            0.0625f, 0.125f, 0.25f, 0.5f, 1.0f, 2.0f, 4.0f
+            0.0625f, 0.125f, 0.25f, 0.5f, 1.0f, 2.0f
           };
-          std::uniform_int_distribution<int> b(0, 6);
+          std::uniform_int_distribution<int> b(0, 5);
           tc.l1[row].value = beats[b(slot.rng)];
           break;
         }
-        case 4: {  // gate-amp 0..1, 0.05 step
-          std::uniform_int_distribution<int> a(0, 20);
-          tc.l1[row].value = a(slot.rng) * 0.05f;
+        case 4: {  // stL: step-len tick counts converted back to beats.
+          static const int ticks[] = { 1, 2, 4, 8, 16, 32 };
+          std::uniform_int_distribution<int> t(0, 5);
+          tc.l1[row].value = ticks[t(slot.rng)] * 0.25f;
+          break;
+        }
+        case 5: {  // tr: transpose semitones from a biased palette
+                   // (zero-weighted, perfect 5ths, octaves).
+          static const float palette[] = {
+            0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+            -12.0f, -7.0f, -5.0f,
+            0.0f, 5.0f, 7.0f, 12.0f
+          };
+          std::uniform_int_distribution<int> p(0, 11);
+          tc.l1[row].value = palette[p(slot.rng)];
           break;
         }
       }

@@ -58,9 +58,19 @@ bool evaluate(Slot& slot, const Predicate& p, int hostCol)
     }
 
     case PRED_FIRE:
-      // Slot-level (per the gate-row TODO model -- there's one gate
-      // per slot, sourced from CV1's playhead row). colA ignored.
+      // Slot-level: ANY gate produced an edge this tick (= OR of
+      // firedGate1ThisTick / firedGate2ThisTick). colA ignored.
+      // Back-compat with v0.1 quicksaves; for gate-specific detection
+      // use PRED_FIRE1 / PRED_FIRE2.
       return slot.firedThisTick;
+
+    case PRED_FIRE1:
+      // gate1 (g1L) produced an edge this tick? colA ignored.
+      return slot.firedGate1ThisTick;
+
+    case PRED_FIRE2:
+      // gate2 (g2L) produced an edge this tick? colA ignored.
+      return slot.firedGate2ThisTick;
 
     case PRED_CHANGED: {
       // Compare the inspected column's current playhead-row value to

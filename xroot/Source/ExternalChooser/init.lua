@@ -42,33 +42,34 @@ local externals = {
     app.getExternalSource("OUT3"),
     app.getExternalSource("OUT4")
   },
-  -- 4 outputs per slot exposed in the picker: cv1, cv2, cv3, gate.
-  -- step_len and gate_len are sequencer-internal (drive the tick clock
-  -- and the gate envelope duration respectively) and are not patchable.
-  -- The full 6 columns still exist in the grid view for authoring.
+  -- 4 outputs per slot exposed in the picker (v2 layout): cv1, cv2,
+  -- gate1, gate2. step_len and transpose are sequencer-internal (drive
+  -- the tick clock and pre-applied cv1 transpose respectively) and are
+  -- not patchable. The full 6 columns still exist in the grid view for
+  -- authoring.
   seq1 = {
     app.getExternalSource("seq1.cv1"),
     app.getExternalSource("seq1.cv2"),
-    app.getExternalSource("seq1.cv3"),
-    app.getExternalSource("seq1.gate")
+    app.getExternalSource("seq1.gate1"),
+    app.getExternalSource("seq1.gate2")
   },
   seq2 = {
     app.getExternalSource("seq2.cv1"),
     app.getExternalSource("seq2.cv2"),
-    app.getExternalSource("seq2.cv3"),
-    app.getExternalSource("seq2.gate")
+    app.getExternalSource("seq2.gate1"),
+    app.getExternalSource("seq2.gate2")
   },
   seq3 = {
     app.getExternalSource("seq3.cv1"),
     app.getExternalSource("seq3.cv2"),
-    app.getExternalSource("seq3.cv3"),
-    app.getExternalSource("seq3.gate")
+    app.getExternalSource("seq3.gate1"),
+    app.getExternalSource("seq3.gate2")
   },
   seq4 = {
     app.getExternalSource("seq4.cv1"),
     app.getExternalSource("seq4.cv2"),
-    app.getExternalSource("seq4.cv3"),
-    app.getExternalSource("seq4.gate")
+    app.getExternalSource("seq4.gate1"),
+    app.getExternalSource("seq4.gate2")
   }
 }
 
