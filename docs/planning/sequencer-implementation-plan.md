@@ -1410,18 +1410,12 @@ implementation phase (step 5).
      File: `xroot/Sequencer/GridView.lua` enterReleased + encoder
      edit-branch when columnCursor is in {3, 4}. ~0.1w.
 
-   - **(23) Hide modal `col` S3 hint on non-cellref slots.** The
-     L2 cell editor's persistent S3 hint chip ("col", item 1) is
-     only meaningful when the focused slot is one of the **cellref**
-     kinds -- M1 (predColA) and M4 (actTarget). On the op slots (M2
-     predOp, M5 actOp) and number slots (M3 predVal, M6 actVal),
-     S3-held + encoder does nothing useful since those slots have no
-     column to cycle. The hint chip should hide on those slots so
-     the user isn't misled into thinking S3 has an effect there.
-     Implementation: subscribe the s3Hint's visibility to slot focus
-     -- show when `kSlotKind[self.slot].kind == "cellref"`, hide
-     otherwise. Refresh on slot-focus changes (M-key press). ~0.05w.
-     File: `xroot/Sequencer/CellEditor.lua`.
+   - **(23) Hide modal `col` S3 hint on non-cellref slots.** ✅
+     Shipped 2026-05-14. `_refresh` sets `s3Hint:setText(...)` to
+     `"col"` when `kSlotKind[focused].kind == "cellref"` (M1
+     predColA, M4 actTarget), empty otherwise. Convention here is
+     blank text rather than `:hide()` since SubButtons stay laid out
+     either way. File: `xroot/Sequencer/CellEditor.lua`.
 
    - **(21) Shift+S3 = clear / zero on the focused cell.** ✅
      Shipped 2026-05-14. Both layers, single-cell clear at

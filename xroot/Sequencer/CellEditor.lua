@@ -531,6 +531,14 @@ function CellEditor:_refresh()
   else
     self.stepChip:setText("")
   end
+
+  -- "col" hint is only meaningful on cell-ref slots (M1 predColA,
+  -- M4 actTarget) -- those are the only places where S3-held +
+  -- encoder cycles the column letter. Blank the chip text on op /
+  -- number slots so it doesn't mislead the user into thinking S3
+  -- does something there. (Empty text is the convention here for a
+  -- SubButton you want to render as nothing, see GridView.)
+  self.s3Hint:setText(kind == "cellref" and "col" or "")
 end
 
 -- ---------------------------------------------------------------------------
