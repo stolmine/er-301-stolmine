@@ -104,6 +104,10 @@ menuItems[#menuItems + 1] = {
   "unifyConfirm"
 }
 menuItems[#menuItems + 1] = {
+  "addVariable",
+  "quickSaveRestoresSequencerTransport"
+}
+menuItems[#menuItems + 1] = {
   "addCategory",
   "Multitrack Recorder"
 }

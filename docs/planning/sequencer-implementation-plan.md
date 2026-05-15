@@ -1380,28 +1380,18 @@ implementation phase (step 5).
      File: `xroot/Sequencer/GridView.lua` mark-modal subReleased
      S3 branch reads `Settings.get("unifyConfirm")`.
 
-   - **(17) Settings toggle: quicksave restores transport state.**
-     Step 3's locked decision force-stops all slots on quicksave
-     load -- the running state is NOT serialized. Add an opt-in:
-     `quickSaveRestoresSequencerTransport` (yes / no, default
-     **no**) as a flat entry under the "Sequencer" subheading (see
-     the "Sequencer settings" section above) -- no dependency on
-     the v2 admin Sequencer page.
-     Plumbing needed:
-       - Engine: a `SequencerTask::isSlotRunning(slot)` getter
-         (`Slot::running` is currently write-only from Lua's POV).
-       - `xroot/Sequencer/Persist.lua` serialize: capture per-slot
-         running flags into the `data.sequencer` table.
-       - `Persist.deserialize`: when the Setting is "yes", call
-         `startSlot` for the slots that were saved running instead
-         of the unconditional `stopSlot`. When "no" (default),
-         keep the current force-stop behaviour.
-       - Bench: extend `test_persistence_roundtrip` to cover the
-         running-state field.
-     Note transport is unified (one S1 toggles all 4) -- a single
-     global bool would suffice today, but serializing per-slot
-     flags keeps the door open for future per-slot transport
-     without a format bump. ~0.15w.
+   - **(17) Settings toggle: quicksave restores transport state.** ✅
+     Shipped 2026-05-14. New Setting
+     `quickSaveRestoresSequencerTransport` (yes / no, default **no**)
+     under the Sequencer subheading. Engine getter
+     `SequencerTask::isSlotRunning(slot)` reads `Slot::running`;
+     `Persist.serialize` writes the per-slot flag unconditionally so
+     flipping the Setting on doesn't need a format bump.
+     `Persist.deserialize` consults the Setting once and restores
+     transport after `resetSlot`. Old quicksaves missing the
+     `running` field load as not-running.
+     **Pending:** bench coverage for the running-state field round-trip
+     in `sequencer_bench.lua` (`test_persistence_roundtrip` extension).
 
    - **(18) Auto-gate fill setting.** When the user authors a value
      in one of the two gate columns (gate-len col 3 / gate-amp col 4)

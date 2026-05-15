@@ -90,6 +90,10 @@ namespace od {
     void startSlot(int slot);
     void stopSlot(int slot);
     void resetSlot(int slot);
+    // Read-side companion to startSlot/stopSlot. Used by quicksave
+    // (Persist.lua) to capture which slots were running so the load
+    // path can optionally restore that transport state.
+    bool isSlotRunning(int slot) const;
     void seedRng(int slot, unsigned int seed);
     int  playhead(int slot, int col) const;
     float l1Value(int slot, int col, int row) const;

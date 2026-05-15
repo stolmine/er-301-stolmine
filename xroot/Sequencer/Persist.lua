@@ -33,7 +33,12 @@ function M.serialize()
 
   local data = { slots = {} }
   for s = 0, kNumSlots - 1 do
-    local slot = { columns = {} }
+    -- Capture per-slot running flag so the load path can optionally
+    -- resume transport (gated by the
+    -- quickSaveRestoresSequencerTransport Setting). Stored
+    -- unconditionally so the format doesn't need to bump if the user
+    -- later flips the Setting on.
+    local slot = { running = seq:isSlotRunning(s), columns = {} }
     for c = 0, kNumColumns - 1 do
       local col = {
         length  = seq:columnLength(s, c),
@@ -79,6 +84,15 @@ end
 function M.deserialize(data)
   local seq = app.AudioThread.getSequencerTask()
   if not (seq and data and data.slots) then return end
+
+  -- Setting gates whether the saved running flag is honored on load.
+  -- Default "no" preserves the locked decision that every quicksave
+  -- load force-stops all slots. Read once outside the slot loop so
+  -- the answer is consistent across slots even if Settings changes
+  -- mid-load (unlikely, but defensive).
+  local Settings = require "Settings"
+  local restoreTransport =
+    (Settings.get("quickSaveRestoresSequencerTransport") == "yes")
 
   for s = 0, kNumSlots - 1 do
     local slot = data.slots[s + 1]
@@ -134,6 +148,16 @@ function M.deserialize(data)
       -- Reset transient state (playhead -> loopMin, passCount=0,
       -- lastTickValue=NaN, lastL2FiredRow=-1, held*=0, etc.).
       seq:resetSlot(s)
+
+      -- Restore transport last so the slot ticks against fully-loaded
+      -- state. Only when the Setting is "yes" and the saved flag was
+      -- true; default-no keeps the legacy force-stop behaviour. Older
+      -- quicksaves missing the `running` field load as not-running
+      -- (the seq:isSlotRunning getter wasn't called when they were
+      -- saved, so the field is absent / nil).
+      if restoreTransport and slot.running then
+        seq:startSlot(s)
+      end
     end
   end
 end

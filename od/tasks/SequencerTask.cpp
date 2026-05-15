@@ -139,6 +139,11 @@ namespace od {
     mSlots[clampSlot(slot)].reset();
   }
 
+  bool SequencerTask::isSlotRunning(int slot) const
+  {
+    return mSlots[clampSlot(slot)].running;
+  }
+
   void SequencerTask::seedRng(int slot, unsigned int seed)
   {
     mSlots[clampSlot(slot)].seedRng(static_cast<uint32_t>(seed));

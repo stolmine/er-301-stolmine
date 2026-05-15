@@ -382,6 +382,19 @@ local defaults = {
       "yes",
       "no"
     }
+  },
+  quickSaveRestoresSequencerTransport = {
+    -- Default "no" preserves the locked decision that quicksave load
+    -- force-stops all slots (so the user always lands in a quiet
+    -- predictable state). "yes" opts into resuming whichever slots
+    -- were saved running -- consult Persist.lua's deserialize path.
+    category = "Sequencer",
+    description = "QuickSave restores sequencer transport state?",
+    value = "no",
+    choices = {
+      "yes",
+      "no"
+    }
   }
 }
 
