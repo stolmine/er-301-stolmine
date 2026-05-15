@@ -98,20 +98,17 @@ int Slot::fireTick()
   Column& gateAmpC = columns[kColGateAmp];
   Column& stepLenC = columns[kColStepLen];
 
-  // 1. Sample-and-hold from current playhead positions.
-  //    Per the v0.1 working assumption (TODO(gate-row) in Sequencer.h),
-  //    gate-len and gate-amp values are read from CV1's playhead row, NOT
-  //    each column's own row. CV outputs and step-len read each column's
-  //    own playhead.
+  // 1. Sample-and-hold from current playhead positions. Every column
+  //    reads from its OWN playhead -- gate-len and gate-amp included --
+  //    so all six columns stay polymetric. An earlier v0.1 working
+  //    assumption read both gate-* values from CV1's playhead; that
+  //    produced "staggered" gate patterns when the user marked a short
+  //    gate-amp loop because gate emission still tracked CV1's long
+  //    loop. See the "gate-row resolution" block at the bottom of
+  //    Sequencer.h for the locked-in semantics.
   heldCV1     = cv1c.l1[cv1c.playhead].value;
   heldCV2     = cv2c.l1[cv2c.playhead].value;
   heldCV3     = cv3c.l1[cv3c.playhead].value;
-  // gate-len reads from its OWN playhead (each column polymetric per
-  // its own loop), matching CV1/CV2/CV3/step-len. The earlier v0.1
-  // working assumption read both gate-* values from CV1's playhead;
-  // that produced "staggered" gate patterns when the user marked a
-  // short gate-amp loop because gate emission still tracked CV1's
-  // long loop. Resolving the gate-row TODO.
   heldGateLen = gateLenC.l1[gateLenC.playhead].value;
   heldStepLen = stepLenC.l1[stepLenC.playhead].value;
 

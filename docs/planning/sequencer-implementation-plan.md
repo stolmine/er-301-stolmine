@@ -1296,10 +1296,13 @@ implementation phase (step 5).
    commitReleased per `xroot/Application.lua:300-305`). Shipped in `ade1f44`.
    **Step 8 done.**
 
-9. ⏳ **Polish + listen test.** _Not started._ Revised estimate
-   **~1.5–2.0 weeks** with the expanded backlog below. Items roughly
-   in priority order; deferable items at the bottom can slip to v1.1
-   if not biting in practice.
+9. ✅ **Polish + listen test.** _v0.1 UI affordances + verification
+   complete (2026-05-15)._ All shipping items below are marked ✅;
+   the engine-refinement batch (8, 9, 11, 22) defers to v1.1, and
+   items 12 + 18 were dropped (not user-facing needs / collapsed
+   under the v2 layout change). Item 10 was resolved pre-v0.1 and
+   its stale TODO comments were cleaned up. **Step 9 closed --
+   v0.1 ready for listen-test phase.**
 
    ### UI affordances
 
@@ -1394,21 +1397,12 @@ implementation phase (step 5).
      Setting paths against the same serialized data; restores the
      user's prior Setting value regardless of pass / fail.
 
-   - **(18) Auto-gate fill setting.** When the user authors a value
-     in one of the two gate columns (gate-len col 3 / gate-amp col 4)
-     on a row, the OTHER gate column on that same row is
-     auto-populated with a sensible default (gate-amp default = 1.0,
-     gate-len default = 1 tick = 0.25 beats). Avoids the common
-     mistake of dialing in gate-amp on a row but leaving gate-len at
-     zero (= silent gate) or vice-versa.
-     New Setting under the Sequencer subheading: `autoGateFill`
-     (yes / no, default **yes**). Hooked into the L1 inline-edit
-     setL1 path only -- bulk-edit, copy/paste, and random ops are
-     not auto-completed (those are intentional batch operations and
-     the user expects exact-write semantics). The L2 modal's view
-     of gate columns is unaffected.
-     File: `xroot/Sequencer/GridView.lua` enterReleased + encoder
-     edit-branch when columnCursor is in {3, 4}. ~0.1w.
+   - **(18) Auto-gate fill setting.** ✗ **Dropped (2026-05-15).**
+     The v2 layout collapses gate-amp into a constant 1.0 and gates
+     are length-only across g1L / g2L. With no separate gate-amp
+     axis the "user dialed amp but forgot len" failure mode goes
+     away. Re-evaluate post-v2 if a g1L/g2L co-authoring helper
+     turns out to be useful, but no v0.1 work needed.
 
    - **(23) Hide modal `col` S3 hint on non-cellref slots.** ✅
      Shipped 2026-05-14. `_refresh` sets `s3Hint:setText(...)` to
@@ -1458,81 +1452,51 @@ implementation phase (step 5).
      Bench: `test_tie_legato` + `test_tie_start_no_prior` cover both
      branches.
 
-   ### Engine + audio refinement
+   ### Engine + audio refinement -- all deferred to v1.1 (2026-05-15)
 
-   - **(8) Audio-thread priority audit for clock stability.**
-     Sequencer task at `INT_MAX - 2`. Measure tick jitter under load
-     (heavy patches + recording). Bump priority if needed. ~0.15w.
+   None of these are correctness blockers for v0.1. Listen-test
+   coverage from hardware sessions has not surfaced audible drift,
+   glitching, or RNG-reproducibility complaints, and the
+   encoder-capture stall (22) only bites above ~75% global CPU
+   where the chain UI is also under stress. Park the engine
+   refinement batch as a v1.1 milestone; revisit after v0.1 ships.
 
-   - **(9) Sample-accurate tick scheduling.** Ticks fire at frame
-     boundaries → up to ~2.6 ms jitter at 48 kHz / 128 samples.
-     Refactor `processFrame` to split frames at tick boundaries.
-     Deferable to v1.1 if not biting. ~0.2w.
+   - **(8) Audio-thread priority audit.** ⏸ v1.1. Measure tick
+     jitter under load; bump task priority if drift shows up.
 
-   - **(10) Gate-row source disambiguation.** Resolve the gate-row
-     TODO at `Sequencer.h:215-220`. v0.1 reads gate-amp from CV1's
-     playhead row; pick final semantics (per-column gate? composite?)
-     and reconcile PRED_FIRE's slot-level scope. ~0.15w.
+   - **(9) Sample-accurate tick scheduling.** ⏸ v1.1. Refactor
+     `processFrame` to split frames at tick boundaries. Up to
+     ~2.6 ms jitter at 48 kHz / 128-sample frames; not audible in
+     practice on hardware so far.
 
-   - **(11) gate-len / gate-amp / step-len under load.** Verify
-     polymetric patterns don't drift, gate envelopes don't glitch.
-     Listen + bench. Deferable to v1.1. ~0.1w.
+   - **(10) Gate-row source disambiguation.** ✅ **Resolved
+     pre-v0.1.** The "gate-row resolution" block in `Sequencer.h`
+     locks in "each column reads from its OWN playhead row" (gate-
+     len + gate-amp both polymetric). fireTick at Sequencer.cpp
+     reflects this; PRED_FIRE stays slot-level for v0.1, with the
+     v2 grammar adding per-gate PRED_FIRE1 / PRED_FIRE2 alongside.
+     2026-05-15: cleaned up the stale "TODO(gate-row)" doc comments
+     in `Sequencer.cpp:101-116` and `Sequencer.h:201-205` to match
+     the resolved state.
 
-   - **(12) RNG reproducibility (locked decision #4).** Pick one:
-     (a) persist seed in quicksave + Settings toggle; (b) explicit
-     re-seed gesture (e.g. shift+HOME outside modals). ~0.1w.
+   - **(11) gate-len / gate-amp / step-len under load.** ⏸ v1.1.
+     Listen test + targeted bench scripts to verify no envelope
+     glitching at tick boundaries under heavy patches.
 
-   - **(22) Encoder-capture stall under CPU load (sequencer-only).**
-     Observed 2026-05-14 on hardware: with global CPU sitting at
-     ~75%, the sequencer takeover starts dropping / coalescing
-     encoder events (visible as encoder rotation that lands but
-     produces no `focusHeadRow` advance, or one big jump after a
-     pause), while the chain-view UI and audio thread remain
-     responsive up to ~95% CPU. Clock + step content output is
-     **unaffected** -- ticks fire on time, gate envelopes are clean,
-     polymetric patterns hold. The asymmetry localizes the issue to
-     the sequencer takeover's UI-thread cost specifically, not the
-     audio-thread DSP path. Candidates to investigate:
-       - `GridView:refresh()` cost. Refresh redraws all six columns
-         every visible-frame regardless of which cells actually
-         changed (cursor anim, scroll easing, ruler-hide pass, fire
-         indicator decay loops). Under load the refresh budget eats
-         into the UI event loop's encoder-poll cadence.
-       - Per-frame fire-indicator probe. The UI calls
-         `SequencerTask::lastL2FiredRow(slot, col)` + `l2FireSerial`
-         once per column per refresh for the fire-dot decay -- that's
-         6 cols * (up to) 60 fps * SWIG-bound C++ getter, on the UI
-         thread. SWIG glue is not free at high frame counts.
-       - Cursor easing. The cursorAnimX / cursorAnimY interpolation
-         keeps refresh "dirty" continuously while a transition is
-         in flight; combined with scroll easing, every encoder tick
-         can keep the view in a multi-frame redraw loop.
-       - Encoder event delivery. The base Window's encoder events
-         are dispatched via the UI thread's run loop; if refresh is
-         taking too long per frame, events queue up and either drop
-         or coalesce on the next `encoder()` invocation. Worth
-         confirming with a frame-time printout vs. encoder-tick
-         arrival rate.
-     Diagnosis path:
-       - Add a frame-time / refresh-duration print under a hidden
-         dev flag and correlate against global CPU.
-       - Try gating `refresh()` work behind a "dirty since last
-         frame" flag so static views are cheap (no animations + no
-         encoder activity = early-out the redraw).
-       - Try caching `lastL2FiredRow` snapshots via a single batched
-         SWIG call (`SequencerTask::snapshotFireIndicators(slot,
-         out[6])`) instead of 6 per-col round-trips.
-       - If refresh cost dominates, consider lowering UI refresh
-         rate inside the sequencer takeover to 30 fps (vs. default
-         60), since the view rarely benefits from full-rate
-         animation -- the cursor and scroll easings are short-lived.
-     Note: this is a polish/perf item, not a correctness bug. Ship
-     v0.1 with this documented as a known limitation if it doesn't
-     bite at typical patch loads; defer the fix to v1.1 if needed.
-     ~0.3w if a single root cause; ~0.5w if multiple compounding.
-     Files: `xroot/Sequencer/GridView.lua` (refresh + animation),
-     `od/tasks/SequencerTask.{h,cpp}` (batched fire-snapshot getter
-     if that's the dominant cost).
+   - **(12) RNG reproducibility.** ✗ **Dropped (2026-05-15).** Not
+     a user-facing need. The locked decision tolerates non-deterministic
+     evolution; nobody has asked for "rewind" or "same seed twice"
+     workflows, and quicksaves capture the L1/L2 state directly
+     anyway. If the workflow ask appears later, path (b) (explicit
+     shift+HOME re-seed gesture) is ~0.1w.
+
+   - **(22) Encoder-capture stall under CPU load.** ⏸ v1.1. Only
+     bites above ~75% global CPU; chain UI is also under stress
+     there. Audio output stays clean (clock + step content
+     unaffected). Diagnosis candidates and instrumentation plan
+     captured in the original entry (see git log for `f4bb076`).
+     Re-open when the listen-test phase produces a patch that
+     pushes the boundary in normal use.
 
    ### Verification
 

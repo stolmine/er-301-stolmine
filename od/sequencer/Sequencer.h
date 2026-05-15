@@ -198,10 +198,14 @@ public:
   float cachedBpm        = 120.0f;
   float cachedSampleRate = 48000.0f;
 
-  // Set true at the top of every fireTick whenever this tick retriggers
-  // the gate (gate-amp > 0 at CV1's playhead row, per the gate-row TODO
-  // model). Read by PRED_FIRE. Slot-level until the per-column gate
-  // resolution lands (Sequencer.h gate-row TODO).
+  // Set true inside fireTick whenever this tick produces a gate EDGE
+  // (gate-amp > 0 at the gate-amp column's own playhead AND the row
+  // isn't extending an in-flight TIE -- TIE-extend preserves the held
+  // gate without re-edging, so firedThisTick stays false there).
+  // Read by PRED_FIRE. Slot-level: the v0.1 layout has a single gate
+  // per slot. When v2 splits gates into g1L/g2L, the dual-gate
+  // detector predicates PRED_FIRE1 / PRED_FIRE2 land alongside this
+  // slot-level "any gate fired" indicator (see plan doc v2 layout).
   bool firedThisTick = false;
 
   // ---- audio-thread API ----
