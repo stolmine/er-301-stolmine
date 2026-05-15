@@ -1401,6 +1401,31 @@ implementation phase (step 5).
      File: `xroot/Sequencer/GridView.lua` enterReleased + encoder
      edit-branch when columnCursor is in {3, 4}. ~0.1w.
 
+   - **(21) Shift+S3 = clear / zero on the focused cell.** Both
+     layers. Today shift+S3 is unbound on the default sub bar (and
+     was previously the layer-toggle shortcut, freed by item 2). Use
+     it for a single-cell clear gesture at `(focusHeadRow,
+     columnCursor)`:
+       - **L1:** writes 0.0 to the cell. Bypasses `setL1`'s edit
+         tracking so the cell doesn't flicker as "dirty" -- it's a
+         zero-write, not a nudge.
+       - **L2:** clears the cell (`L2Cell.present = false`). Same
+         effect as authoring an empty rule via the cell editor's
+         clear gesture, but without entering the modal.
+     Selection-mode overlay rules: when selection is active, shift+S3
+     stays as "coherent rand" (per the post-Step-9 sub-bar table) --
+     the clear-cell gesture only lives on the default sub bar (no
+     selection, no marking). When clipboard non-empty, shift+S3 is
+     still unbound (shift+S1 is paste); clear-cell takes that slot.
+     Distinguishing this from `=0` ACTION on L2: this is a layer-1
+     authoring gesture, not a rule. Authoring an L2 cell as "clear"
+     would mean `present=true, action=ACTION_NONE` -- a no-op rule.
+     Shift+S3 instead removes the cell entirely (sets `present=false`).
+     ~0.05w each layer, ~0.1w total. File:
+     `xroot/Sequencer/GridView.lua` -- add `subPressed` shift+S3
+     branch alongside the existing shift+S1 paste handler; new sub
+     label "clr" when the gesture is active.
+
    - **(20) TIE value at the top of the gate-length step parameter.**
      The first entry in the L1 inline-edit value list for gate-len
      (or below the smallest fractional value if we don't use a
@@ -1448,6 +1473,58 @@ implementation phase (step 5).
      (a) persist seed in quicksave + Settings toggle; (b) explicit
      re-seed gesture (e.g. shift+HOME outside modals). ~0.1w.
 
+   - **(22) Encoder-capture stall under CPU load (sequencer-only).**
+     Observed 2026-05-14 on hardware: with global CPU sitting at
+     ~75%, the sequencer takeover starts dropping / coalescing
+     encoder events (visible as encoder rotation that lands but
+     produces no `focusHeadRow` advance, or one big jump after a
+     pause), while the chain-view UI and audio thread remain
+     responsive up to ~95% CPU. Clock + step content output is
+     **unaffected** -- ticks fire on time, gate envelopes are clean,
+     polymetric patterns hold. The asymmetry localizes the issue to
+     the sequencer takeover's UI-thread cost specifically, not the
+     audio-thread DSP path. Candidates to investigate:
+       - `GridView:refresh()` cost. Refresh redraws all six columns
+         every visible-frame regardless of which cells actually
+         changed (cursor anim, scroll easing, ruler-hide pass, fire
+         indicator decay loops). Under load the refresh budget eats
+         into the UI event loop's encoder-poll cadence.
+       - Per-frame fire-indicator probe. The UI calls
+         `SequencerTask::lastL2FiredRow(slot, col)` + `l2FireSerial`
+         once per column per refresh for the fire-dot decay -- that's
+         6 cols * (up to) 60 fps * SWIG-bound C++ getter, on the UI
+         thread. SWIG glue is not free at high frame counts.
+       - Cursor easing. The cursorAnimX / cursorAnimY interpolation
+         keeps refresh "dirty" continuously while a transition is
+         in flight; combined with scroll easing, every encoder tick
+         can keep the view in a multi-frame redraw loop.
+       - Encoder event delivery. The base Window's encoder events
+         are dispatched via the UI thread's run loop; if refresh is
+         taking too long per frame, events queue up and either drop
+         or coalesce on the next `encoder()` invocation. Worth
+         confirming with a frame-time printout vs. encoder-tick
+         arrival rate.
+     Diagnosis path:
+       - Add a frame-time / refresh-duration print under a hidden
+         dev flag and correlate against global CPU.
+       - Try gating `refresh()` work behind a "dirty since last
+         frame" flag so static views are cheap (no animations + no
+         encoder activity = early-out the redraw).
+       - Try caching `lastL2FiredRow` snapshots via a single batched
+         SWIG call (`SequencerTask::snapshotFireIndicators(slot,
+         out[6])`) instead of 6 per-col round-trips.
+       - If refresh cost dominates, consider lowering UI refresh
+         rate inside the sequencer takeover to 30 fps (vs. default
+         60), since the view rarely benefits from full-rate
+         animation -- the cursor and scroll easings are short-lived.
+     Note: this is a polish/perf item, not a correctness bug. Ship
+     v0.1 with this documented as a known limitation if it doesn't
+     bite at typical patch loads; defer the fix to v1.1 if needed.
+     ~0.3w if a single root cause; ~0.5w if multiple compounding.
+     Files: `xroot/Sequencer/GridView.lua` (refresh + animation),
+     `od/tasks/SequencerTask.{h,cpp}` (batched fire-snapshot getter
+     if that's the dominant cost).
+
    ### Verification
 
    - Multi-slot non-interference under playback (all 4 slots ticking
@@ -1469,15 +1546,20 @@ implementation phase (step 5).
    | Layer | Selection | Marking | Clipboard | Shift | S1 | S2 | S3 |
    |---|---|---|---|---|---|---|---|
    | L1 | No  | No  | Empty     | No  | start\|stop      | mark | L2 |
-   | L1 | No  | No  | Empty     | Yes | —                | BPM  | L2 |
-   | L1 | No  | No  | Non-empty | Yes | paste            | BPM  | L2 |
+   | L1 | No  | No  | Empty     | Yes | —                | BPM  | **clr** |
+   | L1 | No  | No  | Non-empty | Yes | paste            | BPM  | **clr** |
    | L1 | No  | Yes | (any)     | (any) | start\|stop    | end  | — |
    | L1 | Yes | —   | (any)     | No  | copy             | cut  | rand |
    | L1 | Yes | —   | (any)     | Yes | copy             | cut  | coherent rand |
    | L2 | No  | No  | Empty     | No  | start\|stop      | mark | L1 |
-   | L2 | No  | No  | Empty     | Yes | rule preview     | BPM  | L1 |
-   | L2 | No  | No  | Non-empty | Yes | paste + clip preview | BPM | L1 |
+   | L2 | No  | No  | Empty     | Yes | rule preview     | BPM  | **clr** |
+   | L2 | No  | No  | Non-empty | Yes | paste + clip preview | BPM | **clr** |
    | L2 | Yes | —   | (any)     | (any) | copy / cut / rand | | |
+
+   Note: unshifted S3 stays as the layer-toggle (item 2). Shift+S3 is
+   the new cell-clear gesture (item 21) on both L1 and L2 default
+   sub bars. Selection-mode shift+S3 keeps its "coherent rand"
+   binding -- clear-cell only lives on the default bar.
 
 ---
 
