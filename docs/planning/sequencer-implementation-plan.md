@@ -1389,9 +1389,10 @@ implementation phase (step 5).
      flipping the Setting on doesn't need a format bump.
      `Persist.deserialize` consults the Setting once and restores
      transport after `resetSlot`. Old quicksaves missing the
-     `running` field load as not-running.
-     **Pending:** bench coverage for the running-state field round-trip
-     in `sequencer_bench.lua` (`test_persistence_roundtrip` extension).
+     `running` field load as not-running. Bench coverage:
+     `test_persistence_transport_roundtrip` (9th test) exercises both
+     Setting paths against the same serialized data; restores the
+     user's prior Setting value regardless of pass / fail.
 
    - **(18) Auto-gate fill setting.** When the user authors a value
      in one of the two gate columns (gate-len col 3 / gate-amp col 4)

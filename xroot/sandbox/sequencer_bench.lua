@@ -366,6 +366,82 @@ local function fullClearSlot(s)
 end
 
 -- ---------------------------------------------------------------------------
+-- Test 5b: persistence roundtrip -- transport (running) field
+--
+-- Covers the Step 9 item 17 opt-in restore. Two paths:
+--   (a) Setting == "yes": saved-running slot resumes after deserialize.
+--   (b) Setting == "no":  saved-running slot stays stopped (legacy
+--                         force-stop preserved).
+-- Both paths run on the same authored save data so we know the
+-- difference is the Setting, not the data.
+-- ---------------------------------------------------------------------------
+local function test_persistence_transport_roundtrip()
+  local name = "persistence-transport-roundtrip"
+  local Persist = require "Sequencer.Persist"
+  local Settings = require "Settings"
+
+  -- Snapshot the user's current Setting value so the bench is
+  -- non-destructive -- restored at the end regardless of pass / fail.
+  local savedSetting = Settings.get("quickSaveRestoresSequencerTransport")
+
+  local function restore_and_fail(msg)
+    if savedSetting then
+      Settings.set("quickSaveRestoresSequencerTransport", savedSetting)
+    end
+    seq:stopSlot(SLOT)
+    fail(name, msg)
+  end
+
+  -- Author: start the slot so its running flag is captured by serialize.
+  seq:stopSlot(SLOT)
+  fullClearSlot(SLOT)
+  seq:startSlot(SLOT)
+  if not seq:isSlotRunning(SLOT) then
+    restore_and_fail("startSlot did not flip isSlotRunning to true")
+    return
+  end
+
+  local data = Persist.serialize()
+  if not (data and data.slots and data.slots[SLOT + 1]) then
+    restore_and_fail("serialize() returned empty data")
+    return
+  end
+  if data.slots[SLOT + 1].running ~= true then
+    restore_and_fail("serialize did not capture running=true")
+    return
+  end
+
+  -- Path (a): Setting = "yes" -> running resumes after deserialize.
+  Settings.set("quickSaveRestoresSequencerTransport", "yes")
+  seq:stopSlot(SLOT)
+  if seq:isSlotRunning(SLOT) then
+    restore_and_fail("stopSlot did not clear isSlotRunning before path (a)")
+    return
+  end
+  Persist.deserialize(data)
+  if not seq:isSlotRunning(SLOT) then
+    restore_and_fail("Setting=yes: slot did not resume running after deserialize")
+    return
+  end
+
+  -- Path (b): Setting = "no" -> slot stays stopped after deserialize.
+  Settings.set("quickSaveRestoresSequencerTransport", "no")
+  seq:stopSlot(SLOT)
+  Persist.deserialize(data)
+  if seq:isSlotRunning(SLOT) then
+    restore_and_fail("Setting=no: slot resumed running despite opt-out")
+    return
+  end
+
+  -- Leave slot stopped + restore the user's prior Setting choice.
+  seq:stopSlot(SLOT)
+  if savedSetting then
+    Settings.set("quickSaveRestoresSequencerTransport", savedSetting)
+  end
+  pass(name)
+end
+
+-- ---------------------------------------------------------------------------
 -- Test 6: row-pinned predicate. An L2 cell inspects a column PINNED
 -- to a specific row (predColARow >= 0) rather than that column's
 -- playhead. CV2's playhead never reaches the pinned row, so the test
@@ -486,6 +562,7 @@ test_polymetric_5_7()
 test_l2_destructive_write()
 test_l2_phase15_polish()
 test_persistence_roundtrip()
+test_persistence_transport_roundtrip()
 test_l2_row_pinned_predicate()
 test_l2_row_pinned_action()
 test_multislot_independence()
