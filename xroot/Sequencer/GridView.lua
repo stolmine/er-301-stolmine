@@ -1381,20 +1381,36 @@ function GridView:subReleased(i, shifted)
   elseif i == 3 then
     if self.markingMode == "marking_end" then
       -- Unify: apply the in-flight marker pair the user is defining
-      -- on the active column to ALL six columns at once, then exit
-      -- the modal. Immediate-apply (no confirm) for now -- the
-      -- confirmation toggle lands with the admin Sequencer section
-      -- (plan item 16, Tier 3). Destructive: the other columns'
-      -- prior markers are overwritten with no per-column backup.
+      -- on the active column to ALL six columns at once. Destructive
+      -- (the other columns' prior markers are overwritten with no
+      -- per-column backup), so it gates on the `unifyConfirm`
+      -- Setting -- "yes" pops a confirm dialog first, "no" applies
+      -- immediately. The marker pair is snapshotted into the closure
+      -- so a deferred dialog answer can't drift against focusHead.
       local lo = math.min(self.markFirstMark, self.focusHeadRow)
       local hi = math.max(self.markFirstMark, self.focusHeadRow)
-      for c = 0, kNumColumns - 1 do
-        seq:setMarkers(self.slot, c, lo, hi)
+      local function applyUnify()
+        for c = 0, kNumColumns - 1 do
+          seq:setMarkers(self.slot, c, lo, hi)
+        end
+        self.markingMode   = "idle"
+        self.markBackup    = nil
+        self.markFirstMark = nil
+        self:refresh()
       end
-      self.markingMode   = "idle"
-      self.markBackup    = nil
-      self.markFirstMark = nil
-      self:refresh()
+      local Settings = require "Settings"
+      if Settings.get("unifyConfirm") == "yes" then
+        -- "no" answer leaves the mark modal open so the user keeps
+        -- their in-flight marking rather than losing it.
+        local Verification = require "Verification"
+        local dialog = Verification.Sub("Unify markers?", "all 6 columns")
+        dialog:subscribe("done", function(ans)
+          if ans then applyUnify() end
+        end)
+        dialog:show()
+      else
+        applyUnify()
+      end
       return true
     end
     -- Layer toggle: same gesture whether shift is held or not (see

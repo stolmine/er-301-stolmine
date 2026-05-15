@@ -372,6 +372,15 @@ local defaults = {
         app.AudioThread.getSequencerTask():setBpm(n)
       end
     end
+  },
+  unifyConfirm = {
+    category = "Sequencer",
+    description = "Confirm before mark-modal Unify?",
+    value = "yes",
+    choices = {
+      "yes",
+      "no"
+    }
   }
 }
 

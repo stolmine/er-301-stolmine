@@ -93,6 +93,18 @@ menuItems[#menuItems + 1] = {
 }
 menuItems[#menuItems + 1] = {
   "addCategory",
+  "Sequencer"
+}
+menuItems[#menuItems + 1] = {
+  "addVariable",
+  "bpm"
+}
+menuItems[#menuItems + 1] = {
+  "addVariable",
+  "unifyConfirm"
+}
+menuItems[#menuItems + 1] = {
+  "addCategory",
   "Multitrack Recorder"
 }
 menuItems[#menuItems + 1] = {
