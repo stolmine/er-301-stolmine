@@ -412,7 +412,8 @@ function GridView:init(chain)
 
   -- Active grid layer: "L1" shows L1 cell values (per-column formatters);
   -- "L2" shows compact pred:action rules from the L2 grammar layer.
-  -- Toggled via shift+S3 (with shift-overlay label "L2" / "L1" on S3).
+  -- Toggled via unshifted S3; the sub-bar's S3 label always reads the
+  -- OTHER layer so the gesture is discoverable without holding shift.
   -- Phase 1 is read-only on L2: ENTER, shift+encoder selection, paste,
   -- and bulk ops are blocked while layer == "L2". Marking, transport,
   -- and scroll work on both layers since they're layer-agnostic.
@@ -1359,15 +1360,12 @@ function GridView:subReleased(i, shifted)
   -- Shift-overlay bindings:
   --   shift+S1 = paste (only when clipboard is non-empty; see refresh
   --              for the matching label swap on S1)
-  --   shift+S3 = layer toggle (kept on shifted too for muscle memory
-  --              continuity; same gesture as unshifted S3 below).
+  --   shift+S3 = reserved for cell-clear (Step 9 item 21, not yet
+  --              wired). Layer toggle lives on UNSHIFTED S3 only --
+  --              the bar's always-on S3 label is the discoverable
+  --              affordance, so the shifted duplicate is removed.
   if shifted then
     if i == 1 then return self:_pasteAtFocus() end
-    if i == 3 then
-      self.layer = (self.layer == "L1") and "L2" or "L1"
-      self:refresh()
-      return true
-    end
     return false
   end
 
@@ -1445,9 +1443,10 @@ function GridView:subReleased(i, shifted)
       end
       return true
     end
-    -- Layer toggle: same gesture whether shift is held or not (see
-    -- shifted path above), so the bar's S3 label is the discoverable
-    -- always-on affordance.
+    -- Layer toggle: unshifted-S3 only. The bar's S3 label is the
+    -- always-on discoverable affordance (reads the OTHER layer). The
+    -- shifted-S3 duplicate was removed to free that slot for the
+    -- cell-clear gesture (Step 9 item 21).
     self.layer = (self.layer == "L1") and "L2" or "L1"
     self:refresh()
     return true

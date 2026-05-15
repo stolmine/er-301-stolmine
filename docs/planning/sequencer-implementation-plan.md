@@ -1276,11 +1276,13 @@ implementation phase (step 5).
      modal regardless of held state. ~0.05w. File:
      `xroot/Sequencer/CellEditor.lua`.
 
-   - **(2) Always-visible layer toggle on unshifted S3.** Today the
-     L1↔L2 toggle is hidden behind shift+S3. Promote it: unshifted S3
-     always shows the OTHER layer name. Bidirectional, mirrored
-     between L1 and L2 sub bars. ~0.05w. File:
-     `xroot/Sequencer/GridView.lua`.
+   - **(2) Free shift+S3 from the layer toggle.** ✅ Unshifted S3
+     already does the layer toggle (bar always reads the OTHER
+     layer's name as the discoverable affordance). Shift+S3 was a
+     redundant duplicate kept "for muscle memory continuity";
+     removed to free that slot for the cell-clear gesture (item 21).
+     Shipped 2026-05-14. File: `xroot/Sequencer/GridView.lua`
+     subReleased shifted branch.
 
    - **(3) In-takeover BPM control on shift+S2.** BPM is read-only
      inside the takeover today (only editable via admin Settings).
