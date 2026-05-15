@@ -120,14 +120,45 @@ int Slot::fireTick()
   //    continues counting down. Otherwise we retrigger: amp = new value,
   //    duration = gateLenBeats * samplesPerBeat.
   // gate-amp also reads from its own playhead (see gate-len above).
+  //
+  // TIE encoding: a gate-len value at or above kTieThreshold (= top of
+  // the editor's dial range) means "hold gate for this entire step":
+  //   - extend-or-start: if a gate is in flight from a prior tick,
+  //     refresh gateRemainingSamples to samplesPerTick and DO NOT
+  //     re-edge (heldGateAmp / firedThisTick unchanged) so the audio
+  //     stays continuous. If no gate is in flight, START a fresh
+  //     full-step gate (firedThisTick = true) -- TIE on a row with no
+  //     surrounding steps just reads as a full-width gate.
+  //   - kTieThreshold is set tight (3.999) so only the literal dial
+  //     ceiling (4.0) snaps to TIE; UI clamps reinforce this.
+  //   - When gate-amp becomes a constant 1.0 in the v2 layout, this
+  //     logic ports cleanly -- only the gate-len side determines TIE.
+  static constexpr float kTieThreshold = 3.999f;
   const float rowGateAmp = gateAmpC.l1[gateAmpC.playhead].value;
-  firedThisTick = (rowGateAmp > 0.0f);
-  if (firedThisTick) {
-    heldGateAmp = rowGateAmp;
+  if (rowGateAmp > 0.0f) {
     const float samplesPerBeat = 60.0f * cachedSampleRate / cachedBpm;
-    int n = static_cast<int>(heldGateLen * samplesPerBeat);
-    if (n < 1) n = 1;
-    gateRemainingSamples = n;
+    if (heldGateLen >= kTieThreshold) {
+      float stepBeats = (heldStepLen > 0.0f) ? heldStepLen : 0.25f;
+      int spt = static_cast<int>(stepBeats * samplesPerBeat);
+      if (spt < 1) spt = 1;
+      if (gateRemainingSamples > 0) {
+        // Extend the held gate; no edge, leave heldGateAmp +
+        // firedThisTick untouched (= false this tick).
+        gateRemainingSamples = spt;
+      } else {
+        // No prior gate -- start a fresh full-step one. Edge.
+        firedThisTick = true;
+        heldGateAmp = rowGateAmp;
+        gateRemainingSamples = spt;
+      }
+    } else {
+      // Normal retrigger.
+      firedThisTick = true;
+      heldGateAmp = rowGateAmp;
+      int n = static_cast<int>(heldGateLen * samplesPerBeat);
+      if (n < 1) n = 1;
+      gateRemainingSamples = n;
+    }
   }
 
   // 3. L2 evaluation. For each column whose current playhead row has an

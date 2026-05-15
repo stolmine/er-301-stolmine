@@ -433,6 +433,118 @@ local function test_persistence_transport_roundtrip()
 end
 
 -- ---------------------------------------------------------------------------
+-- Test 5c: TIE on gate-len -- legato (extend held gate, no edge).
+--
+-- gate-len 4.0 is the TIE sentinel. A TIE row WITH a gate already in
+-- flight extends gateRemainingSamples to the upcoming step's length
+-- without producing a new edge: heldGateAmp is preserved and
+-- firedThisTick stays false. This is the legato case -- audio output
+-- stays continuous across the TIE row.
+-- ---------------------------------------------------------------------------
+local function test_tie_legato()
+  local name = "tie-legato"
+  fullClearSlot(SLOT)
+  -- 4-step loop on every column. Gate-amp pattern: fire on rows 0/1/2,
+  -- skip row 3. Gate-len pattern: row 0 short, row 1 TIE, row 2 short,
+  -- row 3 zero. Step-len uniform 0.25 so each tick is one /16 note.
+  for c = 0, 5 do
+    seq:setColumnLength(SLOT, c, 4)
+    seq:setMarkers(SLOT, c, 0, 3)
+  end
+  seq:setL1(SLOT, COL_GATE_AMP, 0, 1.0)
+  seq:setL1(SLOT, COL_GATE_AMP, 1, 1.0)
+  seq:setL1(SLOT, COL_GATE_AMP, 2, 1.0)
+  seq:setL1(SLOT, COL_GATE_AMP, 3, 0.0)
+  seq:setL1(SLOT, COL_GATE_LEN, 0, 0.25)
+  seq:setL1(SLOT, COL_GATE_LEN, 1, 4.0)    -- TIE
+  seq:setL1(SLOT, COL_GATE_LEN, 2, 0.25)
+  seq:setL1(SLOT, COL_GATE_LEN, 3, 0.0)
+  for r = 0, 3 do seq:setL1(SLOT, COL_STEP_LEN, r, 0.25) end
+  seq:resetSlot(SLOT)
+
+  -- Tick 0 -- normal fire. Edge expected.
+  seq:tickOnce(SLOT)
+  if not seq:firedThisTick(SLOT) then
+    fail(name, "tick 0: firedThisTick false -- expected fresh fire edge")
+    return
+  end
+  local amp_after_t0 = seq:heldGateAmp(SLOT)
+  if not approxEq(amp_after_t0, 1.0) then
+    fail(name, string.format("tick 0: heldGateAmp expected 1.0, got %f", amp_after_t0))
+    return
+  end
+
+  -- Tick 1 -- TIE row, gate in flight from tick 0. Extend, no edge.
+  seq:tickOnce(SLOT)
+  if seq:firedThisTick(SLOT) then
+    fail(name, "tick 1 (TIE extend): firedThisTick true -- expected no edge")
+    return
+  end
+  if not approxEq(seq:heldGateAmp(SLOT), 1.0) then
+    fail(name, "tick 1 (TIE extend): heldGateAmp drifted -- should be preserved")
+    return
+  end
+
+  -- Tick 2 -- normal fire. Edge expected.
+  seq:tickOnce(SLOT)
+  if not seq:firedThisTick(SLOT) then
+    fail(name, "tick 2: firedThisTick false -- expected fresh fire edge")
+    return
+  end
+
+  -- Tick 3 -- gate-amp 0, no fire.
+  seq:tickOnce(SLOT)
+  if seq:firedThisTick(SLOT) then
+    fail(name, "tick 3 (amp 0): firedThisTick true -- expected skip")
+    return
+  end
+  pass(name)
+end
+
+-- ---------------------------------------------------------------------------
+-- Test 5d: TIE on gate-len -- start-fresh (no prior gate -> full-step).
+--
+-- TIE row WITHOUT a gate in flight starts a fresh full-step gate WITH
+-- an edge: the row reads as a full-width gate when nothing's running.
+-- This is the "no surrounding steps" behaviour the user wants -- a
+-- TIE in isolation just hits gate at amp 1.0 for one step.
+-- ---------------------------------------------------------------------------
+local function test_tie_start_no_prior()
+  local name = "tie-start-no-prior"
+  fullClearSlot(SLOT)
+  for c = 0, 5 do
+    seq:setColumnLength(SLOT, c, 2)
+    seq:setMarkers(SLOT, c, 0, 1)
+  end
+  -- Row 0: no fire (gate-amp 0). Row 1: TIE.
+  seq:setL1(SLOT, COL_GATE_AMP, 0, 0.0)
+  seq:setL1(SLOT, COL_GATE_AMP, 1, 1.0)
+  seq:setL1(SLOT, COL_GATE_LEN, 0, 0.0)
+  seq:setL1(SLOT, COL_GATE_LEN, 1, 4.0)    -- TIE
+  for r = 0, 1 do seq:setL1(SLOT, COL_STEP_LEN, r, 0.25) end
+  seq:resetSlot(SLOT)
+
+  -- Tick 0 -- skip (gate-amp 0). No gate in flight after this tick.
+  seq:tickOnce(SLOT)
+  if seq:firedThisTick(SLOT) then
+    fail(name, "tick 0 (amp 0): firedThisTick true -- expected skip")
+    return
+  end
+
+  -- Tick 1 -- TIE with no prior gate -> fresh full-step fire WITH edge.
+  seq:tickOnce(SLOT)
+  if not seq:firedThisTick(SLOT) then
+    fail(name, "tick 1 (TIE fresh): firedThisTick false -- expected edge for full-width gate")
+    return
+  end
+  if not approxEq(seq:heldGateAmp(SLOT), 1.0) then
+    fail(name, "tick 1 (TIE fresh): heldGateAmp not set to row's amp")
+    return
+  end
+  pass(name)
+end
+
+-- ---------------------------------------------------------------------------
 -- Test 6: row-pinned predicate. An L2 cell inspects a column PINNED
 -- to a specific row (predColARow >= 0) rather than that column's
 -- playhead. CV2's playhead never reaches the pinned row, so the test
@@ -554,6 +666,8 @@ test_l2_destructive_write()
 test_l2_phase15_polish()
 test_persistence_roundtrip()
 test_persistence_transport_roundtrip()
+test_tie_legato()
+test_tie_start_no_prior()
 test_l2_row_pinned_predicate()
 test_l2_row_pinned_action()
 test_multislot_independence()

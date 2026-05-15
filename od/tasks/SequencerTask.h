@@ -94,6 +94,13 @@ namespace od {
     // (Persist.lua) to capture which slots were running so the load
     // path can optionally restore that transport state.
     bool isSlotRunning(int slot) const;
+
+    // Whether the most recent fireTick produced a gate edge on this
+    // slot. Mirrors Slot::firedThisTick. Used by the bench harness to
+    // distinguish "extend held gate" (TIE re-energizing an in-flight
+    // gate) from "edge / new gate event" (TIE starting fresh, or a
+    // normal retrigger).
+    bool firedThisTick(int slot) const;
     void seedRng(int slot, unsigned int seed);
     int  playhead(int slot, int col) const;
     float l1Value(int slot, int col, int row) const;

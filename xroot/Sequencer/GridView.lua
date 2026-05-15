@@ -70,8 +70,13 @@ local function fmtVolts(v)
 end
 
 -- gate-len / step-len: beats. Common musical fractions get clean names.
+-- gate-len's editor caps at 4.0, where the engine treats values at or
+-- above kTieThreshold (3.999) as TIE -- a "hold across this whole step"
+-- sentinel. Render that as "TIE  " ahead of the numeric formatters so
+-- the dial's max position is unmistakable.
 local function fmtBeats(v)
   if v ~= v then return "  NaN" end
+  if v >= 3.999 then return "TIE  " end
   if v < 0.005 then return " 0.00" end
   if math.abs(v - 0.0625) < 0.001 then return "1/16 " end
   if math.abs(v - 0.125)  < 0.001 then return "1/8  " end
@@ -551,6 +556,25 @@ local function stepForColumn(col, editStepMode, shifted)
   return shifted and cfg.superFine or cfg.fine
 end
 
+-- Per-column edit clamps for the inline + bulk encoder edits.
+-- gate-len: [0, 4.0]. 4.0 is the TIE sentinel (engine threshold 3.999);
+--           any newV > 4.0 snaps to exactly 4.0 so dialing up always
+--           lands on TIE cleanly without "overshoot" floats.
+-- step-len: floor at 0.0625 (= "1/16" per fmtBeats) -- the engine's
+--           safety fallback at 0 catches accidents, but preventing
+--           authoring of 0 or negative step-len in the UI is cleaner.
+-- Other columns: pass through unclamped (CV columns have no
+-- hardware-meaningful bounds beyond the audio-buffer scale at output).
+local function clampForColumn(col, newV)
+  if col == 3 then
+    if newV > 4.0 then return 4.0 end
+    if newV < 0.0 then return 0.0 end
+  elseif col == 5 then
+    if newV < 0.0625 then return 0.0625 end
+  end
+  return newV
+end
+
 local function cellBrightness(isPlayhead, isFocus, inLoop)
   if isPlayhead and isFocus then return kBrightBoth end
   if isPlayhead            then return kBrightPlayhead end
@@ -670,7 +694,11 @@ end
 -- distributions match the column's typed range so randomized values
 -- look musically sensible: ±5 octaves for V/oct, ±5 V for raw CV,
 -- common-fraction beats for length columns, 0..1 amplitude for gates.
-local kRandomBeats = { 0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0 }
+-- gate-len random pool stops at 2.0 -- 4.0 would collide with TIE
+-- (sentinel value at the editor's max), and randomly authoring a
+-- legato gate is rarely the intent. Coherent / fill modes can
+-- surface TIE explicitly via dedicated authoring affordances.
+local kRandomBeats = { 0.0625, 0.125, 0.25, 0.5, 1.0, 2.0 }
 -- Step-len draws from integer-tick multiples only. 1 tick = 0.25 beats
 -- at the engine's 4 PPQN. Choices map to 1, 2, 4, 8, 16, 32 ticks --
 -- i.e. 1/16, 1/8, 1/4, 1/2, whole, double-whole notes.
@@ -1518,13 +1546,15 @@ function GridView:encoder(change, shifted)
     local step = stepForColumn(self.columnCursor, self.editStepMode, shifted)
     while self.encoderAccum >= kEncoderThreshold do
       local v = seq:l1Value(self.slot, self.columnCursor, self.focusHeadRow)
-      seq:setL1(self.slot, self.columnCursor, self.focusHeadRow, v + step)
+      seq:setL1(self.slot, self.columnCursor, self.focusHeadRow,
+                clampForColumn(self.columnCursor, v + step))
       self.encoderAccum = self.encoderAccum - kEncoderThreshold
       moved = true
     end
     while self.encoderAccum <= -kEncoderThreshold do
       local v = seq:l1Value(self.slot, self.columnCursor, self.focusHeadRow)
-      seq:setL1(self.slot, self.columnCursor, self.focusHeadRow, v - step)
+      seq:setL1(self.slot, self.columnCursor, self.focusHeadRow,
+                clampForColumn(self.columnCursor, v - step))
       self.encoderAccum = self.encoderAccum + kEncoderThreshold
       moved = true
     end
@@ -1593,7 +1623,7 @@ function GridView:encoder(change, shifted)
     local col    = self.selectionColumn
     local step   = stepForColumn(col, self.editStepMode, false)
     local function applyBulk(delta)
-      local newV = seq:l1Value(self.slot, col, selMin) + delta
+      local newV = clampForColumn(col, seq:l1Value(self.slot, col, selMin) + delta)
       local pre  = self.preEditValues[col]
       local dirty = self.editedCells[col]
       if not pre   then pre   = {}; self.preEditValues[col] = pre end

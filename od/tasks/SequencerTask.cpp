@@ -144,6 +144,11 @@ namespace od {
     return mSlots[clampSlot(slot)].running;
   }
 
+  bool SequencerTask::firedThisTick(int slot) const
+  {
+    return mSlots[clampSlot(slot)].firedThisTick;
+  }
+
   void SequencerTask::seedRng(int slot, unsigned int seed)
   {
     mSlots[clampSlot(slot)].seedRng(static_cast<uint32_t>(seed));

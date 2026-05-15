@@ -1433,28 +1433,30 @@ implementation phase (step 5).
      File: `xroot/Sequencer/GridView.lua` subReleased shifted
      branch + refresh sub-label swap.
 
-   - **(20) TIE value at the top of the gate-length step parameter.**
-     The first entry in the L1 inline-edit value list for gate-len
-     (or below the smallest fractional value if we don't use a
-     fixed list) is a **TIE** sentinel: the gate stays held for the
-     full duration of the step (= legato across that step). When
-     the next gate row fires, the held gate is released and the new
-     one triggers.
-     Encoding: a dedicated sentinel value in the L1 cell (proposed
-     `-1.0` -- negative beats is otherwise meaningless on gate-len).
-     fmtBeats renders the sentinel as `TIE`; the engine's gate
-     envelope logic checks for the sentinel before computing
-     `gateRemainingSamples` and sets the gate to hold-forever (or
-     more practically, to one full samplesPerStep window so the
-     next tick naturally retriggers).
-     Engine: `Slot::fireTick` step 2 already reads `heldGateLen` --
-     special-case the sentinel by setting `gateRemainingSamples` to
-     `samplesPerTick` (i.e. the same value as the upcoming
-     `spt` -- the gate runs the full step). Lua: fmtBeats returns
-     "TIE  " when v < 0, encoder edit clamps at -1 so dialing past
-     zero lands on TIE, randomForColumn doesn't include the
-     sentinel (random gate-lens are positive only).
-     ~0.15w (engine + UI + bench).
+   - **(20) TIE value at the top of the gate-length step parameter.** ✅
+     Shipped 2026-05-14. **Sentinel at the TOP of the range** (not
+     below 0): gate-len 4.0 is the editor ceiling and the engine
+     treats values at or above `kTieThreshold = 3.999` as TIE.
+     Dialing up always lands on exactly 4.0 (clamp), so the
+     "max = TIE" affordance is unmistakable. `fmtBeats` renders the
+     sentinel as `"TIE  "`. Random pool max dropped to 2.0 so
+     random rolls never collide with TIE.
+     Semantics: **extend-or-start**. TIE row with `gate-amp > 0`:
+       - gate in flight (gateRemainingSamples > 0): refresh
+         `gateRemainingSamples = samplesPerTick`, leave heldGateAmp
+         + firedThisTick alone (no edge -- legato).
+       - no gate in flight: start a fresh full-step gate WITH edge
+         (`firedThisTick = true`). A TIE in isolation reads as a
+         full-width gate.
+     Step-len floor: the same edit-clamp helper enforces step-len
+     `>= 0.0625` (= "1/16" per fmtBeats) so the user can no longer
+     author 0 / negative step-len that would hang the playhead. UI
+     fine-step (0.25) makes dial-reachable values ≥ 0.25 in practice.
+     Engine: `od/sequencer/Sequencer.cpp` fireTick step 2.
+     New accessor: `SequencerTask::firedThisTick(int slot) const`
+     for bench coverage (ABI-safe addition).
+     Bench: `test_tie_legato` + `test_tie_start_no_prior` cover both
+     branches.
 
    ### Engine + audio refinement
 
