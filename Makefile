@@ -1,5 +1,13 @@
 # top-level makefile
 
+# Default to parallel build using all available cores. Sub-makes via
+# `+$(MAKE)` inherit the parent's `-j` so the parallelism composes
+# across firmware.mk / app.mk / emu.mk / etc. Override with `make -j1
+# <target>` if a parallel cold-build hiccups (per project memory: this
+# has been seen rarely on fully-cold firmware builds; the workaround
+# is a single re-run, OR fall back to `-j1`).
+MAKEFLAGS += -j$(shell nproc)
+
 # Define all build targets
 BUILD_TARGETS = firmware app-libs app core teletype txo emu
 
