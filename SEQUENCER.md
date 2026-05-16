@@ -3,8 +3,8 @@
 4 concurrent sequencers, each carrying 2 channels of CV and gate,
 independent step length column, and transposition. Each sequencer
 also includes a second layer, which exposes a simple IF > THEN
-framework where rules can be called on individual cells as the
-playhead passes over them. You can find this by entering scope mode
+framework where actions can be called via conditionals on individual cells as the
+playhead passes over them. You can find sequencers by entering scope mode
 and hitting `shift+ENTER`.
 
 ## Quick start
