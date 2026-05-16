@@ -295,7 +295,7 @@ void Slot::setL1(int col, int row, float value)
 {
   if (col < 0 || col >= kNumColumns) return;
   if (row < 0 || row >= kMaxStepsPerColumn) return;
-  columns[col].l1[row].value = value;
+  columns[col].l1[row].value = normalizeL1Value(col, value);
 }
 
 void Slot::setColumnLength(int col, int length)

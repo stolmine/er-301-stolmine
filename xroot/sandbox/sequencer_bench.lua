@@ -916,6 +916,91 @@ local function test_per_gate_fire_actions()
 end
 
 -- ---------------------------------------------------------------------------
+-- Test 5j: transpose column integer-snap on all write paths.
+-- The engine normalizes L1 writes targeting kColTranspose to the
+-- nearest integer semitone, so microtones can't leak in via L2
+-- actions, setL1, or pastes. Verifies setL1 + ACTION_ADD +
+-- ACTION_SET + ACTION_DIV all land integer values on tr.
+-- ---------------------------------------------------------------------------
+local function test_transpose_integer_snap()
+  local name = "transpose-integer-snap"
+  fullClearSlot(SLOT)
+
+  -- (1) setL1 with fractional value rounds to int.
+  seq:setL1(SLOT, COL_TRANSPOSE, 0, 0.4)
+  if seq:l1Value(SLOT, COL_TRANSPOSE, 0) ~= 0.0 then
+    fail(name, string.format("setL1(0.4) expected 0 after snap, got %f",
+                              seq:l1Value(SLOT, COL_TRANSPOSE, 0)))
+    return
+  end
+  seq:setL1(SLOT, COL_TRANSPOSE, 0, 0.5)
+  if seq:l1Value(SLOT, COL_TRANSPOSE, 0) ~= 1.0 then
+    fail(name, string.format("setL1(0.5) expected 1 after snap (round-half-up), got %f",
+                              seq:l1Value(SLOT, COL_TRANSPOSE, 0)))
+    return
+  end
+  seq:setL1(SLOT, COL_TRANSPOSE, 0, -7.4)
+  if seq:l1Value(SLOT, COL_TRANSPOSE, 0) ~= -7.0 then
+    fail(name, string.format("setL1(-7.4) expected -7 after snap, got %f",
+                              seq:l1Value(SLOT, COL_TRANSPOSE, 0)))
+    return
+  end
+  seq:setL1(SLOT, COL_TRANSPOSE, 0, -7.5)
+  if seq:l1Value(SLOT, COL_TRANSPOSE, 0) ~= -8.0 then
+    fail(name, string.format("setL1(-7.5) expected -8 after snap (round-half-away-from-zero), got %f",
+                              seq:l1Value(SLOT, COL_TRANSPOSE, 0)))
+    return
+  end
+
+  -- (2) L2 ACTION_SET on tr with fractional operand snaps.
+  --     cv1 length-1 loop hosts a single L2 cell that always fires.
+  seq:setColumnLength(SLOT, COL_CV1, 1)
+  seq:setMarkers(SLOT, COL_CV1, 0, 0)
+  seq:setL1(SLOT, COL_TRANSPOSE, 0, 0)  -- reset
+  seq:setColumnLength(SLOT, COL_TRANSPOSE, 1)
+  seq:setMarkers(SLOT, COL_TRANSPOSE, 0, 0)
+  seq:setL2(SLOT, COL_CV1, 0,
+            PRED_PROBABILITY, -1, -1, 100.0,
+            ACTION_SET, COL_TRANSPOSE, -1, 7.6)
+  seq:resetSlot(SLOT)
+  seq:tickOnce(SLOT)
+  if seq:l1Value(SLOT, COL_TRANSPOSE, 0) ~= 8.0 then
+    fail(name, string.format("ACTION_SET 7.6 on tr expected 8 after snap, got %f",
+                              seq:l1Value(SLOT, COL_TRANSPOSE, 0)))
+    return
+  end
+
+  -- (3) L2 ACTION_ADD with fractional accumulates to integer state
+  --     after each tick (so repeated fractional ADDs don't drift).
+  seq:setL1(SLOT, COL_TRANSPOSE, 0, 0)
+  seq:setL2(SLOT, COL_CV1, 0,
+            PRED_PROBABILITY, -1, -1, 100.0,
+            ACTION_ADD, COL_TRANSPOSE, -1, 1.4)
+  seq:resetSlot(SLOT)
+  for _ = 1, 3 do seq:tickOnce(SLOT) end
+  -- Each tick: stored value + 1.4, then snap. 0+1.4=1.4 -> 1. 1+1.4=2.4 -> 2.
+  -- 2+1.4=3.4 -> 3. Without per-tick snap, sum would be 4.2 -> 4.
+  local v = seq:l1Value(SLOT, COL_TRANSPOSE, 0)
+  if v ~= 3.0 then
+    fail(name, string.format("3x ACTION_ADD 1.4 with per-tick snap expected 3, got %f", v))
+    return
+  end
+
+  -- (4) heldCV1 reflects the snapped transpose -- not the raw operand.
+  seq:setL1(SLOT, COL_CV1, 0, 0.0)
+  seq:setL1(SLOT, COL_TRANSPOSE, 0, 12.0)
+  for r = 0, 0 do seq:clearL2(SLOT, COL_CV1, r) end
+  seq:resetSlot(SLOT)
+  seq:tickOnce(SLOT)
+  if not approxEq(seq:heldCV1(SLOT), 1.0) then
+    fail(name, string.format("heldCV1 with tr=12 expected 1.0 V/oct, got %.4f",
+                              seq:heldCV1(SLOT)))
+    return
+  end
+  pass(name)
+end
+
+-- ---------------------------------------------------------------------------
 -- Test 6: row-pinned predicate. An L2 cell inspects a column PINNED
 -- to a specific row (predColARow >= 0) rather than that column's
 -- playhead. CV2's playhead never reaches the pinned row, so the test
@@ -1048,6 +1133,7 @@ test_transpose_cv1()
 test_gate1_gate2_independent()
 test_pred_fire1_fire2()
 test_per_gate_fire_actions()
+test_transpose_integer_snap()
 test_l2_row_pinned_predicate()
 test_l2_row_pinned_action()
 test_multislot_independence()

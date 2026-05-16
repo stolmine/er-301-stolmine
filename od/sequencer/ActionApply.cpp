@@ -19,26 +19,30 @@ void apply(Slot& slot, const Action& a, int hostCol)
                   ? a.targetRow
                   : tc.playhead;
 
+  // Normalize after every arithmetic write so columns with stricter
+  // typing (currently just kColTranspose -> integer semitones) can't
+  // be smuggled fractional by an L2 action. Other columns pass through
+  // unchanged.
   switch (a.op) {
     case ACTION_ADD:
-      tc.l1[row].value += a.operand;
+      tc.l1[row].value = normalizeL1Value(target, tc.l1[row].value + a.operand);
       break;
 
     case ACTION_SUB:
-      tc.l1[row].value -= a.operand;
+      tc.l1[row].value = normalizeL1Value(target, tc.l1[row].value - a.operand);
       break;
 
     case ACTION_SET:
-      tc.l1[row].value = a.operand;
+      tc.l1[row].value = normalizeL1Value(target, a.operand);
       break;
 
     case ACTION_MUL:
-      tc.l1[row].value *= a.operand;
+      tc.l1[row].value = normalizeL1Value(target, tc.l1[row].value * a.operand);
       break;
 
     case ACTION_DIV:
       if (a.operand != 0.0f) {
-        tc.l1[row].value /= a.operand;
+        tc.l1[row].value = normalizeL1Value(target, tc.l1[row].value / a.operand);
       }
       break;
 

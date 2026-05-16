@@ -57,6 +57,28 @@ struct L1Cell {
   float value = 0.0f;
 };
 
+// Per-column write normalizer. tr (transpose) snaps to the nearest
+// integer semitone -- microtones aren't expressive enough to justify
+// the off-grid drift, the UI clamp already snaps interactive edits
+// to ints, and L2 actions / pastes would otherwise sneak fractional
+// values in (e.g. ACTION_DIV with a non-integer divisor). Other
+// columns pass through unchanged.
+inline float normalizeL1Value(int col, float v) {
+  if (col == kColTranspose) {
+    // floor(x + 0.5) round, NaN-safe (NaN > 0 is false, NaN < 0 is
+    // false, so NaN falls through to 0.0 -- acceptable for a hidden
+    // sentinel that should never reach storage anyway).
+    if (v != v) return 0.0f;
+    if (v >= 0.0f) {
+      float n = (float)((int)(v + 0.5f));
+      return n;
+    }
+    float n = (float)(-(int)(-v + 0.5f));
+    return n;
+  }
+  return v;
+}
+
 // ---------------------------------------------------------------------------
 // L2 grammar — predicate : action
 //
