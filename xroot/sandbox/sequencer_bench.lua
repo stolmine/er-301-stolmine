@@ -45,6 +45,8 @@ local ACTION_SET   = 3
 local ACTION_FIRE  = 6
 local ACTION_RAND  = 7
 local ACTION_MUTE  = 8
+local ACTION_FIRE1 = 12
+local ACTION_FIRE2 = 13
 
 -- Column indices (v2 layout), mirroring od/sequencer/Sequencer.h
 local COL_CV1        = 0
@@ -864,6 +866,56 @@ local function test_pred_fire1_fire2()
 end
 
 -- ---------------------------------------------------------------------------
+-- Test 5i: ACTION_FIRE1 + ACTION_FIRE2 -- per-gate retrigger actions.
+-- L2 rules with all-fires-true predicates author ACTION_FIRE1 on
+-- cv1 row 0 and ACTION_FIRE2 on cv1 row 1. Both gate columns'
+-- own gate-len rows are 0 (no natural fires), so any gate envelope
+-- activity must come from the L2 actions.
+-- ---------------------------------------------------------------------------
+local function test_per_gate_fire_actions()
+  local name = "per-gate-fire-actions"
+  fullClearSlot(SLOT)
+  -- cv1: 2-step host so we hit both L2 rules across the 2-tick run.
+  seq:setColumnLength(SLOT, COL_CV1, 2)
+  seq:setMarkers(SLOT, COL_CV1, 0, 1)
+  -- gate-len columns kept at 0 so no natural fires steal the
+  -- assertion target.
+  seq:setColumnLength(SLOT, COL_GATE1_LEN, 2)
+  seq:setMarkers(SLOT, COL_GATE1_LEN, 0, 1)
+  seq:setColumnLength(SLOT, COL_GATE2_LEN, 2)
+  seq:setMarkers(SLOT, COL_GATE2_LEN, 0, 1)
+  -- L2 row 0 -> ACTION_FIRE1 (gate1); row 1 -> ACTION_FIRE2 (gate2).
+  seq:setL2(SLOT, COL_CV1, 0,
+            PRED_PROBABILITY, -1, -1, 100.0,
+            ACTION_FIRE1, -1, -1, 0.0)
+  seq:setL2(SLOT, COL_CV1, 1,
+            PRED_PROBABILITY, -1, -1, 100.0,
+            ACTION_FIRE2, -1, -1, 0.0)
+  seq:resetSlot(SLOT)
+
+  -- Tick 0 -- cv1 row 0 -> ACTION_FIRE1 hits gate1.
+  seq:tickOnce(SLOT)
+  if not approxEq(seq:heldGate1Amp(SLOT), 1.0) then
+    fail(name, string.format("tick 0: heldGate1Amp expected 1.0 after ACTION_FIRE1, got %.3f",
+                              seq:heldGate1Amp(SLOT)))
+    return
+  end
+  if not approxEq(seq:heldGate2Amp(SLOT), 0.0) then
+    fail(name, "tick 0: heldGate2Amp drifted -- ACTION_FIRE1 should not touch gate2")
+    return
+  end
+
+  -- Tick 1 -- cv1 row 1 -> ACTION_FIRE2 hits gate2.
+  seq:tickOnce(SLOT)
+  if not approxEq(seq:heldGate2Amp(SLOT), 1.0) then
+    fail(name, string.format("tick 1: heldGate2Amp expected 1.0 after ACTION_FIRE2, got %.3f",
+                              seq:heldGate2Amp(SLOT)))
+    return
+  end
+  pass(name)
+end
+
+-- ---------------------------------------------------------------------------
 -- Test 6: row-pinned predicate. An L2 cell inspects a column PINNED
 -- to a specific row (predColARow >= 0) rather than that column's
 -- playhead. CV2's playhead never reaches the pinned row, so the test
@@ -995,6 +1047,7 @@ test_quicksave_v1_to_v2_migration()
 test_transpose_cv1()
 test_gate1_gate2_independent()
 test_pred_fire1_fire2()
+test_per_gate_fire_actions()
 test_l2_row_pinned_predicate()
 test_l2_row_pinned_action()
 test_multislot_independence()

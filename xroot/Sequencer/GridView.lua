@@ -122,16 +122,18 @@ end
 -- a centered em-dash, present cells show truncated "pred:action".
 local kColLetters    = { "A", "B", "C", "D", "E", "F" }
 local kPredSymbolMap = {
-  [0] = "",      -- PRED_NONE (absent shown as em-dash by caller)
-  [1] = "%",     -- PRED_MODULO
-  [2] = "=",     -- PRED_EQ
-  [3] = ">",     -- PRED_GT
-  [4] = "<",     -- PRED_LT
-  [5] = "?",     -- PRED_PROBABILITY
-  [6] = "~",     -- PRED_APPROX
-  [7] = "!",     -- PRED_FIRE  (no operand)
-  [8] = "c",     -- PRED_CHANGED (no operand)
-  [9] = "@",     -- PRED_STEP_RANGE
+  [0]  = "",     -- PRED_NONE (absent shown as em-dash by caller)
+  [1]  = "%",    -- PRED_MODULO
+  [2]  = "=",    -- PRED_EQ
+  [3]  = ">",    -- PRED_GT
+  [4]  = "<",    -- PRED_LT
+  [5]  = "?",    -- PRED_PROBABILITY
+  [6]  = "~",    -- PRED_APPROX
+  [7]  = "!",    -- PRED_FIRE  (slot-level OR, no operand)
+  [8]  = "c",    -- PRED_CHANGED (no operand)
+  [9]  = "@",    -- PRED_STEP_RANGE
+  [10] = "!1",   -- PRED_FIRE1 (gate1 edge, no operand)
+  [11] = "!2",   -- PRED_FIRE2 (gate2 edge, no operand)
 }
 local kPredHasVal = {
   [1] = true, [2] = true, [3] = true, [4] = true,
@@ -144,20 +146,24 @@ local kActSymbolMap = {
   [3]  = "=",    -- ACTION_SET
   [4]  = "*",    -- ACTION_MUL
   [5]  = "/",    -- ACTION_DIV
-  [6]  = "!",    -- ACTION_FIRE (no operand)
+  [6]  = "!",    -- ACTION_FIRE (v0.1 alias for ACTION_FIRE1, no operand)
   [7]  = "?",    -- ACTION_RAND (no operand)
   [8]  = "M",    -- ACTION_MUTE (no operand)
   [9]  = "j",    -- ACTION_JUMP_THIS  (operand = row)
   [10] = "J",    -- ACTION_JUMP_GLOBAL
   [11] = ".",    -- ACTION_JUMP_SELF
+  [12] = "!1",   -- ACTION_FIRE1 (retrigger gate1, no operand)
+  [13] = "!2",   -- ACTION_FIRE2 (retrigger gate2, no operand)
 }
 local kActHasVal = {
   [1] = true, [2] = true, [3] = true, [4] = true, [5] = true,
   [9] = true, [10] = true, [11] = true,
 }
 local kActHasTgt = {
+  -- Actions that mutate a target column. FIRE / FIRE1 / FIRE2 are
+  -- slot-level (no column target), so they're absent from this map.
   [1] = true, [2] = true, [3] = true, [4] = true, [5] = true,
-  [6] = true, [7] = true, [8] = true,
+  [7] = true, [8] = true,
 }
 
 local function fmtNum(v)

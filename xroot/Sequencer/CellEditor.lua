@@ -32,9 +32,11 @@ local PRED_GT          = 3
 local PRED_LT          = 4
 local PRED_PROBABILITY = 5
 local PRED_APPROX      = 6
-local PRED_FIRE        = 7
+local PRED_FIRE        = 7   -- ! : slot-level (any-gate OR)
 local PRED_CHANGED     = 8
 -- PRED_STEP_RANGE (9) deferred (needs operand2).
+local PRED_FIRE1       = 10  -- !1 : gate1 edge this tick
+local PRED_FIRE2       = 11  -- !2 : gate2 edge this tick
 
 local ACTION_NONE        = 0
 local ACTION_ADD         = 1
@@ -42,21 +44,31 @@ local ACTION_SUB         = 2
 local ACTION_SET         = 3
 local ACTION_MUL         = 4
 local ACTION_DIV         = 5
-local ACTION_FIRE        = 6
+local ACTION_FIRE        = 6   -- ! : v0.1 alias for ACTION_FIRE1 (hits gate1)
 local ACTION_RAND        = 7
 local ACTION_MUTE        = 8
 local ACTION_JUMP_THIS   = 9
 local ACTION_JUMP_GLOBAL = 10
 local ACTION_JUMP_SELF   = 11
+local ACTION_FIRE1       = 12  -- !1 : retrigger gate1 (explicit)
+local ACTION_FIRE2       = 13  -- !2 : retrigger gate2
 
--- Cyclic option lists for the choice slots.
+-- Cyclic option lists for the choice slots. PRED_FIRE / FIRE1 / FIRE2
+-- all surface separately so the user can author slot-level "any gate"
+-- detection alongside per-gate detection. On the action side, the
+-- bare ACTION_FIRE is omitted from the cycle (functionally identical
+-- to ACTION_FIRE1); v0.1 quicksaves with ACTION_FIRE still render
+-- as "!" and execute correctly, but new authoring lands on FIRE1/2.
 local kPredOpList = {
   PRED_MODULO, PRED_EQ, PRED_GT, PRED_LT,
-  PRED_PROBABILITY, PRED_APPROX, PRED_FIRE, PRED_CHANGED,
+  PRED_PROBABILITY, PRED_APPROX,
+  PRED_FIRE, PRED_FIRE1, PRED_FIRE2,
+  PRED_CHANGED,
 }
 local kActOpList = {
   ACTION_ADD, ACTION_SUB, ACTION_SET, ACTION_MUL, ACTION_DIV,
-  ACTION_FIRE, ACTION_RAND, ACTION_MUTE,
+  ACTION_FIRE1, ACTION_FIRE2,
+  ACTION_RAND, ACTION_MUTE,
   ACTION_JUMP_THIS, ACTION_JUMP_GLOBAL, ACTION_JUMP_SELF,
 }
 
@@ -69,6 +81,8 @@ local kPredSymbol = {
   [PRED_PROBABILITY] = "?",
   [PRED_APPROX]      = "~",
   [PRED_FIRE]        = "!",
+  [PRED_FIRE1]       = "!1",
+  [PRED_FIRE2]       = "!2",
   [PRED_CHANGED]     = "c",
 }
 local kActSymbol = {
@@ -77,7 +91,9 @@ local kActSymbol = {
   [ACTION_SET]         = "=",
   [ACTION_MUL]         = "*",
   [ACTION_DIV]         = "/",
-  [ACTION_FIRE]        = "!",
+  [ACTION_FIRE]        = "!",   -- legacy v0.1 render (engine == gate1)
+  [ACTION_FIRE1]       = "!1",
+  [ACTION_FIRE2]       = "!2",
   [ACTION_RAND]        = "?",
   [ACTION_MUTE]        = "M",
   [ACTION_JUMP_THIS]   = "j",
@@ -93,33 +109,42 @@ local kColLetters = { "A", "B", "C", "D", "E", "F" }
 
 -- Returns true when the M1 (predColA) slot should render "-" and skip
 -- focus. Modulo / probability ignore colA (slot-level / not used);
--- fire is the slot-level gate detector so colA doesn't apply.
+-- the gate-fire detectors (FIRE / FIRE1 / FIRE2) are slot-level and
+-- don't inspect a column either.
 local function predColASkipped(predOp)
   return predOp == PRED_MODULO
       or predOp == PRED_PROBABILITY
       or predOp == PRED_FIRE
+      or predOp == PRED_FIRE1
+      or predOp == PRED_FIRE2
 end
 
 -- Returns true when the M3 (predOperand) slot should render "-".
 local function predOperandSkipped(predOp)
   return predOp == PRED_FIRE
+      or predOp == PRED_FIRE1
+      or predOp == PRED_FIRE2
       or predOp == PRED_CHANGED
 end
 
 -- M4 (action target) is forced for the jump family (jumps target a
--- fixed scope: self / global) and the slot-level FIRE action.
+-- fixed scope: self / global) and the gate-fire actions (slot-level).
 local function actTargetSkipped(actOp)
   return actOp == ACTION_FIRE
+      or actOp == ACTION_FIRE1
+      or actOp == ACTION_FIRE2
       or actOp == ACTION_JUMP_THIS
       or actOp == ACTION_JUMP_GLOBAL
       or actOp == ACTION_JUMP_SELF
 end
 
 -- M6 (action operand) skips for ops that act on the target without
--- a numeric operand: FIRE retriggers gate, RAND draws randomly,
--- MUTE zeroes the target cell.
+-- a numeric operand: FIRE retriggers gate (1 / 2), RAND draws
+-- randomly, MUTE zeroes the target cell.
 local function actOperandSkipped(actOp)
   return actOp == ACTION_FIRE
+      or actOp == ACTION_FIRE1
+      or actOp == ACTION_FIRE2
       or actOp == ACTION_RAND
       or actOp == ACTION_MUTE
 end
@@ -201,7 +226,9 @@ local kPredTpl = {
   [PRED_LT]          = "%s < %s",
   [PRED_PROBABILITY] = "%s%% chance",
   [PRED_APPROX]      = "%s near %s",
-  [PRED_FIRE]        = "gate fires",
+  [PRED_FIRE]        = "any gate fires",
+  [PRED_FIRE1]       = "gate1 fires",
+  [PRED_FIRE2]       = "gate2 fires",
   [PRED_CHANGED]     = "%s change",
 }
 local kActTpl = {
@@ -210,7 +237,9 @@ local kActTpl = {
   [ACTION_SET]         = "%s = %s",
   [ACTION_MUL]         = "%s *= %s",
   [ACTION_DIV]         = "%s /= %s",
-  [ACTION_FIRE]        = "retrigger gate",
+  [ACTION_FIRE]        = "retrigger gate1",  -- legacy alias (= ACTION_FIRE1)
+  [ACTION_FIRE1]       = "retrigger gate1",
+  [ACTION_FIRE2]       = "retrigger gate2",
   [ACTION_RAND]        = "randomize %s",
   [ACTION_MUTE]        = "mute %s",
   [ACTION_JUMP_THIS]   = "host -> %s",

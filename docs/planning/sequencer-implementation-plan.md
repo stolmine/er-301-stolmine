@@ -936,22 +936,37 @@ Grid headers swap globally to the new schema: `cv1 cv2 g1L g2L stL tr`.
   random (Step 9 item 6) draws from the column's distinct values
   as usual.
 
-### L2 grammar additions for dual gates
+### L2 grammar additions for dual gates (shipped 2026-05-15)
 
-With two independent gate-length columns (g1L, g2L), the existing
-slot-level `PRED_FIRE` (`!`) is no longer expressive enough -- a rule
-that wants to detect "gate 1 fired this tick" can't distinguish it
-from "gate 2 fired this tick" via the slot-level firedThisTick flag.
-v2 introduces two new predicate ops:
+With two independent gate-length columns (g1L, g2L), the L2 grammar
+gains per-gate detector predicates AND per-gate retrigger actions so
+rules can both LISTEN for and TARGET an individual gate.
+
+**Predicates:**
 
 | op | symbol | meaning |
 |---|---|---|
+| `PRED_FIRE`  | `!`  | slot-level OR -- did EITHER gate fire this tick? |
 | `PRED_FIRE1` | `!1` | gate 1 (g1L) retriggered this tick |
 | `PRED_FIRE2` | `!2` | gate 2 (g2L) retriggered this tick |
 
-`PRED_FIRE` (`!`) stays as the slot-level "any gate fired this tick"
-detector -- backward-compatible alias for v0.1 quicksaves and a useful
-"any-gate" trigger in its own right.
+`PRED_FIRE` (`!`) stays as the slot-level "any gate fired" detector --
+backward-compatible alias for v0.1 quicksaves and a useful "any-gate"
+trigger in its own right.
+
+**Actions:**
+
+| op | symbol | meaning |
+|---|---|---|
+| `ACTION_FIRE`  | `!`  | retrigger gate1 (v0.1 alias; same as ACTION_FIRE1) |
+| `ACTION_FIRE1` | `!1` | retrigger gate1 (v2 explicit name) |
+| `ACTION_FIRE2` | `!2` | retrigger gate2 |
+
+`ACTION_FIRE` (= 6) stays in the engine for v0.1 quicksave back-compat
+and shares its branch with `ACTION_FIRE1` (both arm gate1). The cell
+editor's authoring cycle surfaces only `!1` / `!2` -- no bare `!`
+since it's functionally identical to `!1`. v0.1 cells with `!` still
+render and execute correctly on load (engine path unchanged).
 
 Engine surface:
 
@@ -963,10 +978,9 @@ bool firedGate2ThisTick = false;
 // firedThisTick stays the OR of these two for the legacy PRED_FIRE.
 ```
 
-Cell editor: `kPredSymbol` gains entries for `PRED_FIRE1` /
-`PRED_FIRE2` (rendered as `!1` and `!2`); the predicate-op cycle
-on M2 includes them between `!` and `~`. No new operand needed
-(both are detectors, like `!`).
+Bench coverage: `test_pred_fire1_fire2` (per-gate detector predicates)
++ `test_per_gate_fire_actions` (per-gate retrigger actions). 16/16
+PASS after the cycle additions land.
 
 ### L2 column-letter remap
 

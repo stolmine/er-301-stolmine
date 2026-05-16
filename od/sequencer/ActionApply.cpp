@@ -55,20 +55,32 @@ void apply(Slot& slot, const Action& a, int hostCol)
       }
       break;
 
-    case ACTION_FIRE: {
-      // Re-arm gate1's envelope (the "primary" gate in the v2 layout).
-      // Duration = current heldGate1Len * samplesPerBeat using cached
-      // BPM / sample-rate, with a 0.0625-beat floor when heldGate1Len
-      // is zero so the action stays audible on rows whose own g1L is
-      // zero. Amp constant 1.0 in v2. gate2 is left alone -- L2 rules
-      // that want to retrigger gate2 specifically should use
-      // ACTION_FIRE2 (v2.1 if added) or write the g2L column.
+    case ACTION_FIRE:
+    case ACTION_FIRE1: {
+      // Re-arm gate1's envelope. Duration = current heldGate1Len *
+      // samplesPerBeat using cached BPM / sample-rate, with a
+      // 0.0625-beat floor when heldGate1Len is zero so the action
+      // stays audible on rows whose own g1L is zero. Amp constant 1.0
+      // in v2. ACTION_FIRE (= 6) is the v0.1 back-compat alias; v2
+      // authoring uses ACTION_FIRE1 (= 12). Both land here.
       slot.heldGate1Amp = 1.0f;
       const float gateLen = slot.heldGate1Len > 0.0f ? slot.heldGate1Len : 0.0625f;
       const float samplesPerBeat = 60.0f * slot.cachedSampleRate / slot.cachedBpm;
       int n = static_cast<int>(gateLen * samplesPerBeat);
       if (n < 1) n = 1;
       slot.gate1RemainingSamples = n;
+      break;
+    }
+
+    case ACTION_FIRE2: {
+      // Re-arm gate2's envelope. Symmetric to gate1: 0.0625-beat floor
+      // when heldGate2Len is zero. Amp constant 1.0.
+      slot.heldGate2Amp = 1.0f;
+      const float gateLen = slot.heldGate2Len > 0.0f ? slot.heldGate2Len : 0.0625f;
+      const float samplesPerBeat = 60.0f * slot.cachedSampleRate / slot.cachedBpm;
+      int n = static_cast<int>(gateLen * samplesPerBeat);
+      if (n < 1) n = 1;
+      slot.gate2RemainingSamples = n;
       break;
     }
 

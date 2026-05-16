@@ -94,12 +94,18 @@ enum ActionOp : uint8_t {
   // Step-1 polish / Step 5 (declared, not yet applied):
   ACTION_MUL         = 4,  // *N
   ACTION_DIV         = 5,  // /N
-  ACTION_FIRE        = 6,  // ! : retrigger gate (semantics TODO, see plan)
+  ACTION_FIRE        = 6,  // ! : retrigger gate1 (v0.1 alias; v2 saves use ACTION_FIRE1 explicitly)
   ACTION_RAND        = 7,  // ? : set to random
   ACTION_MUTE        = 8,
   ACTION_JUMP_THIS   = 9,  // n : jump THIS column's playhead to row n
   ACTION_JUMP_GLOBAL = 10, // *n : jump ALL columns' playheads to row n
-  ACTION_JUMP_SELF   = 11  // .n : jump own column to row n (== JUMP_THIS for L2)
+  ACTION_JUMP_SELF   = 11, // .n : jump own column to row n (== JUMP_THIS for L2)
+  // v2 grammar additions (Milestone B): per-gate retrigger.
+  // ACTION_FIRE = 6 stays as the back-compat alias for "fire gate1".
+  // v0.1 quicksaves with ACTION_FIRE keep working; v2 authoring uses
+  // the explicit FIRE1 / FIRE2 names cycled in the cell editor.
+  ACTION_FIRE1       = 12, // !1 : retrigger gate1 (explicit)
+  ACTION_FIRE2       = 13  // !2 : retrigger gate2
 };
 
 struct Predicate {
