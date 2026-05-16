@@ -237,9 +237,9 @@ local kActTpl = {
   [ACTION_SET]         = "%s = %s",
   [ACTION_MUL]         = "%s *= %s",
   [ACTION_DIV]         = "%s /= %s",
-  [ACTION_FIRE]        = "retrigger gate1",  -- legacy alias (= ACTION_FIRE1)
-  [ACTION_FIRE1]       = "retrigger gate1",
-  [ACTION_FIRE2]       = "retrigger gate2",
+  [ACTION_FIRE]        = "retrig gate1",  -- legacy alias (= ACTION_FIRE1)
+  [ACTION_FIRE1]       = "retrig gate1",
+  [ACTION_FIRE2]       = "retrig gate2",
   [ACTION_RAND]        = "randomize %s",
   [ACTION_MUTE]        = "mute %s",
   [ACTION_JUMP_THIS]   = "host -> %s",
