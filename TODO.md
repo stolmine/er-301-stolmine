@@ -129,38 +129,88 @@ Open questions (resolve before coding):
 Dependencies: multi-output framework is shipped (7d99be1). No C++ ABI work
 expected — all fan-out affordances already live in Lua + LocalChooser.
 
-## Chain UI: Replace Picker Opens in Favorites-Tagging Mode (pre-release fix)
-Two related issues with the unit picker invoked from the chain UI's
-**replace** facility. Fix both before next release.
+## Chain UI: Replace Picker Opens in Favorites-Tagging Mode (target: .9.2.1)
+Two related quality-of-life bugs in the unit picker invoked from the
+chain UI's **replace** facility. Investigation 2026-05-16 mapped both
+to exact file:line evidence below; share a common entry point
+(`ring:toggleFavoritesEditMode()`).
 
-1. **Replace lands in tagging mode instead of normal picker.** When
-   the user invokes "replace" on an existing unit (currently it's
-   shift+ENTER on the unit, then the picker is presented to choose
-   the replacement), the picker comes up already in favorites-tagging
-   mode -- shift-state appears to be sticky / carried through from
-   the gesture that invoked replace. Should land in the normal
-   browse mode; tagging is a separate operation gated by holding
-   shift inside the picker, not on entry.
-   Likely cause: the entry path through `xroot/Chain/ChainView.lua`
-   (or similar) into the picker passes a state flag (or leaves the
-   shift-pressed state observable to the picker on construction),
-   and the picker honors it for the initial mode. Path to walk:
-   `xroot/Unit/Browser/init.lua` or `xroot/UnitPicker/init.lua` ctor
-   + the replace entry-point in chain view.
+### 1. Replace lands in tagging mode instead of normal browse
 
-2. **Exiting favorites-tagging mode feels sluggish vs. entering.**
-   Press shift -> instant tagging mode swap. Release shift -> there's
-   a perceptible lag before the picker reverts to browse mode. Either
-   the release handler is debounced harder than the press, or the
-   picker is doing extra refresh work on the exit path (re-filtering
-   the unit list, re-sorting recents, redraw of the full grid) that
-   the entry path doesn't do.
-   Worth a frame-time trace through `shiftReleased` in the picker
-   view vs. `shiftPressed` to see what's asymmetric.
+When the user invokes "replace" on a chain unit (shift + M3 in the
+header sub-menu), the unit picker opens already in favorites-tagging
+mode. User has to release shift to get out of tagging before they can
+pick a replacement.
 
-Both are quality-of-life bugs, neither blocks anything, but
-they're cumulatively annoying enough that they belong on the
-pre-release-fix list.
+**Mechanism**:
+1. `xroot/Unit/ViewControl/Header.lua:243-255` (`subReleased`) does
+   NOT check the `shifted` parameter before dispatching
+   `doCommand("Replace")` -- unlike `spotReleased` at lines 157-158
+   in the same file, which does filter shifted.
+2. `doReplace` at `Header.lua:212-218` shows the `UnitChooser`. Shift
+   is still physically held at this moment.
+3. `xroot/Unit/Chooser/Default.lua` has `shiftReleased` (line
+   424-427) but **no `shiftPressed`**. When the input system
+   processes the picker's first refresh, the shift-held state
+   surfaces as a `shiftReleased` event (since the press had no
+   handler to consume the transition).
+4. `shiftReleased` calls `ring:toggleFavoritesEditMode()` -> picker
+   enters tagging mode on first display.
+
+**Surgical fix (one line)**: add an empty `shiftPressed` handler to
+`Default.lua` that consumes the event:
+```lua
+function Chooser:shiftPressed()
+  return true
+end
+```
+
+**Alternative**: at `Header.lua:subReleased`, add `if shifted then
+return false end` at the top, consistent with the existing
+`spotReleased` pattern.
+
+### 2. Exiting favorites-tagging mode feels sluggish
+
+Press shift -> instant tagging-mode swap. Release shift -> perceptible
+lag before the picker reverts to browse mode.
+
+**Mechanism (asymmetry)**:
+- **Enter** tagging (`xroot/Unit/Chooser/init.lua:148-156`): updates
+  text labels + panel state. No list work. Instant.
+- **Exit** tagging (`init.lua:157-172`): calls
+  `saveFavoritesIfDirty()` (synchronous file I/O on the rear card) +
+  `refresh()` on **both** `categoric` AND `alphabetic` choosers, not
+  just the visible one.
+
+`refresh()` at `Default.lua:169-261` is heavy: clears the list,
+iterates `Factory.getCategories()` + `Factory.getUnits()`, re-sorts,
+rebuilds the category hierarchy, calls `mlist:updateLayout()` (a
+SWIG'd C++ call that triggers a redraw).
+
+**Root causes**:
+1. Synchronous file I/O on the input handler.
+2. Both choosers refreshed instead of just the visible one.
+3. Full rebuild instead of an in-place "fix favorites borders" pass.
+
+**Surgical fix**: refresh only the visible chooser, defer file save:
+```lua
+-- init.lua exit branch
+if self.current == self.categoric then self.categoric:refresh() end
+if self.current == self.alphabetic then self.alphabetic:refresh() end
+-- Schedule file save via Timer.after(0, ...) instead of inline.
+```
+
+**Bigger but better**: cache category/alphabet trees, only update
+borders/colors of favorited items (similar pattern to `choose()` at
+`Default.lua:374-380`) instead of full rebuild. Drops both costs to
+near-zero.
+
+### Cross-cutting
+
+Fixing Bug 1 (so toggle doesn't fire on picker init) reduces Bug 2's
+perceived frequency but doesn't fix the underlying sluggishness when
+the user does deliberately enter and exit tagging. Both fixes should
+land in the same .9.2.1 patch.
 
 ## Encoder Capture Under UI Saturation
 In certain states the system reaches CPU saturation and encoder input becomes
