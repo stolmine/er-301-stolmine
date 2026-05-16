@@ -129,6 +129,39 @@ Open questions (resolve before coding):
 Dependencies: multi-output framework is shipped (7d99be1). No C++ ABI work
 expected — all fan-out affordances already live in Lua + LocalChooser.
 
+## Chain UI: Replace Picker Opens in Favorites-Tagging Mode (pre-release fix)
+Two related issues with the unit picker invoked from the chain UI's
+**replace** facility. Fix both before next release.
+
+1. **Replace lands in tagging mode instead of normal picker.** When
+   the user invokes "replace" on an existing unit (currently it's
+   shift+ENTER on the unit, then the picker is presented to choose
+   the replacement), the picker comes up already in favorites-tagging
+   mode -- shift-state appears to be sticky / carried through from
+   the gesture that invoked replace. Should land in the normal
+   browse mode; tagging is a separate operation gated by holding
+   shift inside the picker, not on entry.
+   Likely cause: the entry path through `xroot/Chain/ChainView.lua`
+   (or similar) into the picker passes a state flag (or leaves the
+   shift-pressed state observable to the picker on construction),
+   and the picker honors it for the initial mode. Path to walk:
+   `xroot/Unit/Browser/init.lua` or `xroot/UnitPicker/init.lua` ctor
+   + the replace entry-point in chain view.
+
+2. **Exiting favorites-tagging mode feels sluggish vs. entering.**
+   Press shift -> instant tagging mode swap. Release shift -> there's
+   a perceptible lag before the picker reverts to browse mode. Either
+   the release handler is debounced harder than the press, or the
+   picker is doing extra refresh work on the exit path (re-filtering
+   the unit list, re-sorting recents, redraw of the full grid) that
+   the entry path doesn't do.
+   Worth a frame-time trace through `shiftReleased` in the picker
+   view vs. `shiftPressed` to see what's asymmetric.
+
+Both are quality-of-life bugs, neither blocks anything, but
+they're cumulatively annoying enough that they belong on the
+pre-release-fix list.
+
 ## Encoder Capture Under UI Saturation
 In certain states the system reaches CPU saturation and encoder input becomes
 effectively unresponsive — encoder movement is still *queued*, but so far

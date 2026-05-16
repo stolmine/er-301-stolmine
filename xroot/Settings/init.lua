@@ -357,6 +357,44 @@ local defaults = {
       "0.3s",
       "0.5s"
     }
+  },
+  bpm = {
+    -- Hidden from the System Settings UI (see Settings/Interface.lua)
+    -- since BPM is set inside the sequencer takeover via shift+S2
+    -- latch + encoder. The entry still exists in defaults so the
+    -- saved BPM persists across reboot via the standard Settings
+    -- load path -- onSet pushes it into the engine on boot.
+    category = "Sequencer",
+    description = "Global BPM:",
+    value = "120",
+    onSet = function(value)
+      local n = tonumber(value)
+      if n then
+        app.AudioThread.getSequencerTask():setBpm(n)
+      end
+    end
+  },
+  unifyConfirm = {
+    category = "Sequencer",
+    description = "Confirm before mark-modal Unify?",
+    value = "yes",
+    choices = {
+      "yes",
+      "no"
+    }
+  },
+  quickSaveRestoresSequencerTransport = {
+    -- Default "no" preserves the locked decision that quicksave load
+    -- force-stops all slots (so the user always lands in a quiet
+    -- predictable state). "yes" opts into resuming whichever slots
+    -- were saved running -- consult Persist.lua's deserialize path.
+    category = "Sequencer",
+    description = "QuickSave restores transport state?",
+    value = "no",
+    choices = {
+      "yes",
+      "no"
+    }
   }
 }
 

@@ -134,6 +134,15 @@ function ScopeView:enterReleased()
   return true
 end
 
+-- shift+ENTER dispatches as commitReleased via Application.lua. Enters
+-- the sequencer sub-view per locked decision in
+-- docs/planning/sequencer-implementation-plan.md ("Access paths").
+function ScopeView:commitReleased()
+  local Channels = require "Channels"
+  Channels.toggleSequencerSubView()
+  return true
+end
+
 function ScopeView:upReleased(shifted)
   if self.ptr:up() then
     self:onSelectionChanged()

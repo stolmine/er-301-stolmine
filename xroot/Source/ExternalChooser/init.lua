@@ -41,6 +41,35 @@ local externals = {
     app.getExternalSource("OUT2"),
     app.getExternalSource("OUT3"),
     app.getExternalSource("OUT4")
+  },
+  -- 4 outputs per slot exposed in the picker (v2 layout): cv1, cv2,
+  -- gate1, gate2. step_len and transpose are sequencer-internal (drive
+  -- the tick clock and pre-applied cv1 transpose respectively) and are
+  -- not patchable. The full 6 columns still exist in the grid view for
+  -- authoring.
+  seq1 = {
+    app.getExternalSource("seq1.cv1"),
+    app.getExternalSource("seq1.cv2"),
+    app.getExternalSource("seq1.gate1"),
+    app.getExternalSource("seq1.gate2")
+  },
+  seq2 = {
+    app.getExternalSource("seq2.cv1"),
+    app.getExternalSource("seq2.cv2"),
+    app.getExternalSource("seq2.gate1"),
+    app.getExternalSource("seq2.gate2")
+  },
+  seq3 = {
+    app.getExternalSource("seq3.cv1"),
+    app.getExternalSource("seq3.cv2"),
+    app.getExternalSource("seq3.gate1"),
+    app.getExternalSource("seq3.gate2")
+  },
+  seq4 = {
+    app.getExternalSource("seq4.cv1"),
+    app.getExternalSource("seq4.cv2"),
+    app.getExternalSource("seq4.gate1"),
+    app.getExternalSource("seq4.gate2")
   }
 }
 
@@ -60,6 +89,10 @@ function ExternalChooser:init(ring)
   self:addSourceGroup("Dx", externals["Dx"])
   self:addSourceGroup("Gx", externals["Gx"])
   self:addSourceGroup("OUTx", externals["OUTx"])
+  self:addSourceGroup("seq1", externals["seq1"])
+  self:addSourceGroup("seq2", externals["seq2"])
+  self:addSourceGroup("seq3", externals["seq3"])
+  self:addSourceGroup("seq4", externals["seq4"])
 end
 
 function ExternalChooser:addSourceGroup(name, sources)

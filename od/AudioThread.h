@@ -2,6 +2,7 @@
 
 #include <od/tasks/InputTask.h>
 #include <od/tasks/OutputTask.h>
+#include <od/tasks/SequencerTask.h>
 #include <od/objects/measurement/FifoProbe.h>
 
 namespace od
@@ -19,6 +20,7 @@ namespace od
 
     static InputTask *getInputTask();
     static OutputTask *getOutputTask();
+    static SequencerTask *getSequencerTask();
 
     static void connect(Outlet *outlet, Inlet *inlet, Object *object = 0);
     static void disconnect(Inlet *inlet, Object *object = 0);

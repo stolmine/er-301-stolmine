@@ -10,6 +10,21 @@ listed as "deferred to implementation phase" are now resolved; see the **Locked
 decisions** section below. New ambiguities surfaced during the lock-in pass are
 captured in **Deferred ambiguities** (intentionally not blocking engine work).
 
+**Progress (as of 2026-05-13):** Steps 1, 2, 3, 4, 5, 6, 7, 8 done.
+Only Step 9 (polish + bench) remains. Branch `feature/sequencer`
+carries the work; commits run from `ba75ad7` (engine) through
+`bf2c312` (quicksave persistence). The sequencer is **end-to-end
+user-authorable** on the device for both L1 patterns AND L2
+predicate:action rules: wire any `seqN.*` source into a chain,
+`shift+ENTER` from scope, navigate to a cell. On L1: ENTER to inline-
+edit, encoder to nudge, shift+encoder for row-range selection, bare
+encoder to bulk-edit, S1/S2/S3 for copy/cut/randomize, shift+S1 for
+paste. On L2 (`shift+S3` to swap layer): ENTER opens the 6-slot cell
+editor modal with column + row-pin targeting on operands, full
+predicate / action grammar exposure (every op the engine evaluates),
+live preview + NL gloss. Patch state survives quicksave round-trip
+across power-cycle. Remaining: polish + bench (Step 9).
+
 ---
 
 ## Architectural shift from the spec — sequencer is *not* a chain unit
@@ -19,8 +34,14 @@ standard unit instantiation."
 
 **Revised framing:** sequencer is a **global firmware service** with virtual-jack
 outputs in `Source/ExternalChooser`, alongside `IN1-4`, `G1-4`, `Ax-Dx`, `OUTx`.
-**Fixed slot count: 4 sequencers** per patch (`seq1` through `seq4`), each with the
-six outputs the spec defines.
+**Fixed slot count: 4 sequencers** per patch (`seq1` through `seq4`).
+
+**Externally exposed outputs per slot (revised 2026-05-12):** `cv1`, `cv2`, `cv3`,
+and `gate` (= the gate-amp envelope output). step-len and gate-len remain as L1
+columns in the grid for authoring, but their effect is entirely INTERNAL: step-len
+drives the tick scheduler, gate-len defines the gate envelope duration. They are
+not patchable into other chains. The picker therefore shows 4 sources per slot
+(16 total across 4 slots) rather than the originally specified 6 (24 total).
 
 Implications:
 - No standard unit lifecycle, no per-instance inlets/outlets.
@@ -73,16 +94,22 @@ These are explicitly removed for v1:
 
 ## Two-axis navigation
 
-**Focus-head row** — single, shared across all 6 plies. Plain encoder advances /
-retreats the focus head universally; every ply moves in sync. Visualized as
-**full-row background highlight** across all plies (e.g. `GRAY5` fb.fill).
+**Focus-head row** — single, shared across all 6 plies. The ER-301 has
+**one encoder**; it is dedicated to focus-head navigation in the
+sequencer takeover. Plain encoder advances / retreats the focus head
+universally; every ply moves in sync. Visualized as **full-row
+background highlight** across all plies (e.g. `GRAY5` fb.fill).
 
-**Column cursor** — which ply is "active." Sub encoder navigates between plies, OR
-direct jump via M1-M6 softkeys (M1 = ply 1, ..., M6 = ply 6). Cursor's column
-is the target of cell-edit, mark-start/end, and clear actions.
+**Column cursor** — which ply is "active." Direct jump via M1-M6
+softkeys is the **only** column-movement input (M1 = ply 1, ..., M6 =
+ply 6). There is no sub encoder; an earlier revision of this doc
+mentioned one, but the hardware does not provide a second rotary.
+Cursor's column is the target of cell-edit, mark-start/end, and clear
+actions.
 
-The two cursors are independent. Focus head defines the row; column cursor defines
-the ply.
+The two cursors are independent. Focus head defines the row; column
+cursor defines the ply. Authoring intent (edit / mark / clear) acts on
+the cell at `(focus_head_row, column_cursor)`.
 
 ---
 
@@ -137,17 +164,31 @@ cell on every tick (held-CV / single-step drone behaviors).
 
 ## Sub-display layout (3 plies, S1 / S2 / S3)
 
-### Grid view, L1 mode
+### Grid view, L1 mode (as shipped)
 
 ```
-+--S1 ply (~42px)-+--S2 ply (~42px)-+--S3 ply (~42px)-+
-|     +1.0        |   mark start    |   ▸ playhead    |   (default; clipboard empty)
-|     EDIT ▸      |     ▸ mark end  |   (state-       |
-|                 |     (cycles)    |    dependent)   |
-+-----------------+-----------------+-----------------+
-   S1 click =        S2 click =        S3 default = jump to playhead
-   keyboard          cycles per-col    S3 with paste = paste clipboard
-   modal on cell     state machine     S3 + shift = clear cell
++--S1 ply-----+--S2 ply-----+--S3 ply-----+
+|             |             |             |
+|  start|stop |    mark     |     —       |   (default; no overlay)
+|             |             |             |
++-------------+-------------+-------------+
+   S1 = transport      S2 = enter mark    S3 = unused
+   (Toggle play /      modal on the       (playhead reset
+    stop on slot 0)    cursor's column     moved to
+                                           shift+HOME)
+
+Mark modal (after 1st S2 press):
++-------------+-------------+-------------+
+|  start|stop |    end      |     —       |
++-------------+-------------+-------------+
+   S2 commits live (firstMark..focusHead) to the column's
+   normalized (lo, hi) loop pair on second press.
+
+Shift held + clipboard non-empty (no other modal):
++-------------+-------------+-------------+
+|    paste    |     —       |     —       |
++-------------+-------------+-------------+
+   S1 = paste at focus head, advance focusHead by N
 ```
 
 ### Grid view, L2 mode
@@ -188,54 +229,131 @@ When user clicks S1 to enter the modal cell editor:
 ```
 +--S1 ply-----+--S2 ply-----+--S3 ply-----+
 |             |             |             |
-|   COPY      |   CUT       |   CLEAR     |
+|   COPY      |    CUT      |   RANDOM    |
 |             |             |             |
 +-------------+-------------+-------------+
 ```
 
-Sub returns to grid mode (L1 or L2) once an action is committed or selection is
-cancelled.
+Sub returns to grid mode once an action is committed or selection is cancelled.
+
+**Selection scope (revised 2026-05-12):** selection is a **row-range within a
+single column** (the active column cursor), not a 2D rectangle. The selection
+anchor is the focus-head row when `shift+encoder` first extends it; the
+selection grows / shrinks as the encoder rotates.
+
+**Bulk edit (no sub action):** if the user does NOT press a sub button while
+the selection is active, the bare encoder (without shift) edits **all selected
+cells uniformly**. The top-of-selection cell is the "master." On the first
+encoder turn after selection is built, the master takes the increment AND every
+other selected cell SNAPS TO the master's new value (i.e., the selection
+becomes a constant fill at that value). Subsequent turns increment the master
+and every cell follows. Conceptually: "set selection to a constant the user
+can then dial."
+
+**Sub buttons:**
+- S1 = COPY (writes selection to clipboard, leaves cells unchanged)
+- S2 = CUT (writes selection to clipboard, sets cells to zero)
+- S3 = RANDOMIZE (replaces each selected cell with a random value in the
+  column's typed range; CV columns randomize within +/- 5 V, gate-amp within
+  0..1, gate-len/step-len within the common-fraction set, etc.)
+
+**PASTE (shipped 2026-05-12):** lives on a **live shift-held overlay** on
+the default (no-selection) sub bar, not on S3. While shift is held AND the
+clipboard is non-empty, the sub labels swap from `start|stop / _ / reset`
+to `paste / _ / _`; releasing shift restores the default. Pressing
+shift+S1 writes the clipboard values into rows
+`[focusHead .. focusHead + N - 1]` in the user's current column, then
+advances focusHead by N (chained pastes stitch contiguously). Type-check
+is by column category (`cv` for col 0/1/2, `time` for col 3/5, `amp` for
+col 4); cross-category paste refuses silently. Selection mode takes
+priority over the shift overlay — while selecting, shift only affects
+encoder gestures.
 
 ---
 
-## S3 ply state-rotation summary
+## Sub-bar state-rotation summary
 
-| Clipboard state | Selection active | S3 default | S3 + shift |
-|---|---|---|---|
-| Empty | No | jump to playhead | clear cell |
-| Empty | Yes | (sub in selection mode) | (sub in selection mode) |
-| Non-empty | No | paste at focus head | clear cell |
-| Non-empty | Yes | (sub in selection mode) | (sub in selection mode) |
+The default sub bar is `start|stop / mark / _`. Three overlays swap it:
+
+- **Selection mode** (shift+encoder built a row-range): replaces all three
+  ply with `copy / cut / rand`.
+- **Mark modal** (1st S2 press; 2nd press / UP / ENTER / column-switch
+  commits): S2 reads `end`; S1 keeps transport active; S3 blank.
+- **Shift-paste overlay** (shift held + clipboard non-empty, no other
+  modal): S1 swaps to `paste`; S2 / S3 blank.
+
+Priority: selection > marking > shift-paste > default. Resolved per
+refresh from gesture state.
+
+| Selection | Marking | Clipboard | Shift | S1 | S2 | S3 |
+|---|---|---|---|---|---|---|
+| No  | No  | Empty     | No  | start\|stop | mark      | — |
+| No  | No  | Empty     | Yes | start\|stop | mark      | — |
+| No  | No  | Non-empty | No  | start\|stop | mark      | — |
+| No  | No  | Non-empty | Yes | **paste**   | —         | — |
+| No  | Yes | (any)     | (any) | start\|stop | **end** | — |
+| Yes | —   | (any)     | (any) | copy        | cut       | rand |
+
+S3 reset was removed; **playhead reset is now shift+HOME** outside the
+L1 cell editor (`zeroReleased`). Inside the editor, shift+HOME keeps
+its existing role as the "zero this cell" gesture.
 
 Clipboard scope:
 - **Single slot, ephemeral** (not persisted across patch save).
-- Cross-column paste: type-checked. Paste preserves source column's type,
-  refuses incompatible (CV→time = no, CV1→CV2 = yes).
-- Layer-checked: L1 selections paste into L1 only; L2 → L2 only.
+- Cross-column paste: type-checked by column category (cv = col 0/1/2,
+  time = col 3/5, amp = col 4). Cross-category paste refuses silently.
+  Same-category cross-column paste OK (CV1 → CV2 ok, gate-len → step-len
+  ok), since the engine values are float-compatible.
+- Layer-checked: L1 selections paste into L1 only; L2 → L2 only. (L2 not
+  yet built; the clipboard is L1-only in practice.)
 
 Selection mechanic:
-- Hold **SHIFT** + encoder scroll extends selection range from focus head's current
-  cell.
-- Selected cells render with distinct background (inverted text or border).
-- Sub display switches to the COPY/CUT/CLEAR layout.
-- Exit selection: **CANCEL** hard button (or release shift, if shift-held model).
+- Hold **SHIFT** + encoder scroll extends selection range from focus head's
+  current cell.
+- Selected cells render with a dotted-edge selection box; the cursor box
+  pins to the top-of-selection (= master) cell.
+- Sub display switches to `copy / cut / rand` layout.
+- Bulk-edit during selection: bare encoder writes `master + step` to every
+  cell in the selection. Dirty marker (small dot on right edge) appears
+  on each modified cell.
+- Exit selection: **CANCEL** reverts bulk edits to the pre-edit snapshot
+  and clears the selection; **UP** commits (keeps values, clears markers);
+  switching columns via M1-M6 or entering ENTER-edit-mode implicitly commits.
 
 ---
 
 ## Hard-button bindings within sequencer takeover
+
+The ER-301's encoder is **rotation-only** (no integrated push button),
+so every "encoder click" pattern from sister modules (teletype, etc.)
+has to be remapped here. ENTER takes the role of "open editor for
+the cell at the cursor"; commit-and-advance within the cell editor
+modal also rides on ENTER (with the modal absorbing the gesture so
+shift+ENTER doesn't bubble out).
 
 | Button | Behavior |
 |---|---|
 | HOME | Jump focus head to current playhead row (per cursor's column) |
 | CANCEL (grid view, no cell editor open) | Jump focus head to row 0 |
 | CANCEL (cell editor modal open) | Exit modal without committing |
-| ENTER (cell editor modal open) | Commit cell, exit modal back to grid |
-| ENTER (grid view) | (reserved — not currently used; could be "click cursor cell to edit" if encoder click isn't used for that) |
+| ENTER (grid view) | **Open the cell editor modal for the cell at `(focus_head_row, column_cursor)`** |
+| ENTER (cell editor modal, no slot focused) | Commit cell and exit modal back to grid |
+| ENTER (cell editor modal, M-slot held) | Commit currently-focused slot, stay in modal, advance slot cursor |
 | **shift+ENTER** anywhere | **Toggle sequencer takeover on/off** (entry + exit) |
-| UP | Toggle L1 ↔ L2 layer view |
+| UP (grid view) | Toggle L1 ↔ L2 layer view |
+| UP (cell editor modal) | Exit modal without committing (alias for CANCEL) |
 | SHIFT | Modifier — extends selection on encoder scroll, modifies S3 to clear |
-| Encoder click (grid view) | Open cell editor modal for cursor's cell |
-| Encoder click (cell editor) | Commit current slot, advance cursor to next slot |
+| M1-M6 (grid view) | Direct jump for the column cursor |
+| M1-M6 (cell editor modal) | Hold to focus that slot for encoder edit; release to release focus |
+
+**Visual cursor: a box around the cell at `(focus_head_row, column_cursor)`.**
+Without an encoder push, the user needs an unambiguous signal of which
+cell ENTER will open. The active-column header highlight + focus-row
+brightness together imply it, but a thin outline around the actual
+target cell makes the gesture-target explicit, especially on layouts
+where the highlighted row spans the full width. Implementation: a small
+`app.Drawing` (or rectangle primitive) whose position updates with
+`columnCursor` and `focusHeadRow` each refresh tick.
 
 ---
 
@@ -398,20 +516,21 @@ Cell content as compact `pred:action` notation (e.g., `%4:B+1`, `?60:B!`, `>0.5:
 
 ## Effort estimate
 
-**~8.3 weeks** of focused development for v1, broken down:
+**~8.3 weeks** of focused development for v1. Status snapshot 2026-05-13
+(approximately ~7.3 of 8.3 weeks shipped):
 
-| Piece | Estimate |
-|---|---|
-| C++ engine | 2 weeks |
-| Picker integration | 0.5 |
-| Patch persistence | 0.5 |
-| Grid view | 1.5 |
-| Cell editor modal | 1.5 |
-| Sub-display routing | 0.5 |
-| Selection + clipboard | 1.0 |
-| Access path (scope-mode shift+ENTER only) | 0.3 |
-| Polish + bench | 1.0 |
-| **Total** | **~8.3** |
+| Piece | Estimate | Status |
+|---|---|---|
+| C++ engine | 2 weeks | ✅ shipped (`ba75ad7`) |
+| Picker integration | 0.5 | ✅ shipped (`ba75ad7`, trimmed `763296b`) |
+| Patch persistence | 0.5 | ✅ shipped (`bf2c312`) |
+| Grid view | 1.5 | ✅ shipped (`f8be7a7` … `22d7b01`) |
+| Cell editor (L1 inline + L2 modal) | 1.5 | ✅ shipped (`ede9963`, `721a8e8`) |
+| Sub-display routing | 0.5 | ✅ shipped (`bf30bfe`, `864b251`, `0b47789`, `3bf71d8`) |
+| Selection + clipboard | 1.0 | ✅ shipped (`e7aaea3`, `22d7b01`, `bf30bfe`, `864b251` -- Chunks A/B/C + PASTE) |
+| Access path (scope-mode shift+ENTER only) | 0.3 | ✅ shipped (`ade1f44`) |
+| Polish + bench | 1.0 | ⏳ pending |
+| **Total** | **~8.3** | **~7.3 shipped, ~1.0 remaining** |
 
 This is **focused**-time. Calendar time depends on context-switching with other
 work; realistic delivery is **3-4 months**.
@@ -441,7 +560,8 @@ now settled. Engine and UI code should reference these directly.
 4. **Tempo source.** Single global internal BPM, admin-set, applies to all
    4 slots. Engine runs at **4 PPQN** (1/16-note base tick). External
    clock-in is explicitly deferred to v2; v1 keeps slots output-only (no
-   per-slot clock input).
+   per-slot clock input). The v2 admin UX + engine wiring is sketched
+   under **External clock + reset (v2 spec)** below.
 
 5. **Clock granularity.** N/A for v1 (no external clock). Internal master
    tick = 1/16 note. Triplets and 1/32 are not supported in v1; would
@@ -461,6 +581,618 @@ now settled. Engine and UI code should reference these directly.
 
 10. **BPM display.** Always-visible header line within the sequencer
     takeover (small text at top of main display showing current BPM).
+
+11. **PASTE binding.** Lives on a live shift-held overlay on S1 of the
+    default (no-selection) sub bar: `start|stop / mark / _` swaps to
+    `paste / _ / _` while shift is held AND the clipboard is non-empty.
+    Transport stays positionally consistent (S1 unshifted always =
+    start/stop). Selection mode is never affected by this overlay --
+    while selecting, shift only modifies encoder gestures. Decided
+    against the alternative of moving transport to S2 (would break
+    scope-mode reflex). Shipped in `864b251`.
+
+12. **Mark-start/end modal.** S2 enters a per-column modal: 1st press
+    snapshots the existing `(marker1, marker2)` pair into `markBackup`
+    and plants `markFirstMark` at focusHead; encoder + HOME during the
+    modal live-update marker2 so the loop dim slides with the user;
+    2nd S2 press / UP / ENTER / column-switch via M-key all commit the
+    normalized `(min, max)` pair and exit; CANCEL reverts to the
+    snapshot. The shared dotted-edge primitive used for selection
+    wraps the live `(firstMark..focusHead)` range while the modal is
+    active. Cursor box turns white during marking (same active-state
+    cue used for edit / selection modes). Shipped in `0b47789`,
+    `3bf71d8`.
+
+13. **Playhead reset gesture.** Moved off the sub bar to
+    **shift+HOME** outside the L1 cell editor. Inside the editor,
+    shift+HOME retains its prior "zero this cell" behaviour. The S3
+    softkey is now unused (reserved for future per-state-machine
+    needs). Shipped in `0b47789`.
+
+---
+
+## Sequencer settings (System Settings subheading)
+
+Non-clock sequencer settings live as **flat entries under a
+"Sequencer" subheading in the existing System Settings menu** -- no
+new admin infrastructure. Only the clock settings (which need
+jack-picker integration + a richer layout) get the dedicated admin
+Sequencer section in the "External clock + reset" v2 spec below.
+
+### How the Settings menu works (studied 2026-05-14)
+
+- `xroot/Settings/init.lua` -- a flat `defaults` table. Each entry:
+  `category` (string), `description` (string), `value` (default),
+  optional `choices` (for String type), optional `onSet(value)`
+  callback fired on change. Three Variable types in
+  `Settings/Variable.lua`: `Boolean`, `String` (choice list),
+  `Number` (min/max).
+- `xroot/Settings/Interface.lua` -- a `menuItems` array drives the
+  *display*. `{"addCategory","Foo"}` renders an `o Foo:` subheading;
+  `{"addVariable","name"}` renders `  + description` + value under
+  it. **The `category` field in init.lua is decorative** -- the
+  Interface.lua array is what actually groups and orders entries.
+- Persistence: `Settings.save()` writes `/rear/settings.lua`;
+  `Settings.load()` restores on boot and fires each `onSet`.
+
+### Orphaned `bpm` entry -- fix while we're here
+
+`bpm` is already defined in `init.lua` (`category = "Sequencer"`,
+choices 60..200, `onSet` calls `setBpm`) but is **NOT** in
+Interface.lua's `menuItems` array -- so it never renders in the
+Settings UI. It's effectively unreachable from System Settings
+today (only the in-takeover shift+S2 fader from Step 9 item 3 can
+change BPM). When we add the Sequencer subheading, wire `bpm` into
+it as the first entry -- a one-line fix to a pre-existing oversight.
+
+### Entries under the "Sequencer" subheading
+
+| Setting | Type | Default | Notes |
+|---|---|---|---|
+| `bpm` | String | "120" | Already defined; just needs the Interface wiring (orphan fix). |
+| `sequencerRandomMode` | String | "simple" | choices: simple / coherent / fill. Read by the randomize gesture (see Fill / generators v2 spec). |
+| `quickSaveRestoresSequencerTransport` | String | "no" | choices: yes / no. Step 9 item 17. `onSet` not needed -- Persist.deserialize reads it directly. |
+| `unifyConfirm` | String | "yes" | choices: yes / no. Mark-modal S3 "unify" confirmation gate (Step 9 item 16). Supersedes the earlier "lives in the admin Sequencer section" note -- a flat Setting is simpler and doesn't block on the admin section. |
+
+### Implementation
+
+1. `xroot/Settings/init.lua` -- add the three new entries
+   (`sequencerRandomMode`, `quickSaveRestoresSequencerTransport`,
+   `unifyConfirm`) to the `defaults` table with `category =
+   "Sequencer"`. `bpm` already exists.
+2. `xroot/Settings/Interface.lua` -- add a `menuItems` block:
+   ```lua
+   menuItems[#menuItems + 1] = { "addCategory", "Sequencer" }
+   menuItems[#menuItems + 1] = { "addVariable", "bpm" }
+   menuItems[#menuItems + 1] = { "addVariable", "sequencerRandomMode" }
+   menuItems[#menuItems + 1] = { "addVariable", "quickSaveRestoresSequencerTransport" }
+   menuItems[#menuItems + 1] = { "addVariable", "unifyConfirm" }
+   ```
+   Placed after the QuickSaves block (natural neighbour -- the
+   transport-restore entry pairs conceptually with the other
+   quicksave-restore toggles).
+3. Consumers read via `Settings.get("name")`:
+   - `quickSaveRestoresSequencerTransport` -> `Persist.deserialize`
+     (Step 9 item 17).
+   - `sequencerRandomMode` -> the selection-mode randomize branch in
+     `GridView.lua` (+ later the fill modal router).
+   - `unifyConfirm` -> the mark-modal S3 handler in `GridView.lua`:
+     "yes" -> show a confirm dialog before fanning markers across
+     columns; "no" -> immediate-apply (current Tier-1 behaviour).
+
+### Effort estimate
+
+~0.2w. No new files, no engine changes -- defaults-table additions
++ a menuItems block + three `Settings.get` call sites. Each consumer
+(items 16 confirm, 17, randomMode) is wired as its own feature lands;
+the subheading + `bpm` orphan fix can ship immediately on their own.
+
+---
+
+## External clock + reset (v2 spec)
+
+v0.1 ships internal-clock-only (locked decision #4). The v2 path lets
+the user drive the sequencer from an external clock signal and an
+external reset signal, both routed through the standard jack picker.
+Single global tempo source (= matches the BPM model -- one source for
+all 4 slots).
+
+### Admin menu surface
+
+Add a **Sequencer** section to the admin menu (alongside Settings,
+Quicksaves, etc.). Inside, a **Clock settings** entry opens a
+sub-page laid out like the system-settings menu (one row per option):
+
+```
++--- Clock settings ----------------------------+
+| Clock source          [ internal | external ] |
+| External clock jack   [ none / G1 / G2 / ... ]|
+| External clock div    [ 1 / 2 / 3 / 4 / 6 / 8]|
+| Reset jack            [ none / G1 / G2 / ... ]|
++-----------------------------------------------+
+```
+
+- **Clock source** -- toggle between `internal` (BPM-driven) and
+  `external` (rising-edge driven). When external, the BPM Settings
+  entry can stay visible but is informational only.
+- **External clock jack** -- jack picker entry. Reuses the existing
+  `Source.ExternalChooser` flow (`xroot/Source/ExternalChooser/`); a
+  user picks G1..G4, IN1..IN4, or any other gate-class external
+  source. None = clock disabled.
+- **External clock div** -- integer divisor (1..8 or so). The
+  sequencer fires one tick every Nth external rising edge. Useful
+  when the upstream clock is at a higher PPQN than our 4 PPQN.
+- **Reset jack** -- separate jack picker. On rising edge: all
+  playheads return to their loop minimums (equivalent of pressing
+  shift+HOME to reset playheads, applied to every slot).
+
+### Engine wiring
+
+`Sequencer.h` gets a few new fields on `Slot` (or hoisted to
+`SequencerTask` since they're slot-shared):
+
+```cpp
+// Clock source mode -- the sequencer either runs on internal BPM
+// scheduling (samplesUntilTick countdown driven by setBpm) or on
+// rising-edge detection from an external gate input.
+enum ClockSource : uint8_t {
+  CLOCK_INTERNAL = 0,
+  CLOCK_EXTERNAL = 1,
+};
+ClockSource clockSource = CLOCK_INTERNAL;
+
+// External clock input edge detection. The Lua side hands us an
+// Inlet pointer when the user picks a jack; processFrame samples it
+// and counts rising edges. extClockDiv = N means we fire one tick
+// every N edges.
+od::Inlet* extClockInlet = nullptr;
+int        extClockDiv   = 1;
+int        extClockEdgeCounter = 0;
+float      extClockLastSample  = 0.0f;
+
+// External reset input.
+od::Inlet* extResetInlet      = nullptr;
+float      extResetLastSample = 0.0f;
+```
+
+`processFrame` adds an external-clock branch:
+
+- For each sample in the frame, read `extClockInlet`'s value at
+  that sample.
+- Detect rising edge: previous < 0.5 && current >= 0.5 (gate
+  threshold).
+- On edge: increment `extClockEdgeCounter`; if `>= extClockDiv`, fire
+  `fireTick()` and reset counter.
+- Detect rising edge on `extResetInlet` similarly: on edge, call
+  `reset()` on every slot.
+
+The existing sample-accurate processFrame loop (item 9 from Step 9)
+naturally accommodates this: the frame is already being split at
+tick boundaries; external-clock just becomes another tick-emit
+trigger.
+
+### SequencerTask + Lua surface
+
+- `SequencerTask::setClockSource(int mode)` / `clockSource()` getters.
+- `SequencerTask::setExtClockInlet(od::Inlet*)` /
+  `setExtResetInlet(od::Inlet*)` -- accept SWIG-bound inlet pointers
+  from the picker.
+- `SequencerTask::setExtClockDiv(int)` / `extClockDiv()`.
+
+Lua side adds:
+- `xroot/Sequencer/AdminMenu.lua` -- the Clock settings page. Forks
+  the MondrianMenu pattern used by system settings.
+- Settings entries persisted via the standard `Settings` module so
+  the clock-source pick survives reboot. Jack picks may need a
+  bespoke serializer (storing the source name rather than the
+  pointer).
+- `xroot/AdminMode/Menu.lua` -- add the **Sequencer** section entry
+  pointing at the new menu.
+
+### Effort estimate
+
+~1.0 week focused:
+- Admin menu wiring + Clock settings sub-page: ~0.2w.
+- Jack-picker integration for clock + reset (reusing
+  `Source.ExternalChooser`): ~0.2w.
+- Engine rising-edge detection + reset wiring + division logic: ~0.3w.
+- Settings persistence + boot-time restore of clock config: ~0.1w.
+- Listen test + interop verification with common external clock
+  sources (modular gate at 1/16, 1/8, 1/4 etc.): ~0.2w.
+
+### Open design questions
+
+- **Should the internal BPM display be dimmed when external clock
+  is active?** Probably yes -- BPM is moot in external mode.
+  Alternative: display "extBPM" computed from edge intervals so the
+  user sees the effective tempo.
+- **External clock jitter handling.** A modular gate clock is not
+  sample-accurate (jitter from analog source). Should we add a
+  smoothing/PLL to stabilize tick intervals, or run "as-is" so the
+  sequencer follows the source faithfully (warts and all)?
+  Probably as-is for v2.0; PLL is a v2.1+ refinement.
+- **Reset behavior during a running pattern.** Hard-reset to
+  loop-min on rising edge, or queue the reset for the next tick
+  boundary? Hard-reset is closer to user expectation but can
+  produce audible clicks if the gate is mid-envelope.
+
+---
+
+## v2 column layout -- 2 CV + 2 gate + transpose meta (✅ SHIPPED 2026-05-15)
+
+Phase 1 in `8e217ca` (engine + dual gates + transpose pre-application
++ picker rename + bench). Phase 2 in this turn's commit (GridView +
+CellEditor catch-up + Persist `schemaVersion=2` + v1->v2 migration +
+bench migration test). Bench: 15/15 PASS. v0.1 quicksaves load cleanly
+with documented log lines for cv3 neutering + gate-amp-to-g2L mapping.
+
+This replaced the previously-drafted per-slot 1-gate/2-gate toggle.
+After working with the v0.1 layout on hardware and considering
+modular conventions, the v2 layout drops gate-amp as a column and
+trades cv3 for a second independent gate, plus a per-row transpose
+meta column. There is **no per-slot mode toggle**: every slot uses
+the same new schema.
+
+### Layout
+
+```
+col0   col1   col2   col3   col4   col5
+ cv1    cv2    g1L    g2L    stL    tr
+ V/o    raw    len    len   step   semi
+```
+
+| col | symbol | type | units | role |
+|---|---|---|---|---|
+| 0 | cv1 | CV | V/oct (transpose pre-applied) | primary pitch lane |
+| 1 | cv2 | CV | raw float | secondary modulator |
+| 2 | g1L | GATE_LEN | beats | gate 1 length (amp fixed = 1.0) |
+| 3 | g2L | GATE_LEN | beats | gate 2 length (amp fixed = 1.0) |
+| 4 | stL | STEP_LEN | beats | per-tick spacing (host-only) |
+| 5 | tr  | TRANSPOSE | semitones (int) | meta: shifts cv1 only |
+
+The slot exposes exactly **4 picker outputs** -- `seqN.cv1`,
+`seqN.cv2`, `seqN.gate1`, `seqN.gate2` -- matching the 4-channel-
+per-group picker constraint (commit 763296b). `tr` and `stL` are
+internal / meta and do not appear in the picker.
+
+### Why this shape
+
+- **Modular convention favors 2 gates over 1 gate w/ amp.** In a
+  hardware patch, variable gate amplitude is rarely the choice
+  vector you reach for; a second independent gate (envelope
+  trigger, drum hit, layered rhythm) almost always is. Gate-amp
+  is dropped entirely -- not parked behind a toggle.
+- **Picker stays at 4 outputs per slot.** Adding a 5th source per
+  slot (e.g. cv3 + gate2) would have required rewriting picker
+  page graphics that were trimmed back from 6 to 4 outputs per
+  group in commit 763296b. Going 2 CV + 2 gate fits the existing
+  picker without graphic work.
+- **Transpose buys back per-row octave/pentatonic variation.** Cv3
+  was historically a free CV lane and rarely a melody-driver;
+  surfacing per-row transpose pre-applied to cv1 is a stronger
+  default for the lead voice and keeps the meta lane authorable
+  in the grid like any other column.
+
+### Engine surface
+
+`Sequencer.h` column-index constants update:
+
+```cpp
+constexpr int kColCV1       = 0;
+constexpr int kColCV2       = 1;
+constexpr int kColGate1Len  = 2;
+constexpr int kColGate2Len  = 3;
+constexpr int kColStepLen   = 4;
+constexpr int kColTranspose = 5;
+```
+
+New `ColumnType` value: `CT_TRANSPOSE` (semantically: int
+semitones, stored as float for uniformity with other lanes; UI
+clamps to integer step on edit).
+
+`fireTick` semantics:
+
+```cpp
+// pre-apply transpose to cv1 sample-and-hold
+float trSemis = columns[kColTranspose].l1[columns[kColTranspose].playhead].value;
+heldCV1 = columns[kColCV1].l1[columns[kColCV1].playhead].value + trSemis / 12.0f;
+
+// gate1 / gate2 are both length-only; amp is constant 1.0
+float g1Beats = columns[kColGate1Len].l1[columns[kColGate1Len].playhead].value;
+float g2Beats = columns[kColGate2Len].l1[columns[kColGate2Len].playhead].value;
+if (g1Beats > 0.0f) {
+  heldGate1Amp = 1.0f;
+  gate1RemainingSamples = (int)(g1Beats * samplesPerBeat);
+  firedThisTick = true;
+}
+if (g2Beats > 0.0f) {
+  heldGate2Amp = 1.0f;
+  gate2RemainingSamples = (int)(g2Beats * samplesPerBeat);
+  firedThisTick = true;  // PRED_FIRE = either gate fired
+}
+```
+
+`Slot` gains `heldGate1Amp / heldGate2Amp` + `gate1RemainingSamples /
+gate2RemainingSamples`; the old single `heldGateAmp /
+gateRemainingSamples` go away. `processFrame` writes both `gate1` and
+`gate2` audio buffers each frame.
+
+Buffer additions to SequencerTask: replace `mSeqNGateAmp` with
+`mSeqNGate1Amp` + `mSeqNGate2Amp` (* 4 slots).
+
+### UI
+
+Grid headers swap globally to the new schema: `cv1 cv2 g1L g2L stL tr`.
+
+- Column 5 (transpose) value formatter: `fmtTranspose` --
+  prints `"+0"`, `"+12"`, `" -5"` (right-aligned 3 chars).
+- Cell-edit step values for `tr`:
+  - fine = 1 semitone
+  - coarse = 12 (octave)
+  - super-coarse = 24
+- Random distribution for `tr` (selection RAND, ACTION_RAND):
+  biased palette `{0, 0, 0, 0, 0, -12, -7, -5, 0, 5, 7, 12}`
+  (zero-weighted, then perfect-5th + octave shifts). Coherent
+  random (Step 9 item 6) draws from the column's distinct values
+  as usual.
+
+### L2 grammar additions for dual gates (shipped 2026-05-15)
+
+With two independent gate-length columns (g1L, g2L), the L2 grammar
+gains per-gate detector predicates AND per-gate retrigger actions so
+rules can both LISTEN for and TARGET an individual gate.
+
+**Predicates:**
+
+| op | symbol | meaning |
+|---|---|---|
+| `PRED_FIRE`  | `!`  | slot-level OR -- did EITHER gate fire this tick? |
+| `PRED_FIRE1` | `!1` | gate 1 (g1L) retriggered this tick |
+| `PRED_FIRE2` | `!2` | gate 2 (g2L) retriggered this tick |
+
+`PRED_FIRE` (`!`) stays as the slot-level "any gate fired" detector --
+backward-compatible alias for v0.1 quicksaves and a useful "any-gate"
+trigger in its own right.
+
+**Actions:**
+
+| op | symbol | meaning |
+|---|---|---|
+| `ACTION_FIRE`  | `!`  | retrigger gate1 (v0.1 alias; same as ACTION_FIRE1) |
+| `ACTION_FIRE1` | `!1` | retrigger gate1 (v2 explicit name) |
+| `ACTION_FIRE2` | `!2` | retrigger gate2 |
+
+`ACTION_FIRE` (= 6) stays in the engine for v0.1 quicksave back-compat
+and shares its branch with `ACTION_FIRE1` (both arm gate1). The cell
+editor's authoring cycle surfaces only `!1` / `!2` -- no bare `!`
+since it's functionally identical to `!1`. v0.1 cells with `!` still
+render and execute correctly on load (engine path unchanged).
+
+Engine surface:
+
+```cpp
+// Slot.h additions alongside the existing firedThisTick:
+bool firedGate1ThisTick = false;
+bool firedGate2ThisTick = false;
+// Set inside fireTick when the corresponding gate retriggers.
+// firedThisTick stays the OR of these two for the legacy PRED_FIRE.
+```
+
+Bench coverage: `test_pred_fire1_fire2` (per-gate detector predicates)
++ `test_per_gate_fire_actions` (per-gate retrigger actions). 16/16
+PASS after the cycle additions land.
+
+### L2 column-letter remap
+
+L2 cell editor's column-letter cycle (S3-hold + encoder):
+
+| letter | column |
+|---|---|
+| A | cv1 |
+| B | cv2 |
+| C | g1L |
+| D | g2L |
+| E | stL |
+| F | tr |
+
+Existing L2 rules referencing letters A/B retain their meaning
+(col index unchanged for A/B); references to C/D/E/F need a
+migration pass on load since the old column at those indices was
+cv3/gtL/gtA/stL (see quicksave migration below).
+
+### Quicksave migration (v0.1 -> v2)
+
+Slot column state is keyed by column index. Migration rules on load
+of a v0.1 quicksave:
+
+1. col 0 (cv1), col 1 (cv2) -- unchanged.
+2. col 2 (old cv3) -- DROPPED. Values discarded. Document this
+   in the v2 changelog.
+3. col 3 (old gtL) -- moves to col 2 (g1L). Length / markers /
+   L1 / L2 transferred verbatim.
+4. col 4 (old gtA, gate-amp) -- becomes col 3 (g2L). Reinterpret
+   each non-zero amp value as 0.25 beats (= 1 tick of gate length).
+   A row with amp = 0 stays 0 (no gate). This preserves "where the
+   user wanted a gate" semantics without inheriting amplitude as
+   length (which would be surprising for big amp values).
+5. col 5 (stL) -- unchanged in role; index shifts to col 4.
+6. col 5 (new tr) -- absent in v0.1; zero-initialized.
+
+L2 rules: `colA` / `targetCol` indices remap 3->2, 4->3, 5->4
+(old gate-amp ACTIONs/PREDs become gate2-length ACTIONs/PREDs, which
+is musically the closest available mapping). Old `colA = 2` (cv3)
+references are neutered -- rewrite to `colA = -1` (host col) and
+leave the user to re-author. Log a one-line notice during load when
+this happens.
+
+### Open design questions
+
+- **Transpose application target.** v2 spec pre-applies tr to cv1
+  only. Should cv2 also be transposable? Default: no -- cv2 is
+  the "raw modulator" lane and semantic conflation hurts. Could
+  expose as a per-slot Setting if users ask.
+- **Transpose grid display when value is 0.** Render as `" +0"` or
+  blank? Leaning toward `" +0"` for visual consistency with non-
+  zero rows -- otherwise a fresh tr column is indistinguishable
+  from "this slot has no transpose lane at all."
+- **L2 detector predicates per-gate.** _Resolved -- promoted to
+  v2.0 spec._ PRED_FIRE1 (`!1`) and PRED_FIRE2 (`!2`) are part of
+  the v2 grammar. PRED_FIRE (`!`) stays as the slot-level
+  "any-gate" detector. See "L2 grammar additions for dual gates"
+  above.
+- **Picker output naming.** `seqN.gate1` / `seqN.gate2`, or keep
+  `seqN.gate` for gate1 (back-compat) and add `seqN.gate2`?
+  Leaning rename to gate1/gate2 since v2 is a planned breaking
+  bump anyway.
+
+### Reconciling Step 9 backlog item 18 (auto-gate fill)
+
+Item 18 in the Step 9 polish backlog -- "auto-gate fill that
+populates the gate-amp column based on user-set density" -- becomes
+obsolete in this v2 layout: gate-amp is gone, both g1L and g2L are
+length-only with constant amp 1.0. Auto-gate fill in v2 should
+instead target **gate-length columns** (g1L and g2L independently),
+with the density parameter controlling how many rows get a non-zero
+length value (default 0.25 beats = 1 tick). Range still drives
+length-variation around the chosen default. Item 18 is retained in
+the backlog with this revised meaning; the old gate-amp formulation
+is dropped.
+
+### Effort estimate
+
+~1.0 week focused. Engine column-index + struct rename (~0.2w),
+gate1/gate2 buffer plumbing in SequencerTask (~0.2w), grid header +
+fmtTranspose + L2 letter remap (~0.2w), quicksave migration logic +
+bench coverage (~0.3w), picker source rename + Lua source-list
+update (~0.1w).
+
+---
+
+## Fill / generators (v2 spec)
+
+Supersedes Step 9 item 6 ("coherent random"). The randomize gesture
+gains three behaviors selected by a single **admin toggle** (the UI
+is out of softkey space, so the mode lives in settings, not on a
+button):
+
+| Random mode | Behaviour of the randomize gesture |
+|---|---|
+| `simple` (default, shipped) | Unconstrained per-column-typed random fill (`randomForColumn`). |
+| `coherent` | Constrained random: draws only from values already present in the column / selection -- keeps the user's authored palette. ~0.2w on its own. |
+| `fill` | Opens a **fill modal** (below) instead of immediately randomizing. |
+
+Setting `sequencerRandomMode` lives in `xroot/Settings/init.lua`
+alongside the other sequencer settings; persisted via the standard
+Settings path. The selection-mode S3 (and L2 ACTION_RAND) read it
+to decide which behaviour to run.
+
+### Fill modal
+
+A procedural pattern generator that operates on the **current
+selection** (a row-range on one column). Forked from
+`xroot/Sequencer/CellEditor.lua` -- same six tap-to-focus M-slot
+layout, same encoder / dial / shift conventions. The generator's
+output fills the selected rows.
+
+Reference designs researched 2026-05-14:
+
+- **Westlicht PER|FORMER** generators (`engine/generators/`):
+  - *Euclidean*: 3 params -- `steps` (1..N pattern length),
+    `beats` (1..N active hits), `offset` (0..N-1 rotation).
+  - *Random*: 4 params -- `seed` (0..1000), `smooth` (0..10,
+    inter-value smoothing), `bias` (-10..10, distribution shift),
+    `scale` (0..100, spread).
+  - UI: a generator page shows up to 5 params on F0-F4 + encoder,
+    applied to a step selection picked via a first/second-step
+    range selector. Our 6-slot modal maps cleanly onto this -- one
+    extra slot of headroom vs. their 5.
+- **Polyend Tracker** fill: per-parameter randomization *ranges*
+  (Random Note, Random Volume +/-0..100, Random Fx +/-value)
+  applied across a selection, plus probability. Confirms the
+  "range + probability over a selection" model.
+
+### Slot layout (fill modal)
+
+```
++--M1---+--M2---+--M3---+--M4---+--M5---+--M6---+
+|  gen  | p1    | p2    | p3    | p4    | p5    |
+| type  |       |       |       |       |       |
++-------+-------+-------+-------+-------+-------+
+```
+
+M1 = generator type; M2-M6 = type-dependent params with the same
+slot-skip rule the L2 editor uses (irrelevant slots render `-`).
+
+Generator types + params, interpreted per the selected column's
+type:
+
+| Generator | M2 | M3 | M4 | M5 | M6 |
+|---|---|---|---|---|---|
+| **Euclidean** (gate-amp esp.) | steps | beats/hits | offset | on-value | off-value |
+| **Random** | seed | smooth | bias | range-lo | range-hi |
+| **Ramp** | start | end | curve (lin/exp/log) | -- | -- |
+| **Pulse** (every-N) | interval N | offset | on-value | off-value | -- |
+| **Clear / Init** | -- | -- | -- | -- | -- |
+
+- Euclidean is the headline gate-amp generator -- `steps` / `beats`
+  / `offset` produces classic euclidean rhythms; `on-value` /
+  `off-value` set the gate-amp emitted on hit vs. non-hit rows.
+- Random with smooth/bias/scale matches the Performer's CV-random
+  feel; on a CV column it produces musical drift, on gate-amp a
+  density-controlled scatter.
+- Ramp fills a CV column with a linear/curved sweep across the
+  selection -- handy for slides / glissandi authored as L1 data.
+- Pulse is the simple "every Nth row" gate generator.
+- Clear/Init zeroes the selection (parallel to the Performer's
+  InitLayer generator; also reachable via selection-mode CUT).
+
+### Per-column-type generator availability
+
+The generator-type list on M1 is filtered by the selection's
+column type so the user never sees a nonsensical option:
+- **CV columns** (cv1/cv2/cv3): Random, Ramp, Clear.
+- **gate-amp** (col 4): Euclidean, Pulse, Random, Clear.
+- **gate-len / step-len** (col 3 / 5): Random, Ramp, Clear.
+  (Step-len Random draws integer ticks per the Step 9 step-len
+  work; Ramp produces an accelerando / ritardando.)
+
+### Engine / plumbing
+
+Generators run **Lua-side** -- they just call `seq:setL1` across
+the selected rows. No engine changes needed for the generators
+themselves; the euclidean bit-pattern + random distributions are
+cheap to compute in Lua at author time (not audio-rate). The only
+engine touch is the `sequencerRandomMode` Setting read.
+
+Sub-display in the fill modal: S1 live preview of the resulting
+pattern shape (a tiny sparkline / dot-density render), S2/S3 NL
+gloss ("8-step euclidean, 3 hits, offset 2").
+
+### Effort estimate
+
+~1.0 week focused:
+- `sequencerRandomMode` Setting + wiring the 3-way branch into the
+  randomize gesture: ~0.15w.
+- Coherent-random implementation: ~0.2w.
+- Fill modal skeleton (fork CellEditor): ~0.2w.
+- Euclidean + Random + Ramp + Pulse + Clear generators (Lua): ~0.3w.
+- Per-column-type filtering + sub preview/gloss: ~0.15w.
+
+### Open design questions
+
+- **Selection requirement.** Fill needs an active selection to
+  define the row range. If the user invokes fill with no selection,
+  do we (a) refuse, (b) default to the whole column length, or
+  (c) default to the loop region? Loop region is probably the most
+  musical default.
+- **Euclidean on CV columns?** Euclidean naturally produces a
+  binary on/off pattern. On a CV column it'd alternate between
+  `on-value` and `off-value` -- usable for two-level CV patterns
+  but maybe better gated to gate-amp only. Decide in mockup.
+- **Seed exposure.** The Performer exposes `seed` as a dialable
+  param so a random pattern is reproducible. Worth doing -- pairs
+  with the deferred RNG-reproducibility item (#12) for a coherent
+  "deterministic randomness" story.
 
 ---
 
@@ -487,46 +1219,340 @@ implementation phase (step 5).
   or template-generated from a grammar table? Template-generation is the
   default unless a hand-authored variant proves clearer in mockup.
 
-- **StepListGraphic origin.** Plan cites
-  `er-301-habitat/mods/spreadsheet/StepListGraphic.h` as the visual idiom
-  to fork for the grid view. Habitat is a separate repo. Options: mirror
-  the file into stolmine, build a compatible widget fresh in
-  `xroot/Sequencer/`, or promote StepListGraphic into the firmware proper.
-  Engine work proceeds either way; decide before grid-view work
-  (implementation sequence step 4).
+- **StepListGraphic origin.** _Resolved 2026-05-12._ Built fresh in
+  `xroot/Sequencer/GridView.lua` using stock `app.Label` / `app.Drawing`
+  / `app.DrawingInstructions` primitives. No fork of Habitat's
+  `StepListGraphic.h` was needed; the widget is Lua-only, ~700 lines,
+  and depends on no C++ additions beyond the engine. The earlier
+  cross-reference to Habitat stands as a visual-idiom citation only.
 
 ---
 
 ## Implementation sequence (concrete order)
 
-1. **Engine first, no UI** — write the C++ slot data structure, predicate eval,
-   action applier, tick scheduler, source-buffer emission. Test via direct
-   register-poke from emu shell (Lua test harness). Prove the audio output is
-   correct in a chain context. **2 weeks.**
+1. ✅ **Engine first, no UI** — C++ slot data structure, predicate eval, action
+   applier, tick scheduler, source-buffer emission. Verified via Lua bench
+   harness (`xroot/sandbox/sequencer_bench.lua`): static-16-step-cv,
+   polymetric-5-and-7, l2-destructive-mod2-add1 all PASS on every boot.
+   Shipped in `ba75ad7`. **Step 1 done.**
 
-2. **External source registration + picker integration** — surface `seq*.*` in
-   the input picker. Verify they route to chain destinations. **0.5 week.**
+2. ✅ **External source registration + picker integration** — 24 `seq*` sources
+   (4 slots × 6 outputs) registered via `xroot/boot/app-setup.lua` and grouped
+   in `xroot/Source/ExternalChooser/init.lua` as `seq1`..`seq4`. Wireable
+   from any chain's input picker. Shipped in `ba75ad7`. **Step 2 done.**
 
-3. **Patch persistence** — round-trip the slot state in quicksave. Catch any
-   serialization edge cases early. **0.5 week.**
+3. ✅ **Patch persistence.** `xroot/Sequencer/Persist.lua` serializes
+   per-slot state (length, markers, dense L1 cells, sparse L2 rules
+   with row pins) into `data.sequencer`, hooked into
+   `xroot/Persist/QuickSavePreset.lua` `populate()` / `apply()`.
+   On load: each slot is force-stopped, stale cells cleared, saved
+   state applied via existing engine setters, then `resetSlot` clears
+   transient state. Skipped (per locked decisions): RNG state,
+   running flag, all transient runtime fields. Bench includes a 5th
+   `test_persistence_roundtrip` test exercising both predicate +
+   action row pins. Shipped in `bf2c312`. **Step 3 done.**
 
-4. **Read-only grid view** — render L1 + L2 with playhead but no editing. Iterate
-   the visual until it reads cleanly on the 256×64 main. **1 week.**
+4. ✅ **Read-only grid view** — `xroot/Sequencer/GridView.lua`. Six column
+   headers ("name:NN" with live playhead row counter), 6-row × 6-column cell
+   grid (font 9, 9 px pitch), 2-digit row ruler at the right edge.
+   Brightness-encoded state (out-of-loop / in-loop / focus / playhead /
+   focus+playhead modelled on teletype's pattern_mode.c). Cursor box outlines
+   `(focusHeadRow, columnCursor)`. Scope-mode `shift+ENTER` is the single
+   access path. Encoder threshold matches `Env.EncoderThreshold.Default`.
+   Shipped across `f8be7a7` → `ede9963`. **Step 4 done.**
 
-5. **Cell editor modal** — the meat of the UI work. 6-slot Keyboard.Slot fork.
-   Paper-mockup the type-aware operand display first; then code. **2 weeks.**
+5. ✅ **Cell editor (L1 inline + L2 modal).** L1 inline edit shipped in
+   `ede9963`: ENTER toggles "editingL1", encoder nudges by per-column
+   step, dial button cycles fine/coarse, shift selects super, shift+HOME
+   zeros the cell, ENTER while editing commits + advances focusHead
+   (Habitat-fluid). **L2 modal** shipped in `721a8e8`:
+   `xroot/Sequencer/CellEditor.lua` -- six tap-to-focus slots in the
+   order `predColA / predOp / predOperand / actTarget / actOp /
+   actOperand` so each side reads naturally (`A=3.5`, `B+1`). Cell-ref
+   slots (M1 / M4) support row pinning -- bare encoder increments row
+   index, S3 held + encoder cycles column letter, HOME clears the pin.
+   Engine struct extended with `Predicate.colARow` / `Action.targetRow`;
+   pin defaults to -1 (use that column's playhead). `setL2` grew two
+   args; `l2PredColARow` / `l2ActTgtRow` getters added. Live preview on
+   S1 + IF / THEN NL gloss on S2 / S3. shift+ENTER commits + advances
+   focusHead + stays in modal for Habitat-fluid sweep authoring.
+   **Step 5 done.**
 
-6. **Sub-display state machines + mark-start/end** — wire up the 3-ply layout
-   logic and per-column loop-marking cycle. **0.5 week.**
+   L2 fire indicator (Phase 2 polish): `Column.lastL2FiredRow` set in
+   `fireTick` step 3 when a rule evaluates true. GridView L2 layer
+   tracks per-column decay (~180 ms at 55 Hz) and renders a 2x2 dot on
+   the cell's right edge -- same primitive as the L1 dirty marker.
 
-7. **Selection + clipboard** — shift+scroll selection, COPY/CUT/CLEAR ops,
-   paste at focus head. **1 week.**
+6. ✅ **Sub-display state machines + mark-start/end.** Sub bar swaps
+   between selection (`copy / cut / rand`), mark modal
+   (`start|stop / end / _`), shift-paste overlay (`paste / _ / _` when
+   clipboard non-empty), and default (`start|stop / mark / _`).
+   Priority order: selection > marking > shift-paste > default. S2
+   drives a per-column mark modal: 1st press snapshots the existing
+   `(marker1, marker2)` and plants `markFirstMark` at focusHead;
+   encoder + HOME during the modal live-update marker2; 2nd press / UP
+   / ENTER / column-switch commit the normalized `(lo, hi)` pair;
+   CANCEL reverts to the snapshot. The same dotted-edge primitive
+   used for selection wraps the live `(firstMark..focusHead)` range.
+   S3 reset button was reclaimed; **playhead reset moved to
+   shift+HOME** outside the L1 cell editor (zeroReleased keeps its
+   zero-the-cell behaviour while editing). Shipped in `bf30bfe`,
+   `864b251`, `0b47789`, `3bf71d8`. **Step 6 done.**
 
-8. **Access path** — `shift+ENTER` toggle in scope mode, single path only.
-   **0.3 week.**
+7. ✅ **Selection + clipboard.** shift+scroll builds a row-range selection
+   on the active column. Bare encoder during selection bulk-edits all
+   selected cells (top-as-master snap then dial). `copy` / `cut` / `rand`
+   on S1/S2/S3 commit any in-flight bulk edit and run the action; CANCEL
+   reverts; UP commits. Shift-held overlay on the default sub bar reveals
+   `paste` on S1 when the clipboard is non-empty; paste lands at focus
+   head and advances focus head past the pasted region. Type-checked by
+   column category. Shipped across `e7aaea3` (Chunk A), `22d7b01`
+   (Chunk B + smooth scroll), `bf30bfe` (Chunk C), `864b251` (PASTE).
+   **Step 7 done.**
 
-9. **Polish + listen test** — under-load consistency, tempo sync, RNG reproducibility,
-   patch quicksave round-trips. **1 week.**
+8. ✅ **Access path** — `shift+ENTER` toggle in scope mode, single path.
+   Routed via `Channels.toggleSequencerSubView` from
+   `xroot/Chain/ScopeView.lua::commitReleased` (shift+ENTER dispatches as
+   commitReleased per `xroot/Application.lua:300-305`). Shipped in `ade1f44`.
+   **Step 8 done.**
+
+9. ✅ **Polish + listen test.** _v0.1 UI affordances + verification
+   complete (2026-05-15)._ All shipping items below are marked ✅;
+   the engine-refinement batch (8, 9, 11, 22) defers to v1.1, and
+   items 12 + 18 were dropped (not user-facing needs / collapsed
+   under the v2 layout change). Item 10 was resolved pre-v0.1 and
+   its stale TODO comments were cleaned up. **Step 9 closed --
+   v0.1 ready for listen-test phase.**
+
+   ### UI affordances
+
+   - **(1) L2 cell editor: persistent S3 hint on sub.** ✅
+     Shipped in `eea1e71`. `s3Hint = app.SubButton("col", 3)` lives
+     in the modal sub layout; always-on label regardless of S3 held
+     state. File: `xroot/Sequencer/CellEditor.lua`.
+
+   - **(2) Free shift+S3 from the layer toggle.** ✅ Unshifted S3
+     already does the layer toggle (bar always reads the OTHER
+     layer's name as the discoverable affordance). Shift+S3 was a
+     redundant duplicate kept "for muscle memory continuity";
+     removed to free that slot for the cell-clear gesture (item 21).
+     Shipped 2026-05-14. File: `xroot/Sequencer/GridView.lua`
+     subReleased shifted branch.
+
+   - **(3) In-takeover BPM control on shift+S2.** BPM is read-only
+     inside the takeover today (only editable via admin Settings).
+     Add `shift+S2 + encoder` to nudge BPM with fine/coarse/super
+     stepping. Applies in both L1 and L2 default views (NOT inside
+     selection or modal). Uniform value across all four slots. ~0.15w.
+
+   - **(4) Multi-slot grid view + picker.** ✅ Shipped in `eea1e71`.
+     `kDefaultSlot = 0` seeds `self.slot`; shift+M2..M5 picks slots
+     0..3 (M1 and M6 reserved). Slot indicator label refreshes live;
+     all `seq:`-prefixed calls in GridView read `self.slot`. The cell
+     editor modal takes `slot` as a ctor arg so it honors the active
+     slot on ENTER.
+
+   - **(5) L2 grid expanded-rule preview on shift+S1.** ✅
+     Shipped in `c32bdab` (alongside item 7). `previewLabel` on the
+     sub display renders one of two contents while shift is held:
+     `clip <...>` (paste-target preview when clipboard non-empty)
+     or `here <...>` (expanded L2 cell at the cursor when on L2 and
+     the cell is present). Clipboard preview wins when both apply.
+     Format helper is `fmtL2CellFull` in GridView (not factored to
+     a shared Format.lua module -- duplication accepted).
+
+   - **(6) Coherent random + fill generators.** _Superseded by the
+     "Fill / generators (v2 spec)" section above._ The original
+     shift+S3 placement is dropped in favour of a single
+     `sequencerRandomMode` admin toggle (simple / coherent / fill);
+     coherent random is one of the three modes, the fill modal is
+     the third. v2 work, ~1.0w total. See the v2 spec for the slot
+     layout, generator types (euclidean / random / ramp / pulse /
+     clear), and per-column-type filtering.
+
+   - **(7) Enable L2 selection (Phase 3-lite).** Lift the Phase 1
+     block on L2 selection/copy/cut/paste/random. Selection on L2
+     builds a row-range; clipboard distinguishes L1 vs L2 content;
+     cross-layer paste refuses. ~0.25w.
+
+   - **(13) L2 col-5 cell truncation tighter than other columns.** ✅
+     Shipped in `b92c87f`. `fmtL2Cell` now takes the column index;
+     col 5 (stL) truncates one char earlier so glyphs stay inside the
+     245-px boundary and don't collide with the ruler text.
+
+   - **(14) Out-of-loop cells one level dimmer.** ✅ Shipped in
+     `b92c87f`. `kBrightDim` dropped from 3 to 2 -- out-of-loop cells
+     read as visibly secondary against the 6-level in-loop normal.
+
+   - **(15) Cursor box dimmer when not in a "will-mutate" state.** ✅
+     Shipped in `b92c87f`. Nav-mode border = `app.GRAY5` (was
+     `GRAY10`); active-state border = `app.WHITE`. The brightness gap
+     now reads at a glance.
+
+   - **(16) Mark modal: S3 = "unify" -- snap all columns to the
+     marked region.** _Bare gesture shipped 2026-05-14 (`7097dfa`)._
+     During the mark modal, S3 applies the in-flight `(lo, hi)`
+     marker pair the user is defining on the active column to ALL
+     six columns at once, then exits the modal. Immediate-apply
+     today (no confirm).
+     **Remaining:** the `unifyConfirm` gate -- a flat Setting under
+     the "Sequencer" subheading (see the "Sequencer settings"
+     section above), NOT the admin Sequencer section. "yes" -> S3
+     prompts a confirm dialog before fanning markers; "no" ->
+     current immediate-apply. ~0.05w once the subheading exists.
+     File: `xroot/Sequencer/GridView.lua` mark-modal subReleased
+     S3 branch reads `Settings.get("unifyConfirm")`.
+
+   - **(17) Settings toggle: quicksave restores transport state.** ✅
+     Shipped 2026-05-14. New Setting
+     `quickSaveRestoresSequencerTransport` (yes / no, default **no**)
+     under the Sequencer subheading. Engine getter
+     `SequencerTask::isSlotRunning(slot)` reads `Slot::running`;
+     `Persist.serialize` writes the per-slot flag unconditionally so
+     flipping the Setting on doesn't need a format bump.
+     `Persist.deserialize` consults the Setting once and restores
+     transport after `resetSlot`. Old quicksaves missing the
+     `running` field load as not-running. Bench coverage:
+     `test_persistence_transport_roundtrip` (9th test) exercises both
+     Setting paths against the same serialized data; restores the
+     user's prior Setting value regardless of pass / fail.
+
+   - **(18) Auto-gate fill setting.** ✗ **Dropped (2026-05-15).**
+     The v2 layout collapses gate-amp into a constant 1.0 and gates
+     are length-only across g1L / g2L. With no separate gate-amp
+     axis the "user dialed amp but forgot len" failure mode goes
+     away. Re-evaluate post-v2 if a g1L/g2L co-authoring helper
+     turns out to be useful, but no v0.1 work needed.
+
+   - **(23) Hide modal `col` S3 hint on non-cellref slots.** ✅
+     Shipped 2026-05-14. `_refresh` sets `s3Hint:setText(...)` to
+     `"col"` when `kSlotKind[focused].kind == "cellref"` (M1
+     predColA, M4 actTarget), empty otherwise. Convention here is
+     blank text rather than `:hide()` since SubButtons stay laid out
+     either way. File: `xroot/Sequencer/CellEditor.lua`.
+
+   - **(21) Shift+S3 = clear / zero on the focused cell.** ✅
+     Shipped 2026-05-14. Both layers, single-cell clear at
+     `(focusHeadRow, columnCursor)`:
+       - **L1:** writes 0.0 to the cell via `setL1`.
+       - **L2:** clears the cell (`L2Cell.present = false`) via
+         `clearL2` -- distinct from authoring a no-op rule
+         (`present=true, action=ACTION_NONE`); the cell is removed
+         entirely.
+     Gated on `markingMode == "idle"` so the modal's S3 unify
+     gesture is not overridden mid-mark. Selection-mode shift+S3
+     stays as coherent-rand (gated upstream by the
+     `selectionActive` branch returning early). Sub-label swaps to
+     "clr" when shift is held on the default bar.
+     File: `xroot/Sequencer/GridView.lua` subReleased shifted
+     branch + refresh sub-label swap.
+
+   - **(20) TIE value at the top of the gate-length step parameter.** ✅
+     Shipped 2026-05-14. **Sentinel at the TOP of the range** (not
+     below 0): gate-len 4.0 is the editor ceiling and the engine
+     treats values at or above `kTieThreshold = 3.999` as TIE.
+     Dialing up always lands on exactly 4.0 (clamp), so the
+     "max = TIE" affordance is unmistakable. `fmtBeats` renders the
+     sentinel as `"TIE  "`. Random pool max dropped to 2.0 so
+     random rolls never collide with TIE.
+     Semantics: **extend-or-start**. TIE row with `gate-amp > 0`:
+       - gate in flight (gateRemainingSamples > 0): refresh
+         `gateRemainingSamples = samplesPerTick`, leave heldGateAmp
+         + firedThisTick alone (no edge -- legato).
+       - no gate in flight: start a fresh full-step gate WITH edge
+         (`firedThisTick = true`). A TIE in isolation reads as a
+         full-width gate.
+     Step-len floor: the same edit-clamp helper enforces step-len
+     `>= 0.0625` (= "1/16" per fmtBeats) so the user can no longer
+     author 0 / negative step-len that would hang the playhead. UI
+     fine-step (0.25) makes dial-reachable values ≥ 0.25 in practice.
+     Engine: `od/sequencer/Sequencer.cpp` fireTick step 2.
+     New accessor: `SequencerTask::firedThisTick(int slot) const`
+     for bench coverage (ABI-safe addition).
+     Bench: `test_tie_legato` + `test_tie_start_no_prior` cover both
+     branches.
+
+   ### Engine + audio refinement -- all deferred to v1.1 (2026-05-15)
+
+   None of these are correctness blockers for v0.1. Listen-test
+   coverage from hardware sessions has not surfaced audible drift,
+   glitching, or RNG-reproducibility complaints, and the
+   encoder-capture stall (22) only bites above ~75% global CPU
+   where the chain UI is also under stress. Park the engine
+   refinement batch as a v1.1 milestone; revisit after v0.1 ships.
+
+   - **(8) Audio-thread priority audit.** ⏸ v1.1. Measure tick
+     jitter under load; bump task priority if drift shows up.
+
+   - **(9) Sample-accurate tick scheduling.** ⏸ v1.1. Refactor
+     `processFrame` to split frames at tick boundaries. Up to
+     ~2.6 ms jitter at 48 kHz / 128-sample frames; not audible in
+     practice on hardware so far.
+
+   - **(10) Gate-row source disambiguation.** ✅ **Resolved
+     pre-v0.1.** The "gate-row resolution" block in `Sequencer.h`
+     locks in "each column reads from its OWN playhead row" (gate-
+     len + gate-amp both polymetric). fireTick at Sequencer.cpp
+     reflects this; PRED_FIRE stays slot-level for v0.1, with the
+     v2 grammar adding per-gate PRED_FIRE1 / PRED_FIRE2 alongside.
+     2026-05-15: cleaned up the stale "TODO(gate-row)" doc comments
+     in `Sequencer.cpp:101-116` and `Sequencer.h:201-205` to match
+     the resolved state.
+
+   - **(11) gate-len / gate-amp / step-len under load.** ⏸ v1.1.
+     Listen test + targeted bench scripts to verify no envelope
+     glitching at tick boundaries under heavy patches.
+
+   - **(12) RNG reproducibility.** ✗ **Dropped (2026-05-15).** Not
+     a user-facing need. The locked decision tolerates non-deterministic
+     evolution; nobody has asked for "rewind" or "same seed twice"
+     workflows, and quicksaves capture the L1/L2 state directly
+     anyway. If the workflow ask appears later, path (b) (explicit
+     shift+HOME re-seed gesture) is ~0.1w.
+
+   - **(22) Encoder-capture stall under CPU load.** ⏸ v1.1. Only
+     bites above ~75% global CPU; chain UI is also under stress
+     there. Audio output stays clean (clock + step content
+     unaffected). Diagnosis candidates and instrumentation plan
+     captured in the original entry (see git log for `f4bb076`).
+     Re-open when the listen-test phase produces a patch that
+     pushes the boundary in normal use.
+
+   ### Verification
+
+   - Multi-slot non-interference under playback (all 4 slots ticking
+     distinct patterns, no cross-bleed).
+   - Quicksave round-trip across firmware reboot with playback
+     resuming as authored.
+   - Long-run listen test (~30 min).
+   - Bench expansion: row-pinned predicate/action, multi-slot
+     independence, L2 selection round-trip (post item 7).
+
+   ### Intentionally dropped from polish
+
+   - **L2 cell-editor "delete this cell" gesture.** Covered by
+     selection-mode CUT (once L2 selection lands in item 7) and by
+     per-cell zero-out in the existing modal flow.
+
+   ### Sub-bar state table — proposed post-Step 9
+
+   | Layer | Selection | Marking | Clipboard | Shift | S1 | S2 | S3 |
+   |---|---|---|---|---|---|---|---|
+   | L1 | No  | No  | Empty     | No  | start\|stop      | mark | L2 |
+   | L1 | No  | No  | Empty     | Yes | —                | BPM  | **clr** |
+   | L1 | No  | No  | Non-empty | Yes | paste            | BPM  | **clr** |
+   | L1 | No  | Yes | (any)     | (any) | start\|stop    | end  | — |
+   | L1 | Yes | —   | (any)     | No  | copy             | cut  | rand |
+   | L1 | Yes | —   | (any)     | Yes | copy             | cut  | coherent rand |
+   | L2 | No  | No  | Empty     | No  | start\|stop      | mark | L1 |
+   | L2 | No  | No  | Empty     | Yes | rule preview     | BPM  | **clr** |
+   | L2 | No  | No  | Non-empty | Yes | paste + clip preview | BPM | **clr** |
+   | L2 | Yes | —   | (any)     | (any) | copy / cut / rand | | |
+
+   Note: unshifted S3 stays as the layer-toggle (item 2). Shift+S3 is
+   the new cell-clear gesture (item 21) on both L1 and L2 default
+   sub bars. Selection-mode shift+S3 keeps its "coherent rand"
+   binding -- clear-cell only lives on the default bar.
 
 ---
 

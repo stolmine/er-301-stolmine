@@ -143,6 +143,12 @@ local function onDisplayReady()
     Timer.update(timerDelta)
     timerUpdateCount = 0
   end
+  -- Per-display-frame signal at GRAPHICS_REFRESH_RATE (55 Hz). Views
+  -- that need finer-than-Timer.update granularity (e.g., sequencer
+  -- playhead tracking at ~8+ Hz) subscribe to this rather than using
+  -- Timer.every, which is throttled to ~5 Hz by the timerUpdatePeriod
+  -- above.
+  Signal.emit("onDisplayFrame")
   updateDisplay()
 end
 

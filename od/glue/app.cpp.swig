@@ -70,6 +70,7 @@
 #include <od/tasks/ObjectList.h>
 #include <od/tasks/InputTask.h>
 #include <od/tasks/OutputTask.h>
+#include <od/tasks/SequencerTask.h>
 
 // units
 
@@ -293,6 +294,7 @@ bool Uart_isEnabled();
 %include <od/tasks/ObjectList.h>
 %include <od/tasks/InputTask.h>
 %include <od/tasks/OutputTask.h>
+%include <od/tasks/SequencerTask.h>
 
 // units
 

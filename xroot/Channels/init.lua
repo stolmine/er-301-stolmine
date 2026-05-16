@@ -302,6 +302,16 @@ local function setViewMode(s)
   generic("setMode", nil, s)
 end
 
+local function toggleSequencerSubView()
+  -- Only the current channel toggles; the others stay in whichever
+  -- sub-view they were last in. Matches "current channel is the user's
+  -- focus" semantics throughout the rest of this module.
+  local g = c2g[current]
+  if g and g.toggleSequencerSubView then
+    g:toggleSequencerSubView()
+  end
+end
+
 local function show()
   c2g[current]:show()
 
@@ -441,6 +451,7 @@ return {
   toggleMute = toggleMute,
   clear = clear,
   setViewMode = setViewMode,
+  toggleSequencerSubView = toggleSequencerSubView,
   show = show,
   select = select,
   selected = selected,
