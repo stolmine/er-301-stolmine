@@ -12,7 +12,7 @@ standard scope display.
 2. The grid shows 6 columns and 6 visible rows. Top row is the column
    header; cells below show L1 values.
 3. Encoder scrolls the focus head; `M1..M6` jump the column cursor.
-4. Pressing `ENTER` while focus on a cell has different effects in L1 and L2. In L1, this enters edit mode where the encoder adjust the value in-step. In L2 it opens the expression editor for the given cell.
+4. Pressing `ENTER` while focused on a cell has different effects in L1 and L2. In L1, this enters edit mode where the encoder adjusts the value in-step. In L2 it opens the expression editor for the given cell.
 5. `S1` starts/stops all slots together. The slot's CV and gates show
    up on the chain picker as `seqN.cv1`, `seqN.cv2`, `seqN.gate1`,
    `seqN.gate2` (slot `N` is 1..4).
