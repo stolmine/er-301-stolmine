@@ -302,6 +302,36 @@ appearing 1-2x) to keep density-on-roll musically sensible. Or leave
 uniform and let the user roll a rest more often. Pick before
 implementation.
 
+## Sequencer: Mark Mode vs Edit Mode Conflict (target: .9.2.1)
+Pressing `S2` to enter mark mode while in L1 inline-edit mode lets
+both modes coexist. Encoder is then ambiguous (nudge value vs.
+live-update marker2), and the visual cursor / sub-bar reads
+incorrectly for at least one of them.
+
+**Mechanism**: `xroot/Sequencer/GridView.lua:1471-1490` (`subReleased`
+case `i == 2`) flips `self.markingMode = "marking_end"` without
+checking `self.editingL1`. The two state machines are independent.
+
+**Fix**: at the top of the `elseif i == 2 then` branch, force-commit
+any in-flight L1 edit before entering mark mode:
+```lua
+elseif i == 2 then
+  -- If user was inline-editing an L1 cell, commit-and-exit edit
+  -- before entering / toggling mark mode. The cell value has been
+  -- live-pushed to the engine on every encoder tick during the
+  -- edit, so "commit" just means dropping the editingL1 flag.
+  if self.editingL1 then
+    self.editingL1 = false
+  end
+  if self.markingMode == "idle" then
+    ...
+```
+
+The same defensive check probably belongs on any other modal-entry
+gesture that could collide with edit mode (selection extension via
+shift+encoder, mark-modal exit S3 unify, etc.). Audit the
+subReleased and subPressed branches for parallel cases while at it.
+
 ## Encoder Capture Under UI Saturation
 In certain states the system reaches CPU saturation and encoder input becomes
 effectively unresponsive — encoder movement is still *queued*, but so far
