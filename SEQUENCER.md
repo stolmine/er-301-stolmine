@@ -12,9 +12,7 @@ standard scope display.
 2. The grid shows 6 columns and 6 visible rows. Top row is the column
    header; cells below show L1 values.
 3. Encoder scrolls the focus head; `M1..M6` jump the column cursor.
-4. Press `ENTER` on a cell to open the cell-edit modal. In L1 the
-   modal nudges the cell value; in L2 it authors a predicate:action
-   rule.
+4. Pressing `ENTER` while focus on a cell has different effects in L1 and L2. In L1, this enters edit mode where the encoder adjust the value in-step. In L2 it opens the expression editor for the given cell.
 5. `S1` starts/stops all slots together. The slot's CV and gates show
    up on the chain picker as `seqN.cv1`, `seqN.cv2`, `seqN.gate1`,
    `seqN.gate2` (slot `N` is 1..4).
@@ -35,7 +33,7 @@ internal (used by the engine only).
 | 5 | `tr`  | transpose (semitones) | shifts cv1 only | internal |
 
 Gate amplitude is constant 1.0; gate columns store length only. A
-gate-len cell value of 0 means "skip this row" (no gate). A value of
+gate-len cell value of 0 means "mute" (no gate). A value of
 `4.0` (top of the dial range) is the `TIE` sentinel: gate held across
 the full step. Random rolls on gate-len exclude `4.0` so TIE is only
 ever authored deliberately.
@@ -53,26 +51,28 @@ the transposed value is what the cv1 audio buffer carries.
 
 | Button | Behavior (grid view) |
 |---|---|
+| `ENTER` | Enters edit mode/modal on given cell |
 | Encoder | Scroll focus head (one row per click) |
 | `shift+Encoder` | Build a row-range selection on the focused column |
 | `M1..M6` | Jump column cursor to column 1..6 |
 | `shift+M2..M5` | Switch to slot 1..4 |
-| `HOME` | Jump focus head to the active slot's playhead row |
-| `shift+HOME` | Reset all slots' playheads to row 0 |
-| `CANCEL` | Jump focus head to row 0 |
-| `UP` | Toggle L1 layer / L2 layer |
-| `S3` (default sub bar) | Same as UP, toggle layer |
+| `HOME` | Jump focus to row 0 |
+| `UP` | Unselect, leave modal, etc |
+| `S2` (default sub bar) | mark start/end |
+| `S3` (default sub bar) | toggle layer |
 | `shift+ENTER` | Toggle takeover on/off |
 
 Focus-head and column-cursor together define the **active cell**, drawn
-as a thin box. `ENTER` opens the cell-edit modal for that cell.
+as a thin box. `ENTER` starts the cell-edit modal for the given position.
 
 ## Editing L1 cells
 
 `ENTER` on an L1 cell enters inline-edit mode: the encoder nudges the
 value, M-keys still jump columns (committing the in-flight edit and
-focusing the new cell), `ENTER` again exits edit mode. Per-column nudge
-sizes:
+focusing the new cell), `ENTER` again moves down a cell and stays in edit mode for convenience. 
+Up exits edit mode and commits value, cancel exits edit mode without committing.
+
+Per-column nudge sizes:
 
 | column | fine | coarse | super-fine | super-coarse |
 |---|---|---|---|---|
@@ -101,11 +101,7 @@ on the cell's row. The cell-edit modal exposes 6 slots:
 | M5 | action operator | choice |
 | M6 | action operand | number |
 
-**Hold a slot button (M1..M6)** to focus that slot for encoder edit;
-release to release focus. On cell-ref slots, `S3` held + encoder cycles
-the column letter (A=cv1, B=cv2, C=g1L, D=g2L, E=stL, F=tr).
-
-### Predicates
+### Predicates (IF condition is met...)
 
 | symbol | name | when it fires |
 |---|---|---|
@@ -114,13 +110,13 @@ the column letter (A=cv1, B=cv2, C=g1L, D=g2L, E=stL, F=tr).
 | `>N` | greater than | colA > N |
 | `<N` | less than | colA < N |
 | `?N` | probability | true with N% probability per tick |
-| `~N` | approx equals | colA approximately == N |
+| `~N` | approx equals | colA approximately == N (within 0.05)|
 | `!`  | any gate fires | gate1 OR gate2 produced an edge this tick |
 | `!1` | gate1 fires | gate1 produced an edge this tick |
 | `!2` | gate2 fires | gate2 produced an edge this tick |
 | `c`  | changed | colA's playhead-row value changed since last tick |
 
-### Actions
+### Actions (THEN perform this action on target)
 
 | symbol | name | effect on target cell |
 |---|---|---|
@@ -158,10 +154,9 @@ Example rules:
 | `shift` held, default | (paste if clipboard) | `BPM` latch | `clr` cell |
 | `shift+S2` held / latched | encoder routes to BPM | -- | -- |
 | Selection active | `copy` | `cut` | `rand` |
-| Selection + shift | `copy` | `cut` | `coherent rand` |
-| Mark modal | `start/stop` | `end` (commit) | `unify` (all cols) |
+| Mark modal | `start/stop` | `end` (commit) | `unify` (all cols will get same start/end as proposed) |
 
-`shift+S2` latches the BPM fader: tap S2 to release. Fine = 0.1 BPM
+`hold shift+S2` latches the BPM fader: tap S2 to release. Fine = 0.1 BPM
 per tick, coarse = 1.0 BPM per tick.
 
 `shift+S3` (default sub bar, no selection, no marking) clears the
