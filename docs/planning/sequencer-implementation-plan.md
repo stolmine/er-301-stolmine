@@ -818,9 +818,15 @@ Lua side adds:
 
 ---
 
-## v2 column layout -- 2 CV + 2 gate + transpose meta (locked-in for v2)
+## v2 column layout -- 2 CV + 2 gate + transpose meta (✅ SHIPPED 2026-05-15)
 
-This replaces the previously-drafted per-slot 1-gate/2-gate toggle.
+Phase 1 in `8e217ca` (engine + dual gates + transpose pre-application
++ picker rename + bench). Phase 2 in this turn's commit (GridView +
+CellEditor catch-up + Persist `schemaVersion=2` + v1->v2 migration +
+bench migration test). Bench: 15/15 PASS. v0.1 quicksaves load cleanly
+with documented log lines for cv3 neutering + gate-amp-to-g2L mapping.
+
+This replaced the previously-drafted per-slot 1-gate/2-gate toggle.
 After working with the v0.1 layout on hardware and considering
 modular conventions, the v2 layout drops gate-amp as a column and
 trades cv3 for a second independent gate, plus a per-row transpose

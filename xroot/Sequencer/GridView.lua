@@ -23,9 +23,11 @@ GridView:include(Window)
 -- among the 4 sequencer slots. Methods read self.slot at runtime.
 local kDefaultSlot = 0
 
--- Column-name labels (matching seqN.<name> picker entries, kept to 3
--- chars so the header "name:NN" fits in 6 chars / ~30 px at font 8).
-local kColNames = { "cv1", "cv2", "cv3", "gtL", "gtA", "stL" }
+-- Column-name labels (matching the v2 layout, kept to 3 chars so the
+-- header "name:NN" fits in 6 chars / ~30 px at font 8). cv1 / cv2 +
+-- gate1 / gate2 lengths + step-len + transpose meta. v0.1 had cv3 +
+-- gtL + gtA + stL; the migration drops cv3 and gate-amp.
+local kColNames = { "cv1", "cv2", "g1L", "g2L", "stL", "tr " }
 
 -- Layout constants.
 local kFontHeader = 9                -- header row: font 9
@@ -63,10 +65,18 @@ local function fmtNote(volts)
   return string.format("%-2s%3d", kNoteNames[n + 1], oct)
 end
 
--- CV2/CV3: signed volts with one decimal: " 1.5", "-1.5", " 10.0", "-10.0".
+-- CV2: signed volts with one decimal: " 1.5", "-1.5", " 10.0", "-10.0".
 local function fmtVolts(v)
   if v ~= v then return "  NaN" end
   return string.format("%5.1f", v)
+end
+
+-- Transpose: signed integer semitones, right-aligned 5-char field.
+-- Renders " +0  ", "+12  ", " -5  " etc. Per-row int-semitone offset
+-- that the engine pre-applies to cv1's sample-and-hold each tick.
+local function fmtTranspose(v)
+  if v ~= v then return "  NaN" end
+  return string.format("%+4d ", math.floor(v + 0.5))
 end
 
 -- gate-len / step-len: beats. Common musical fractions get clean names.
@@ -88,12 +98,6 @@ local function fmtBeats(v)
   return string.format("%5.2f", v)
 end
 
--- gate-amp: 0..1 envelope amplitude.
-local function fmtAmp(v)
-  if v ~= v then return "  NaN" end
-  return string.format(" %4.2f", v)
-end
-
 -- step-len: clock ticks per row. Engine stores the value in beats
 -- (1.0 = quarter note); at the locked 4 PPQN this is 4 ticks per
 -- beat, so ticks = beats * 4. Displayed as an integer so the user
@@ -104,11 +108,11 @@ local function fmtTicks(v)
 end
 
 local function fmtCellByCol(col, v)
-  if col == 0 then return fmtNote(v) end
-  if col == 1 or col == 2 then return fmtVolts(v) end
-  if col == 3 then return fmtBeats(v) end   -- gate-len: fractional beats
-  if col == 5 then return fmtTicks(v) end   -- step-len: integer ticks
-  if col == 4 then return fmtAmp(v) end
+  if col == 0 then return fmtNote(v) end       -- cv1 V/oct (raw, pre-transpose)
+  if col == 1 then return fmtVolts(v) end      -- cv2 raw volts
+  if col == 2 or col == 3 then return fmtBeats(v) end  -- g1L / g2L beats (incl. TIE)
+  if col == 4 then return fmtTicks(v) end      -- stL integer ticks
+  if col == 5 then return fmtTranspose(v) end  -- tr signed semitones
   return string.format("%5.2f", v)
 end
 
@@ -526,23 +530,24 @@ local kEncoderThreshold = Env.EncoderThreshold.Default
 -- Per-column nudge step when editing an L1 cell value. Each column
 -- declares 4 step sizes covering the rate ramp: fine, coarse, and the
 -- "super" variants of each (shift held). Tuned for musical units per
--- column type:
---   CV1 (V/oct):    1 semi  / 1 oct  / 1 cent  / 12 oct
---   CV2, CV3:       100 mV  / 1 V    / 10 mV   / 10 V
---   gate-len:       1/16   / 1/4    / 1/64    / 1 beat (fractional)
---   gate-amp:       5%     / 20%    / 1.25%   / 80%
---   step-len:       1 tick / 4 ticks / 1 tick / 16 ticks (integer ticks
---                   only -- the engine's 4 PPQN base means 1 tick = 1/16
---                   note = 0.25 beats; sub-tick steps would land off-
---                   grid and read as ugly decimals in the column, so
---                   super-fine matches fine.)
+-- column type (v2 layout):
+--   cv1 (V/oct):    1 semi  / 1 oct  / 1 cent  / 12 oct
+--   cv2 (volts):    100 mV  / 1 V    / 10 mV   / 10 V
+--   g1L, g2L:       1/16    / 1/4    / 1/64    / 1 beat (fractional)
+--   stL (ticks):    1 tick  / 4 ticks/ 1 tick  / 16 ticks (integer
+--                   ticks only -- 4 PPQN = 1 tick = 1/16 note = 0.25
+--                   beats; sub-tick steps would land off-grid and
+--                   read as ugly decimals, so super-fine matches fine.)
+--   tr (semitones): 1 semi  / 12 semi/ 1 semi  / 24 semi (octave on
+--                   coarse, two-octave super; sub-semitone makes no
+--                   musical sense for transpose so super-fine == fine.)
 local kColumnSteps = {
   [0] = { fine = 1/12,   coarse = 1.0,    superFine = 1/120,  superCoarse = 12.0 },
   [1] = { fine = 0.1,    coarse = 1.0,    superFine = 0.01,   superCoarse = 10.0 },
-  [2] = { fine = 0.1,    coarse = 1.0,    superFine = 0.01,   superCoarse = 10.0 },
+  [2] = { fine = 0.0625, coarse = 0.25,   superFine = 0.0156, superCoarse = 1.0  },
   [3] = { fine = 0.0625, coarse = 0.25,   superFine = 0.0156, superCoarse = 1.0  },
-  [4] = { fine = 0.05,   coarse = 0.2,    superFine = 0.0125, superCoarse = 0.8  },
-  [5] = { fine = 0.25,   coarse = 1.0,    superFine = 0.25,   superCoarse = 4.0  },
+  [4] = { fine = 0.25,   coarse = 1.0,    superFine = 0.25,   superCoarse = 4.0  },
+  [5] = { fine = 1.0,    coarse = 12.0,   superFine = 1.0,    superCoarse = 24.0 },
 }
 
 -- Dial button toggles "fine" <-> "coarse"; shift held picks the
@@ -557,20 +562,29 @@ local function stepForColumn(col, editStepMode, shifted)
 end
 
 -- Per-column edit clamps for the inline + bulk encoder edits.
--- gate-len: [0, 4.0]. 4.0 is the TIE sentinel (engine threshold 3.999);
---           any newV > 4.0 snaps to exactly 4.0 so dialing up always
---           lands on TIE cleanly without "overshoot" floats.
--- step-len: floor at 0.0625 (= "1/16" per fmtBeats) -- the engine's
---           safety fallback at 0 catches accidents, but preventing
---           authoring of 0 or negative step-len in the UI is cleaner.
--- Other columns: pass through unclamped (CV columns have no
--- hardware-meaningful bounds beyond the audio-buffer scale at output).
+-- g1L / g2L: [0, 4.0]. 4.0 is the TIE sentinel (engine threshold 3.999);
+--            any newV > 4.0 snaps to exactly 4.0 so dialing up always
+--            lands on TIE cleanly without "overshoot" floats.
+-- stL:       floor at 0.0625 (= "1/16" per fmtBeats) -- the engine's
+--            safety fallback at 0 catches accidents, but preventing
+--            authoring of 0 or negative step-len in the UI is cleaner.
+-- tr:        [-60, +60] semitones (5 octaves either way). Beyond that
+--            cv1 + tr/12 leaves any sensible V/oct range anyway.
+-- Other columns: pass through unclamped (CV columns have no hardware-
+-- meaningful bounds beyond the audio-buffer scale at output).
 local function clampForColumn(col, newV)
-  if col == 3 then
+  if col == 2 or col == 3 then
     if newV > 4.0 then return 4.0 end
     if newV < 0.0 then return 0.0 end
-  elseif col == 5 then
+  elseif col == 4 then
     if newV < 0.0625 then return 0.0625 end
+  elseif col == 5 then
+    if newV > 60.0 then return 60.0 end
+    if newV < -60.0 then return -60.0 end
+    -- Snap to integer semitones -- transpose is a discrete musical
+    -- value, so any sub-semitone drift from float math is cosmetic
+    -- garbage in the cell display.
+    return math.floor(newV + 0.5)
   end
   return newV
 end
@@ -659,9 +673,13 @@ local clipboard = nil
 -- defensible (semitones become a step pattern in V), so the plan
 -- allows it. The strict-same-column policy is a future opt-in.
 local function columnCategory(col)
-  if col == 0 or col == 1 or col == 2 then return "cv"   end
-  if col == 3 or col == 5             then return "time" end
-  if col == 4                         then return "amp"  end
+  -- v2 categories: cv1 + cv2 = "cv"; g1L + g2L + stL = "time" (all
+  -- in beats); tr = "transpose" (signed semitones -- distinct enough
+  -- from "cv" that pasting a CV pattern into tr would produce
+  -- non-musical micro-shifts).
+  if col == 0 or col == 1                 then return "cv"        end
+  if col == 2 or col == 3 or col == 4     then return "time"      end
+  if col == 5                             then return "transpose" end
   return "unknown"
 end
 
@@ -692,34 +710,45 @@ end
 
 -- Per-column random value generator for the RANDOMIZE action. The
 -- distributions match the column's typed range so randomized values
--- look musically sensible: ±5 octaves for V/oct, ±5 V for raw CV,
--- common-fraction beats for length columns, 0..1 amplitude for gates.
--- gate-len random pool stops at 2.0 -- 4.0 would collide with TIE
--- (sentinel value at the editor's max), and randomly authoring a
--- legato gate is rarely the intent. Coherent / fill modes can
--- surface TIE explicitly via dedicated authoring affordances.
+-- look musically sensible (v2 layout):
+--   cv1: ±5 octaves on V/oct
+--   cv2: ±5 V raw, 0.1 V resolution
+--   g1L / g2L: common-fraction beats, max 2.0 (4.0 = TIE excluded)
+--   stL: integer-tick multiples, 1..32 ticks (= 1/16..double-whole)
+--   tr:  biased palette favouring 0 / perfect 5ths / octaves
+-- gate-len pool excludes 4.0 because that collides with the TIE
+-- sentinel; a random TIE is rarely the intent. Coherent / fill
+-- modes can surface TIE explicitly via dedicated authoring.
 local kRandomBeats = { 0.0625, 0.125, 0.25, 0.5, 1.0, 2.0 }
 -- Step-len draws from integer-tick multiples only. 1 tick = 0.25 beats
 -- at the engine's 4 PPQN. Choices map to 1, 2, 4, 8, 16, 32 ticks --
 -- i.e. 1/16, 1/8, 1/4, 1/2, whole, double-whole notes.
 local kRandomStepTicks = { 1, 2, 4, 8, 16, 32 }
+-- Transpose draws from a biased palette: zero-weighted so the column
+-- mostly sits at 0 (no shift), then perfect-5th (±5, ±7) and octave
+-- (±12) jumps for musical interest when it does fire. Mirrors the
+-- ACTION_RAND palette in od/sequencer/ActionApply.cpp.
+local kRandomTransposePalette = {
+  0, 0, 0, 0, 0,
+  -12, -7, -5,
+  0, 5, 7, 12
+}
 local function randomForColumn(col)
   if col == 0 then
-    -- CV1 (V/oct): random semitone in -60..+60 (5 octaves each way).
+    -- cv1 (V/oct): random semitone in -60..+60 (5 octaves each way).
     return math.random(-60, 60) / 12.0
-  elseif col == 1 or col == 2 then
-    -- CV2 / CV3: -5..+5 V, 0.1 V resolution.
+  elseif col == 1 then
+    -- cv2 raw volts: -5..+5 V, 0.1 V resolution.
     return math.random(-50, 50) / 10.0
-  elseif col == 3 then
-    -- gate-len: draw from the common-fraction set (fractional beats
-    -- allowed for envelope duration -- sub-tick is fine here).
+  elseif col == 2 or col == 3 then
+    -- g1L / g2L: common-fraction beats. 4.0 (TIE) intentionally excluded.
     return kRandomBeats[math.random(1, #kRandomBeats)]
-  elseif col == 5 then
-    -- step-len: integer tick count converted back to beats.
-    return kRandomStepTicks[math.random(1, #kRandomStepTicks)] * 0.25
   elseif col == 4 then
-    -- gate-amp: 0..1, 0.05 step.
-    return math.random(0, 20) / 20.0
+    -- stL: integer tick count converted back to beats.
+    return kRandomStepTicks[math.random(1, #kRandomStepTicks)] * 0.25
+  elseif col == 5 then
+    -- tr: biased palette (zero-weighted, pentatonic + octaves).
+    return kRandomTransposePalette[math.random(1, #kRandomTransposePalette)]
   end
   return 0.0
 end

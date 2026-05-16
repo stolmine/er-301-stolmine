@@ -544,6 +544,170 @@ local function test_tie_start_no_prior()
 end
 
 -- ---------------------------------------------------------------------------
+-- Test 5h: quicksave v1 -> v2 schema migration.
+--
+-- Hand-author a v0.1-shape data table (no schemaVersion field, old
+-- 6-column layout: cv1/cv2/cv3/gtL/gtA/stL) with recognizable values
+-- across every column including cv3 references and non-zero gate-amp
+-- rows + L2 rules that reference the soon-to-be-remapped columns.
+-- Load via Persist.deserialize; assert the engine state reflects the
+-- v2 layout: cv3 dropped, gate-amp -> 0.25-beat g2L, indices shifted,
+-- L2 column refs remapped (cv3 -> -1 host).
+-- ---------------------------------------------------------------------------
+local function test_quicksave_v1_to_v2_migration()
+  local name = "quicksave-v1-to-v2-migration"
+  local Persist = require "Sequencer.Persist"
+
+  -- Build a minimal v1-shape data table for slot SLOT+1 only (other
+  -- slots stay nil; deserialize tolerates that). Six columns per slot
+  -- with column indices keyed 1..6 in the Lua table (0..5 engine-side).
+  local function blankCol(len)
+    local l1 = {}
+    for r = 1, 64 do l1[r] = 0.0 end
+    return { length = len or 16, marker1 = 0, marker2 = (len or 16) - 1,
+             l1 = l1, l2 = {} }
+  end
+
+  local v1_data = { slots = {} }   -- no schemaVersion = v1
+  for s = 1, 4 do
+    v1_data.slots[s] = { running = false, columns = {} }
+    for c = 1, 6 do v1_data.slots[s].columns[c] = blankCol(16) end
+  end
+  local slot = v1_data.slots[SLOT + 1]
+
+  -- cv1 (col 1): known V/oct values at rows 0/1/2.
+  slot.columns[1].l1[1] = 0.0
+  slot.columns[1].l1[2] = 1.0       -- +1 octave
+  slot.columns[1].l1[3] = 7 / 12.0  -- +7 semis
+  -- cv2 (col 2): raw volts.
+  slot.columns[2].l1[1] = 2.5
+  -- cv3 (col 3, will be DROPPED): non-zero value should not survive.
+  slot.columns[3].l1[1] = 9.9
+  -- gtL (col 4, will become g1L at v2 col 2): markers + L1 verbatim.
+  slot.columns[4].length  = 8
+  slot.columns[4].marker1 = 2
+  slot.columns[4].marker2 = 5
+  slot.columns[4].l1[1]   = 0.25
+  slot.columns[4].l1[2]   = 0.5
+  -- gtA (col 5, will become g2L at v2 col 3): non-zero amp -> 0.25 beats
+  slot.columns[5].l1[1] = 0.0  -- stays 0
+  slot.columns[5].l1[2] = 1.0  -- -> 0.25 (g2L beats)
+  slot.columns[5].l1[3] = 0.7  -- -> 0.25 (g2L beats)
+  -- stL (col 6, will become stL at v2 col 4): verbatim.
+  slot.columns[6].l1[1] = 0.5
+
+  -- L2 rules referencing the soon-to-be-remapped column indices:
+  --   on cv1 row 0: PRED_EQ on colA = 3 (cv3) operand 9.9 -> ACTION_ADD targetCol = 5 (gtA) +1
+  --     after migration: colA should be -1 (cv3 neutered), targetCol should be 3 (g2L).
+  slot.columns[1].l2[0] = {
+    predOp = PRED_EQ, predColA = 2, predColARow = -1, predVal = 9.9,
+    actOp = ACTION_ADD, actTgt = 4, actTgtRow = -1, actVal = 1.0,
+  }
+  --   on cv2 row 0: PRED_GT on colA = 4 (gtL) operand 0.4 -> ACTION_SET targetCol = 5 (gtA) = 0.5
+  --     after migration: colA should be 2 (g1L), targetCol should be 3 (g2L).
+  slot.columns[2].l2[0] = {
+    predOp = PRED_GT, predColA = 3, predColARow = -1, predVal = 0.4,
+    actOp = ACTION_SET, actTgt = 4, actTgtRow = -1, actVal = 0.5,
+  }
+
+  -- Stop the slot + apply.
+  seq:stopSlot(SLOT)
+  Persist.deserialize(v1_data)
+
+  -- v2 col 0 (cv1): values intact.
+  if not approxEq(seq:l1Value(SLOT, COL_CV1, 0), 0.0) then
+    fail(name, "cv1[0] != 0 after migration"); return
+  end
+  if not approxEq(seq:l1Value(SLOT, COL_CV1, 1), 1.0) then
+    fail(name, "cv1[1] != 1.0 after migration"); return
+  end
+
+  -- v2 col 1 (cv2): values intact.
+  if not approxEq(seq:l1Value(SLOT, COL_CV2, 0), 2.5) then
+    fail(name, "cv2[0] != 2.5 after migration"); return
+  end
+
+  -- v2 col 2 (g1L, was old gtL): markers + L1 verbatim.
+  if seq:marker1(SLOT, COL_GATE1_LEN) ~= 2 or seq:marker2(SLOT, COL_GATE1_LEN) ~= 5 then
+    fail(name, string.format("g1L markers expected (2,5), got (%d,%d)",
+                              seq:marker1(SLOT, COL_GATE1_LEN),
+                              seq:marker2(SLOT, COL_GATE1_LEN)))
+    return
+  end
+  if not approxEq(seq:l1Value(SLOT, COL_GATE1_LEN, 0), 0.25)
+     or not approxEq(seq:l1Value(SLOT, COL_GATE1_LEN, 1), 0.5) then
+    fail(name, "g1L L1 values did not migrate verbatim from gtL"); return
+  end
+
+  -- v2 col 3 (g2L, was old gtA): non-zero amp -> 0.25 beats.
+  if not approxEq(seq:l1Value(SLOT, COL_GATE2_LEN, 0), 0.0) then
+    fail(name, "g2L[0] should be 0 (gtA[0] was 0)"); return
+  end
+  if not approxEq(seq:l1Value(SLOT, COL_GATE2_LEN, 1), 0.25) then
+    fail(name, string.format("g2L[1] expected 0.25 (gtA[1]=1.0 -> 0.25 beats), got %.3f",
+                              seq:l1Value(SLOT, COL_GATE2_LEN, 1)))
+    return
+  end
+  if not approxEq(seq:l1Value(SLOT, COL_GATE2_LEN, 2), 0.25) then
+    fail(name, string.format("g2L[2] expected 0.25 (gtA[2]=0.7 -> 0.25 beats), got %.3f",
+                              seq:l1Value(SLOT, COL_GATE2_LEN, 2)))
+    return
+  end
+
+  -- v2 col 4 (stL, was old stL): verbatim.
+  if not approxEq(seq:l1Value(SLOT, COL_STEP_LEN, 0), 0.5) then
+    fail(name, "stL[0] != 0.5 after migration"); return
+  end
+
+  -- v2 col 5 (tr, new): zero-initialized.
+  for r = 0, 7 do
+    if not approxEq(seq:l1Value(SLOT, COL_TRANSPOSE, r), 0.0) then
+      fail(name, string.format("tr[%d] != 0 -- expected zero-init for new column", r))
+      return
+    end
+  end
+
+  -- L2 rule on cv1 row 0: cv3 -> -1, gtA target -> g2L (col 3).
+  if not seq:l2Present(SLOT, COL_CV1, 0) then
+    fail(name, "L2 rule on cv1 row 0 missing after migration"); return
+  end
+  if seq:l2PredColA(SLOT, COL_CV1, 0) ~= -1 then
+    fail(name, string.format("L2 cv1[0] predColA expected -1 (cv3 neutered), got %d",
+                              seq:l2PredColA(SLOT, COL_CV1, 0)))
+    return
+  end
+  if seq:l2ActTgt(SLOT, COL_CV1, 0) ~= COL_GATE2_LEN then
+    fail(name, string.format("L2 cv1[0] actTgt expected %d (g2L), got %d",
+                              COL_GATE2_LEN, seq:l2ActTgt(SLOT, COL_CV1, 0)))
+    return
+  end
+
+  -- L2 rule on cv2 row 0: gtL pred -> g1L (col 2), gtA target -> g2L (col 3).
+  if not seq:l2Present(SLOT, COL_CV2, 0) then
+    fail(name, "L2 rule on cv2 row 0 missing after migration"); return
+  end
+  if seq:l2PredColA(SLOT, COL_CV2, 0) ~= COL_GATE1_LEN then
+    fail(name, string.format("L2 cv2[0] predColA expected %d (g1L), got %d",
+                              COL_GATE1_LEN, seq:l2PredColA(SLOT, COL_CV2, 0)))
+    return
+  end
+  if seq:l2ActTgt(SLOT, COL_CV2, 0) ~= COL_GATE2_LEN then
+    fail(name, string.format("L2 cv2[0] actTgt expected %d (g2L), got %d",
+                              COL_GATE2_LEN, seq:l2ActTgt(SLOT, COL_CV2, 0)))
+    return
+  end
+
+  -- Re-serialize and confirm the output now carries schemaVersion = 2.
+  local fresh = Persist.serialize()
+  if fresh.schemaVersion ~= Persist._schemaVersion then
+    fail(name, string.format("re-serialized save expected schemaVersion=%d, got %s",
+                              Persist._schemaVersion, tostring(fresh.schemaVersion)))
+    return
+  end
+  pass(name)
+end
+
+-- ---------------------------------------------------------------------------
 -- Test 5e: transpose pre-applied to cv1. heldCV1 should report
 -- cv1Raw + heldTranspose / 12.0 each tick. Authoring 0 V on cv1 and
 -- nudging the tr column lets us verify the pre-application directly
@@ -827,6 +991,7 @@ test_persistence_roundtrip()
 test_persistence_transport_roundtrip()
 test_tie_legato()
 test_tie_start_no_prior()
+test_quicksave_v1_to_v2_migration()
 test_transpose_cv1()
 test_gate1_gate2_independent()
 test_pred_fire1_fire2()

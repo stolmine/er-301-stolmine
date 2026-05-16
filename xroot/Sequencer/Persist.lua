@@ -24,6 +24,144 @@ local kNumSlots          = 4
 local kNumColumns        = 6
 local kMaxStepsPerColumn = 64
 
+-- Quicksave schema version. Bumped to 2 when the column layout
+-- migrated from v0.1 (cv1 cv2 cv3 gtL gtA stL) to v2 (cv1 cv2 g1L
+-- g2L stL tr). Older saves with no schemaVersion field are treated
+-- as v1 and run through migrateV1ToV2 on load.
+local kSchemaVersion     = 2
+
+-- v0.1 column indices, used only by the v1 -> v2 migration.
+local V1_COL_CV1      = 0
+local V1_COL_CV2      = 1
+local V1_COL_CV3      = 2  -- dropped in v2
+local V1_COL_GATE_LEN = 3  -- -> v2 COL_GATE1_LEN (2)
+local V1_COL_GATE_AMP = 4  -- -> v2 COL_GATE2_LEN (3), non-zero rows mapped to 0.25 beats
+local V1_COL_STEP_LEN = 5  -- -> v2 COL_STEP_LEN (4)
+
+-- v2 column indices (mirror Sequencer.h).
+local V2_COL_CV1        = 0
+local V2_COL_CV2        = 1
+local V2_COL_GATE1_LEN  = 2
+local V2_COL_GATE2_LEN  = 3
+local V2_COL_STEP_LEN   = 4
+local V2_COL_TRANSPOSE  = 5
+
+-- Migrate a v1 quicksave data table to v2 shape, in place. Returns
+-- the same table for chaining. Migration rules (per the v2 layout
+-- plan in docs/planning/sequencer-implementation-plan.md):
+--   col 0 (cv1), col 1 (cv2): unchanged.
+--   col 2 (old cv3): DROPPED. L1 + L2 discarded. References to col 2
+--     in L2 rules' colA/targetCol get neutered to -1 (host) with a log.
+--   col 3 (old gtL) -> col 2 (g1L). Length, markers, L1, L2 verbatim.
+--   col 4 (old gtA, gate-amp) -> col 3 (g2L). Non-zero amp values
+--     rewritten as 0.25 (= 1 tick gate-len) so the row still fires;
+--     zero amp stays zero. Length / markers transferred. The intent
+--     "this row should produce a gate" is preserved.
+--   col 5 (old stL) -> col 4 (stL). Verbatim transfer.
+--   col 5 (new tr): not present in v1; zero-initialized to default
+--     length 16, markers 0..15.
+--   L2 rule colA / targetCol indices remap: 2 -> -1 (neutered cv3),
+--     3 -> 2 (gtL -> g1L), 4 -> 3 (gtA -> g2L), 5 -> 4 (stL).
+local function remapV1ColRef(idx, neutered)
+  if idx == V1_COL_CV3 then
+    -- cv3 references: rewrite to host-col (-1) since cv3 no longer
+    -- exists. Count for log.
+    neutered.cv3 = (neutered.cv3 or 0) + 1
+    return -1
+  elseif idx == V1_COL_GATE_LEN then return V2_COL_GATE1_LEN
+  elseif idx == V1_COL_GATE_AMP then return V2_COL_GATE2_LEN
+  elseif idx == V1_COL_STEP_LEN then return V2_COL_STEP_LEN
+  end
+  -- cv1 (0), cv2 (1), -1 (host) unchanged.
+  return idx
+end
+
+local function migrateV1ToV2(data)
+  if not (data and data.slots) then return data end
+  local neutered = { cv3 = 0, ampToLen = 0 }
+  for s = 1, kNumSlots do
+    local slot = data.slots[s]
+    if slot and slot.columns then
+      local oldCols = slot.columns
+      local newCols = {}
+      -- cv1, cv2: index 1 and 2 in the Lua table (0-based 0 and 1).
+      newCols[1] = oldCols[1]
+      newCols[2] = oldCols[2]
+      -- old gtL (Lua idx 4) -> new g1L (Lua idx 3)
+      newCols[3] = oldCols[4]
+      -- old gtA (Lua idx 5) -> new g2L (Lua idx 4): rewrite L1 values.
+      local gtA = oldCols[5]
+      if gtA then
+        local g2L = {
+          length  = gtA.length,
+          marker1 = gtA.marker1,
+          marker2 = gtA.marker2,
+          l1 = {},
+          l2 = {},
+        }
+        if gtA.l1 then
+          for r = 1, kMaxStepsPerColumn do
+            local v = gtA.l1[r] or 0
+            -- Non-zero amp -> 0.25 beats (= 1 tick) so the row fires
+            -- a short gate; zero amp -> zero (no fire).
+            if v ~= 0 then
+              g2L.l1[r] = 0.25
+              neutered.ampToLen = neutered.ampToLen + 1
+            else
+              g2L.l1[r] = 0
+            end
+          end
+        end
+        -- L2 rules on gate-amp keep their structure; the col 4 index
+        -- they may reference gets remapped below.
+        if gtA.l2 then
+          for r, cell in pairs(gtA.l2) do
+            g2L.l2[r] = cell  -- shallow copy; remap pass below fixes col refs
+          end
+        end
+        newCols[4] = g2L
+      end
+      -- old stL (Lua idx 6) -> new stL (Lua idx 5)
+      newCols[5] = oldCols[6]
+      -- new tr (Lua idx 6): zero-initialized.
+      do
+        local trL1 = {}
+        for r = 1, kMaxStepsPerColumn do trL1[r] = 0 end
+        newCols[6] = { length = 16, marker1 = 0, marker2 = 15,
+                       l1 = trL1, l2 = {} }
+      end
+
+      -- Pass over every L2 cell in the new layout and remap colA /
+      -- targetCol indices from v1 -> v2.
+      for c = 1, kNumColumns do
+        local col = newCols[c]
+        if col and col.l2 then
+          for r, cell in pairs(col.l2) do
+            if type(cell) == "table" then
+              if cell.predColA and cell.predColA >= 0 then
+                cell.predColA = remapV1ColRef(cell.predColA, neutered)
+              end
+              if cell.actTgt and cell.actTgt >= 0 then
+                cell.actTgt = remapV1ColRef(cell.actTgt, neutered)
+              end
+            end
+          end
+        end
+      end
+
+      slot.columns = newCols
+    end
+  end
+  data.schemaVersion = kSchemaVersion
+  if neutered.cv3 > 0 then
+    app.logInfo("Sequencer.Persist: v1->v2 migration neutered %d cv3 L2 references", neutered.cv3)
+  end
+  if neutered.ampToLen > 0 then
+    app.logInfo("Sequencer.Persist: v1->v2 migration mapped %d gate-amp rows to 0.25-beat g2L", neutered.ampToLen)
+  end
+  return data
+end
+
 -- ---------------------------------------------------------------------------
 -- Serialize
 -- ---------------------------------------------------------------------------
@@ -31,7 +169,7 @@ function M.serialize()
   local seq = app.AudioThread.getSequencerTask()
   if not seq then return nil end
 
-  local data = { slots = {} }
+  local data = { schemaVersion = kSchemaVersion, slots = {} }
   for s = 0, kNumSlots - 1 do
     -- Capture per-slot running flag so the load path can optionally
     -- resume transport (gated by the
@@ -84,6 +222,14 @@ end
 function M.deserialize(data)
   local seq = app.AudioThread.getSequencerTask()
   if not (seq and data and data.slots) then return end
+
+  -- v1 saves have no schemaVersion field; run the migration in place so
+  -- the rest of this function works against a v2-shaped table.
+  local sv = data.schemaVersion or 1
+  if sv < kSchemaVersion then
+    app.logInfo("Sequencer.Persist: migrating v%d quicksave -> v%d", sv, kSchemaVersion)
+    data = migrateV1ToV2(data)
+  end
 
   -- Setting gates whether the saved running flag is honored on load.
   -- Default "no" preserves the locked decision that every quicksave
@@ -167,5 +313,10 @@ function M.deserialize(data)
     end
   end
 end
+
+-- Exposed for bench coverage. Production callers go through
+-- M.deserialize which invokes the migration automatically.
+M._migrateV1ToV2  = migrateV1ToV2
+M._schemaVersion  = kSchemaVersion
 
 return M
