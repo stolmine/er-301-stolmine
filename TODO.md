@@ -332,6 +332,44 @@ gesture that could collide with edit mode (selection extension via
 shift+encoder, mark-modal exit S3 unify, etc.). Audit the
 subReleased and subPressed branches for parallel cases while at it.
 
+## Sequencer: Admin Toggle for ENTER-in-Edit Behavior (target: .9.2.1)
+The bulk-edit-then-edit flow has an asymmetry users notice:
+
+1. User builds a selection (shift+encoder), bulk-nudges values via
+   encoder during selection (`GridView.lua:1638`).
+2. ENTER commits the selection and drops into single-cell L1 edit
+   mode on the focused cell (`GridView.lua:1764-1797` enterReleased,
+   `editingL1=false` branch at 1783-1795).
+3. Subsequent ENTER presses in single-cell edit mode advance focus
+   head by 1 and **stay in edit mode** (`enterReleased` `editingL1=true`
+   branch at 1783-1784).
+
+Some users expect step 3's ENTER to instead **exit edit mode** back
+to the navigation state they came from. The "in" route (ENTER -> edit)
+and the "out" routes (UP / CANCEL -> nav) are incongruent: there's no
+ENTER -> nav loop, only ENTER -> advance.
+
+Both behaviors are defensible. Add an admin Setting under the
+`Sequencer` subheading:
+
+- **Setting name (proposed)**: `sequencerEnterInEditMode`
+- **Choices**: `"advance"` (current default; ENTER moves to next
+  cell, stays in edit) | `"exit"` (ENTER commits + exits edit, back
+  to navigation)
+- **Where it gates**: `GridView.lua:1783-1784` in the `editingL1`
+  branch of enterReleased. If `"exit"`, drop `editingL1 = false` +
+  refresh + return instead of incrementing focusHeadRow.
+
+Plumbing:
+- `xroot/Settings/init.lua`: new String entry, default `"advance"`.
+- `xroot/Settings/Interface.lua`: surface under Sequencer subheading.
+- `GridView.lua:1783-1784`: branch on `Settings.get(...)` with pcall
+  guard (boot-time bench may call enterReleased before Settings.init).
+
+If the user picks `"exit"`, document that "advance to next cell"
+becomes encoder-driven only (the value-nudge edit happens at the
+current cell; user uses encoder to navigate after exiting).
+
 ## Encoder Capture Under UI Saturation
 In certain states the system reaches CPU saturation and encoder input becomes
 effectively unresponsive — encoder movement is still *queued*, but so far
