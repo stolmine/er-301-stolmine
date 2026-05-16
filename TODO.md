@@ -370,6 +370,28 @@ If the user picks `"exit"`, document that "advance to next cell"
 becomes encoder-driven only (the value-nudge edit happens at the
 current cell; user uses encoder to navigate after exiting).
 
+## Sequencer: shift+HOME Resets All Slot Playheads (target: .9.2.1)
+Currently `shift+HOME` (zeroReleased) resets only the active slot's
+playheads. Per the unified-transport model (S1 start/stop hits all
+4 slots), the playhead reset should follow the same scope and
+fan to all 4 slots.
+
+**Mechanism**: `xroot/Sequencer/GridView.lua:1903-1916` (`zeroReleased`)
+calls `seq:resetSlot(self.slot)` -- single-slot only -- when not in
+L1 cell-editor mode.
+
+**Surgical fix**: replace the single call with a loop:
+```lua
+local seq = app.AudioThread.getSequencerTask()
+if seq then
+  for s = 0, 3 do seq:resetSlot(s) end
+  self:refresh()
+end
+```
+
+In-edit-mode behavior at lines 1904-1911 stays untouched -- there
+shift+HOME zeros the focused cell (a different gesture entirely).
+
 ## Encoder Capture Under UI Saturation
 In certain states the system reaches CPU saturation and encoder input becomes
 effectively unresponsive — encoder movement is still *queued*, but so far
