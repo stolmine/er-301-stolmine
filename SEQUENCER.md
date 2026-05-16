@@ -156,7 +156,7 @@ Example rules:
 | Default, L1 | `start/stop` | `mark` | `L2` (toggle) |
 | Default, L2 | `start/stop` | `mark` | `L1` (toggle) |
 | `shift` held, default | (paste if clipboard) | `BPM` latch | `clr` cell |
-| `shift+S2` held / latched | encoder routes to BPM | — | — |
+| `shift+S2` held / latched | encoder routes to BPM | -- | -- |
 | Selection active | `copy` | `cut` | `rand` |
 | Selection + shift | `copy` | `cut` | `coherent rand` |
 | Mark modal | `start/stop` | `end` (commit) | `unify` (all cols) |
