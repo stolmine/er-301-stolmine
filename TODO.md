@@ -212,6 +212,96 @@ perceived frequency but doesn't fix the underlying sluggishness when
 the user does deliberately enter and exit tagging. Both fixes should
 land in the same .9.2.1 patch.
 
+## Sequencer BPM Latch: Exit Gestures + Scope-Mode Persistence (target: .9.2.1)
+Two related issues with the `shift+S2` BPM-latch fader in the
+sequencer takeover. Currently it's only reliably exitable via a
+second `shift+S2` toggle; UP doesn't release it, and the latch
+state persists across scope-mode exit (so re-entering the takeover
+later finds the encoder still routed to BPM with no visible cue
+beyond the sub-bar label).
+
+### 1. UP and CANCEL should release the latch
+
+`xroot/Sequencer/GridView.lua:1808-1818` (cancelReleased) already
+has a bpmLatched release branch, so CANCEL release is wired in
+code. If hardware testing confirms CANCEL is not actually working,
+trace why; otherwise the only real gap is UP.
+
+`upReleased` at `GridView.lua:1854-1879` has no bpmLatched branch.
+Add a parallel block at the top:
+```lua
+if self.bpmLatched then
+  self.bpmLatched = false
+  self.bpmAccum   = 0
+  -- Mirror the persistence behaviour from cancelReleased so the
+  -- dialed value survives reboot.
+  local seq = app.AudioThread.getSequencerTask()
+  if seq then
+    local Settings = require "Settings"
+    Settings.set("bpm", string.format("%.2f", seq:getBpm()))
+  end
+  self:refresh()
+  return true
+end
+```
+
+### 2. Latch must NOT persist across takeover hide / scope-mode exit
+
+`GridView:onHide` at `GridView.lua:1198-1203` only clears the frame
+callback; it does NOT reset `bpmLatched`. So if the user latches
+BPM, exits the takeover (via `shift+ENTER`, mode-toggle switch,
+home gesture, etc.), and re-opens the sequencer later, the encoder
+is still routed to BPM with the only signal being the sub-bar
+label, which is easy to miss after a context switch.
+
+Fix in onHide:
+```lua
+function GridView:onHide()
+  if self.frameCallback then
+    Signal.remove("onDisplayFrame", self.frameCallback)
+    self.frameCallback = nil
+  end
+  -- Release any sticky modal state so a later re-show starts clean.
+  if self.bpmLatched then
+    self.bpmLatched = false
+    self.bpmAccum   = 0
+    local seq = app.AudioThread.getSequencerTask()
+    if seq then
+      local Settings = require "Settings"
+      Settings.set("bpm", string.format("%.2f", seq:getBpm()))
+    end
+  end
+end
+```
+
+While we're here: consider whether other modal states should also
+reset in onHide (selection, mark modal, editingL1). Currently
+they persist too. Same scope-mode-exit principle: re-entering
+should land in the default state, not the middle of a half-finished
+gesture.
+
+## Sequencer: Include 0 in gate-len Random Pool (target: .9.2.1)
+The gate-len random pool currently is `{0.0625, 0.125, 0.25, 0.5,
+1.0, 2.0}` (TIE / 4.0 intentionally excluded). It should also include
+0 so random rolls can produce "no gate" (silent step) outcomes.
+Lets `?` actions and the selection-RAND softkey author musical rest
+patterns instead of always-firing density.
+
+Two files to update so the Lua-side selection-RAND and the C++ L2
+ACTION_RAND stay in sync:
+
+1. `xroot/Sequencer/GridView.lua:715` (`kRandomBeats`): add `0` to
+   the front of the list. `{0, 0.0625, 0.125, 0.25, 0.5, 1.0, 2.0}`.
+2. `od/sequencer/ActionApply.cpp:106-108` (`beats` static array in
+   ACTION_RAND case 2/3): add `0.0f` and bump the
+   `uniform_int_distribution<int> b(0, 5)` upper bound to `(0, 6)`.
+
+Consider whether to weight the pool toward "fire" (e.g.
+`{0, 0.25, 0.25, 0.5, 1.0, 2.0}` with 0 appearing once vs the others
+appearing 1-2x) to keep density-on-roll musically sensible. Or leave
+uniform and let the user roll a rest more often. Pick before
+implementation.
+
 ## Encoder Capture Under UI Saturation
 In certain states the system reaches CPU saturation and encoder input becomes
 effectively unresponsive — encoder movement is still *queued*, but so far
