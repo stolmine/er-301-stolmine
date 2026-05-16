@@ -1,14 +1,11 @@
 # Sequencer
 
-A 4-slot, 6-column polymetric sequencer with a two-layer authoring
-model: **L1** holds the per-cell values (pitches, gate lengths,
-transpose, etc.) the engine reads at each tick; **L2** is a
-predicate-action grammar where each cell is an optional rule that
-fires when the playhead lands on it (e.g. "every 4th pass, add 1 to
-cv2") and can read or mutate any cell on the same slot. Each slot
-exposes 4 patchable outputs to the chain picker; columns are authored
-from a takeover grid view that lives behind the standard scope
-display.
+4 concurrent sequencers, each carrying 2 channels of CV and gate,
+independent step length column, and transposition. Each sequencer
+also includes a second layer, which exposes a simple IF > THEN
+framework where rules can be called on individual cells as the
+playhead passes over them. You can find this by entering scope mode
+and hitting `shift+ENTER`.
 
 ## Quick start
 
