@@ -392,6 +392,54 @@ end
 In-edit-mode behavior at lines 1904-1911 stays untouched -- there
 shift+HOME zeros the focused cell (a different gesture entirely).
 
+## TXo Units: Top-Level Passthrough Toggle (target: .9.2.1)
+TXo TR + CV units currently pass the chain input straight through to
+Out1 (and Out2 when stereo) regardless of port state -- the unit
+acts as both "send to I2C" AND "pass audio through". Some patches
+want I2C-pure send with no audible passthrough; some want only
+passthrough with no TXo (impractical via removing the unit but
+worth supporting via the same toggle).
+
+**Files**: `mods/txo/assets/TR.lua:23-41` (onLoadGraph) +
+`mods/txo/assets/TR.lua:43-92` (views table + onLoadViews +
+expanded list); same shape in `mods/txo/assets/CV.lua`.
+
+**Widget research** (from .9.2.1 plan): no existing "binary toggle
+on top-level view" ViewControl. Recommended design: continuous
+**Multiply + Fader on ParameterAdapter** rather than a discrete
+toggle. Gives crossfade-to-mute for free, same encoder UX as gain,
+zero new widget code.
+
+**Surgical implementation** (per-unit, same pattern):
+1. `onLoadGraph`: add `app.Multiply()` named `passthrough` between
+   the txo object's Out and `self:Out1`. Add a `ParameterAdapter`
+   named `passthroughGain` with `Out` tied to one side of the
+   Multiply. Initial bias 1.0 (= passthrough on, current behavior).
+2. `onLoadViews`: add a `GainBias` ViewControl named `passthrough`,
+   `biasMap = Encoder.getMap("unit")` clamped 0..1, `biasPrecision
+   = 2`, `initialBias = 1.0`. Sub-bar label "passthrough".
+3. Insert `"passthrough"` at the FRONT of the `expanded` views list
+   so it sits left of `port` / `threshold` on the top-level bar.
+
+**Default decision**: bias = 1.0 (passthrough on). Preserves existing
+behavior on upgrade; old presets with no `passthroughGain` field
+read the default and stay audible.
+
+**Risk callouts**:
+- Sample-accurate-bypass check: bit-exact identical to a direct
+  connect at gain 1.0? Multiply-by-1 should be, but verify if any
+  patch relies on TXo as a sample-accurate fall-through.
+- Preset compat: ensure old presets load with `passthroughGain`
+  branch reading 1.0 as default (no field present in saved data).
+- View-list shift: focused-unit spot indexing may break for users
+  with TXo focused; verify spotted-strip rebuild handles the new
+  view inserting at the front.
+
+**Hardware verification gate** (TXo required, cannot validate in
+emu without bus simulator): with toggle dialed to 0.0, assert In1 ->
+Out1 silent; assert TR gate detection still fires (TXo LED); assert
+CV stream still drives V/oct downstream.
+
 ## Encoder Capture Under UI Saturation
 In certain states the system reaches CPU saturation and encoder input becomes
 effectively unresponsive — encoder movement is still *queued*, but so far
