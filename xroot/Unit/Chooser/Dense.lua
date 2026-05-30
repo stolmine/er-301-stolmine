@@ -101,26 +101,44 @@ function Dense:init(ring)
   self.divider:add(instr)
   self:addMainGraphic(self.divider)
 
-  -- Sub display: focused-unit info.
-  self.subTitle = app.Label("", kFontTitle)
-  self.subTitle:setPosition(2, app.GRID4_LINE1)
-  self.subTitle:setJustification(app.justifyLeft)
-  self:addSubGraphic(self.subTitle)
+  -- Sub display: BOTH focused units side-by-side, mirroring the
+  -- row cursor (which selects both cells). Left half = left-column
+  -- unit (M1 picks), right half = right-column unit (M4 picks).
+  -- Vertical hairline divider at x=64 keeps the split readable.
+  -- Per column: M1/M4 header label, unit title, library, "used Nx".
+  self.subDivider = app.Drawing(0, 0, 128, 64)
+  local sdInstr = app.DrawingInstructions()
+  sdInstr:color(app.GRAY3)
+  sdInstr:vline(64, 4, 50)
+  self.subDivider:add(sdInstr)
+  self:addSubGraphic(self.subDivider)
 
-  self.subLib = app.Label("", kFontSub)
-  self.subLib:setPosition(2, app.GRID4_LINE2)
-  self.subLib:setJustification(app.justifyLeft)
-  self:addSubGraphic(self.subLib)
+  self.subLeft  = { header = "M1" }
+  self.subRight = { header = "M4" }
+  local function buildSide(side, xBase)
+    side.label = app.Label(side.header, kFontMain)
+    side.label:setPosition(xBase, app.GRID4_LINE1)
+    side.label:setJustification(app.justifyLeft)
+    side.label:setForegroundColor(app.GRAY7)
+    self:addSubGraphic(side.label)
 
-  self.subInfo = app.Label("", kFontSub)
-  self.subInfo:setPosition(2, app.GRID4_LINE3)
-  self.subInfo:setJustification(app.justifyLeft)
-  self:addSubGraphic(self.subInfo)
+    side.title = app.Label("", kFontSub)
+    side.title:setPosition(xBase, app.GRID4_LINE2)
+    side.title:setJustification(app.justifyLeft)
+    self:addSubGraphic(side.title)
 
-  self.subKeywords = app.Label("", kFontMain)
-  self.subKeywords:setPosition(2, app.GRID4_LINE4)
-  self.subKeywords:setJustification(app.justifyLeft)
-  self:addSubGraphic(self.subKeywords)
+    side.lib = app.Label("", kFontMain)
+    side.lib:setPosition(xBase, app.GRID4_LINE3)
+    side.lib:setJustification(app.justifyLeft)
+    self:addSubGraphic(side.lib)
+
+    side.used = app.Label("", kFontMain)
+    side.used:setPosition(xBase, app.GRID4_LINE4)
+    side.used:setJustification(app.justifyLeft)
+    self:addSubGraphic(side.used)
+  end
+  buildSide(self.subLeft,  2)
+  buildSide(self.subRight, 68)
 
   self:_rebuildUnitList()
   self:_refresh()
@@ -209,29 +227,33 @@ function Dense:_refresh()
     self.cursorBox:show()
   end
 
-  -- Sub-display: focused unit info.
+  -- Sub-display: both row units, side-by-side.
   local focusLeft, focusRight = self:_unitsForRow(self.cursorRow)
-  local focus = focusLeft or focusRight  -- default to left cell
-  self:_refreshSub(focus)
+  self:_refreshSubSide(self.subLeft,  focusLeft)
+  self:_refreshSubSide(self.subRight, focusRight)
 end
 
-function Dense:_refreshSub(loadInfo)
+-- Each sub-display half is ~62 px wide = ~11 chars at font 10,
+-- ~12 chars at font 9. Truncate aggressively so nothing wraps into
+-- the divider.
+local kSubColChars = 12
+local function clip(s)
+  if s == nil then s = "" end
+  if #s > kSubColChars then return s:sub(1, kSubColChars - 1) .. "." end
+  return s
+end
+
+function Dense:_refreshSubSide(side, loadInfo)
   if loadInfo == nil then
-    self.subTitle:setText("")
-    self.subLib:setText("")
-    self.subInfo:setText("")
-    self.subKeywords:setText("")
+    side.title:setText("")
+    side.lib:setText("")
+    side.used:setText("")
     return
   end
-  self.subTitle:setText(loadInfo.title or "?")
-  self.subLib:setText(loadInfo.libraryName or "")
+  side.title:setText(clip(loadInfo.title))
+  side.lib:setText(clip(loadInfo.libraryName or ""))
   local ord = #Sparkline.ordinals(loadInfo.title or "")
-  self.subInfo:setText(string.format("used %dx", ord))
-  -- Keywords: comma-separated, truncated to fit sub display width.
-  local kws = loadInfo.keywords or ""
-  if kws == "" then kws = "(untagged)" end
-  if #kws > 22 then kws = kws:sub(1, 21) .. "." end
-  self.subKeywords:setText(kws)
+  side.used:setText(string.format("used %dx", ord))
 end
 
 -- ---------------------------------------------------------------------------
