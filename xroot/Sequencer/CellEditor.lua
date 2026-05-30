@@ -491,13 +491,29 @@ function CellEditor:init(slotIdx, col, row)
   self.stepChip:setJustification(app.justifyLeft)
   self:addSubGraphic(self.stepChip)
 
-  -- Persistent S3 hint -- the modal otherwise has no labelled
-  -- softkeys, so the "hold S3 + encoder = cycle column letter on
-  -- the focused cell-ref slot" gesture would be invisible to a new
-  -- user. The chip stays put whether or not S3 is held; it just
-  -- explains what S3 does.
+  -- Persistent S3 hint -- tap S3 cycles the column letter forward on
+  -- a focused cell-ref slot (host -> A -> B -> ... -> F -> host).
+  -- shift+S3 cycles backward. Hold-S3 + encoder also cycles (kept for
+  -- direction-control muscle memory). Without the label, the gesture
+  -- would be invisible to a new user.
   self.s3Hint = app.SubButton("col", 3)
   self:addSubGraphic(self.s3Hint)
+
+  -- Target-cell L1 readout, stacked above the S3 column over two
+  -- lines so each piece has room to breathe: location on top (e.g.
+  -- "D:12" pinned or "D@07" playhead-resolved), value below (e.g.
+  -- "1.50"). Shows the live L1 value at the action target, i.e. the
+  -- cell the L2 rule will write to when it fires. Suppressed for
+  -- actions that don't take a target (FIRE / jumps).
+  self.targetLocLabel = app.Label("", 10)
+  self.targetLocLabel:setPosition(90, app.GRID4_LINE2)
+  self.targetLocLabel:setJustification(app.justifyLeft)
+  self:addSubGraphic(self.targetLocLabel)
+
+  self.targetValueLabel = app.Label("", 10)
+  self.targetValueLabel:setPosition(90, app.GRID4_LINE3)
+  self.targetValueLabel:setJustification(app.justifyLeft)
+  self:addSubGraphic(self.targetValueLabel)
 
   self.encoderAccum = 0
   self:_refresh()
@@ -562,12 +578,43 @@ function CellEditor:_refresh()
   end
 
   -- "col" hint is only meaningful on cell-ref slots (M1 predColA,
-  -- M4 actTarget) -- those are the only places where S3-held +
-  -- encoder cycles the column letter. Blank the chip text on op /
-  -- number slots so it doesn't mislead the user into thinking S3
-  -- does something there. (Empty text is the convention here for a
+  -- M4 actTarget) -- those are the only places where tapping S3
+  -- cycles the column letter. Blank the chip text on op / number
+  -- slots so it doesn't mislead the user into thinking S3 does
+  -- something there. (Empty text is the convention here for a
   -- SubButton you want to render as nothing, see GridView.)
   self.s3Hint:setText(kind == "cellref" and "col" or "")
+
+  local loc, val = self:_targetReadout()
+  self.targetLocLabel:setText(loc)
+  self.targetValueLabel:setText(val)
+end
+
+-- Compute the two-line target readout shown above S3. The action
+-- writes to (actTarget, actTargetRow); -1 row means "use the target
+-- column's current playhead". Returns (loc, val) strings, both ""
+-- for actions with no target (FIRE family, jumps) or when the
+-- engine task isn't available. Location encodes pin status: ':NN'
+-- for a pinned row, '@NN' for a playhead-resolved row.
+function CellEditor:_targetReadout()
+  if actTargetSkipped(self.values.actOp) then return "", "" end
+  local seq = app.AudioThread.getSequencerTask()
+  if not seq then return "", "" end
+  local hostCol  = self.col
+  local targetCol = self.values.actTarget
+  if targetCol < 0 then targetCol = hostCol end
+  if targetCol < 0 or targetCol > 5 then return "", "" end
+  local targetRow = self.values.actTargetRow
+  local rowTag
+  if targetRow == nil or targetRow < 0 then
+    targetRow = seq:playhead(self.slot, targetCol)
+    rowTag    = string.format("@%02d", targetRow)
+  else
+    rowTag    = string.format(":%02d", targetRow)
+  end
+  local colChar = kColLetters[targetCol + 1] or "?"
+  local v       = seq:l1Value(self.slot, targetCol, targetRow)
+  return colChar .. rowTag, fmtNum(v)
 end
 
 -- ---------------------------------------------------------------------------
@@ -656,6 +703,7 @@ function CellEditor:encoder(change, shifted)
       if shifted then return end
       if self.s3Held then
         self:_rotateCellRefColumn(dir)
+        self.s3SuppressTap = true  -- consumed the hold; skip the tap-cycle on release
       else
         self:_rotateChoice(dir)   -- cellref-row path; lives in _rotateChoice
       end
@@ -687,12 +735,21 @@ end
 -- Hard-button handlers
 -- ---------------------------------------------------------------------------
 
--- S3 hold + encoder = cycle the column part of a focused cell-ref
--- slot (M1 / M4). Tracked as a flag so encoder() can branch on the
--- held state. Other sub buttons currently no-op inside the modal.
+-- S3 has two ways to cycle the column letter on a focused cell-ref
+-- slot (M1 / M4):
+--   (1) Tap: subReleased(3) advances the column one step. Shift+tap
+--       steps backward. This is the discoverable path that matches
+--       the "col" label.
+--   (2) Hold + encoder: tracks s3Held so encoder() can branch on the
+--       held state. Direction follows encoder rotation.
+-- Both paths reuse _rotateCellRefColumn so the wrap rules stay in
+-- one place. Tap is suppressed when s3Held has been used to drive
+-- the encoder (suppressTap), so a "hold S3, turn encoder, release
+-- S3" gesture doesn't extra-step on release.
 function CellEditor:subPressed(i, shifted)
   if i == 3 then
-    self.s3Held = true
+    self.s3Held         = true
+    self.s3SuppressTap  = false
     return true
   end
   return false
@@ -700,7 +757,16 @@ end
 
 function CellEditor:subReleased(i, shifted)
   if i == 3 then
-    self.s3Held = false
+    local wasHeldRotated = self.s3SuppressTap
+    self.s3Held         = false
+    self.s3SuppressTap  = false
+    if not wasHeldRotated then
+      local cfg = kSlotKind[self.focused]
+      if cfg and cfg.kind == "cellref" then
+        self:_rotateCellRefColumn(shifted and -1 or 1)
+        self:_refresh()
+      end
+    end
     return true
   end
   return false
