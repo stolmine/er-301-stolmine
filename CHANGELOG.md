@@ -3,6 +3,45 @@
 * NEW: A new feature. Relevant to users and developers.
 * SYS: A system-level change.  Usually only relevant to developers.
 
+# v0.7.0-stolmine.9.3.0
+* NEW: Dense unit picker as an alternative to the classic Mondrian view.
+  Selectable from `Admin > Settings > Units > Unit picker style:`
+  (`dense` is now the default; `original` preserves the classic view).
+* NEW: 2-column dense layout with 8-10 visible units, alphabet jump
+  ribbon across the top (`*` no-filter + A-Z + `#` numerics), per-row
+  type glyphs derived from a category-first / keyword-fallback cascade
+  (`~ source / > effect / $ modulate / * timing / . utility / ? unknown`),
+  and section dividers in alpha / type / package / keyword sort modes.
+* NEW: M-key gesture set: M1/S1 = pick left, M4/S3 = pick right.
+  M2 cycles sort mode (recents / alpha / type / package / keyword /
+  favs); M3 cycles type filter; M5 / M6 toggle hide-edit / fav-edit
+  modes. Tap M2 / M3 for discrete advance; HOLD M2 / M3 + encoder for
+  live scrubbing through the cycle. Shift+M2 / shift+M3 reverse.
+* NEW: HOME = cursor to top (no filter change). Shift+HOME = full
+  reset to user's configured default sort + clear all filters.
+* NEW: Admin settings for picker customization: default sort, section
+  dividers on/off, pin favorites to top, pin recents to top
+  (recents pin shows the 6 most recent units in a dedicated section).
+* NEW: Persistent right-edge `+` marker per row for favorited units,
+  visible in all view modes. Recency history persists across boots
+  in `~/.od/rear/recencyHistory.lua`; hidden units in `hidden.lua`.
+* ENHANCE: Sub display shows both row cells side-by-side (with M1/S1
+  and M4/S3 chip headers), current sort + type filter status, and
+  active edit mode. Footer chips above M-keys show what each does
+  per current mode.
+* ENHANCE: Sequencer-style cursor + scroll easing for the dense
+  view (0.4 lerp at 55Hz, ~110ms settle). Smooth scroll slides data
+  under a glued cursor; HOME / boundary jumps animate cleanly.
+* ENHANCE: Sequencer L2 cell editor: tap-S3 cycles cell-ref column,
+  2-line target readout above S3 showing target cell location +
+  current value (uses the same column-aware formatter as the L1
+  grid, so notes / `1/16` / `TIE` / etc. all render correctly).
+* SYS: New shared `xroot/Sequencer/Format.lua` consolidates L1 cell
+  formatters used by both the grid render and the L2 modal readout.
+* SYS: Picker per-frame refresh bails out when nothing is animating,
+  freeing the encoder poll thread on an idle picker. Same family of
+  fix as the perlin screensaver encoder-capture patch.
+
 # Development
 * ENHANCE: Unit Header Menu > Replace grid lines by beveled boxes to improve clarity around which commands are active.
 * FIX: Control subdisplay miniscope showing signal after gain and bias. [Issue #53](https://github.com/odevices/er-301/issues/53)
