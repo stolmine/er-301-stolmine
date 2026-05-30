@@ -25,6 +25,7 @@ local Class = require "Base.Class"
 local Window = require "Base.Window"
 local Env = require "Env"
 local Signal = require "Signal"
+local Timer = require "Timer"
 local Factory = require "Unit.Factory"
 local Encoder = require "Encoder"
 local Glyph = require "Unit.Chooser.Glyph"
@@ -395,8 +396,10 @@ function Dense:init(ring)
   self.subStatus:setForegroundColor(app.GRAY10)
   self:addSubGraphic(self.subStatus)
 
-  self.subLeft  = { header = "M1" }
-  self.subRight = { header = "M4" }
+  -- Headers show both the M-key and the S-key that pick that
+  -- side, since S1 / S3 mirror M1 / M4 for one-handed continuity.
+  self.subLeft  = { header = "M1/S1" }
+  self.subRight = { header = "M4/S3" }
   local function buildSide(side, xBase)
     side.label = app.Label(side.header, kFontMain)
     side.label:setPosition(xBase, app.GRID4_LINE2)
@@ -1159,13 +1162,24 @@ end
 -- list (Chooser.recent, consumed by classic view + pin-recents
 -- here) AND the Sparkline ordinal stamp, so we don't need to call
 -- Sparkline.recordUse separately.
+--
+-- Brief WHITE-flash on the cursor before the load fires so the
+-- user sees acknowledgment of their pick. ~120 ms is long enough
+-- to read at 55 Hz refresh (~7 frames) without feeling laggy.
+local kPickFlashSeconds = 0.12
 function Dense:_pick(side)
   local left, right = self:_unitsForRow(self.cursorRow)
   local target = (side == "L") and left or right
   if target == nil then return true end
-  local Default = require "Unit.Chooser.Default"
-  Default:updateRecent(target)
-  self.ring:load(target)
+  if self.pickInFlight then return true end  -- ignore re-press during flash
+  self.pickInFlight = true
+  self.cursorBox:setBorderColor(app.WHITE)
+  Timer.after(kPickFlashSeconds, function()
+    self.pickInFlight = false
+    local Default = require "Unit.Chooser.Default"
+    Default:updateRecent(target)
+    self.ring:load(target)
+  end)
   return true
 end
 
@@ -1286,6 +1300,23 @@ end
 function Dense:enterReleased(shifted)
   if shifted then return false end
   return self:_pick("L")
+end
+
+-- S1 / S3 mirror M1 / M4 as pick alternatives. The sub display
+-- chip labels make this explicit (M1/S1, M4/S3). S2 is unbound
+-- for now -- candidate for a future audition / preview gesture.
+function Dense:subReleased(i, shifted)
+  if shifted then return false end
+  if i == 1 then
+    if self.editMode == "hide" then return self:_toggleHide("L") end
+    if self.editMode == "fav"  then return self:_toggleFav("L")  end
+    return self:_pick("L")
+  elseif i == 3 then
+    if self.editMode == "hide" then return self:_toggleHide("R") end
+    if self.editMode == "fav"  then return self:_toggleFav("R")  end
+    return self:_pick("R")
+  end
+  return false
 end
 
 function Dense:cancelReleased(shifted)

@@ -177,9 +177,9 @@ local defaults = {
   pickerStyle = {
     category = "Units",
     description = "Unit picker style:",
-    value = "new",
+    value = "dense",
     choices = {
-      "new",
+      "dense",
       "original"
     }
   },
