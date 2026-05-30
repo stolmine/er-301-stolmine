@@ -8,8 +8,28 @@ local Overlay = require "Overlay"
 local Clipboard = require "Chain.Clipboard"
 local Utils = require "Utils"
 local Persist = require "Persist"
+local Glyph = require "Unit.Chooser.Glyph"
+local Sparkline = require "Unit.Chooser.Sparkline"
 local ply = app.SECTION_PLY
 local favoritesFile = app.roots.rear .. "/favorites.lua"
+
+-- Map a unit's recent-use history into a border-color brightness.
+-- Counts uses within the last 50 picker actions (ordinal-time, not
+-- wall-time -- the firmware Lua sandbox has no `os` library) and
+-- rounds to a 5-step ramp. Favorite override happens in
+-- ChooserItem:init below.
+local kRecencyWindow = 50
+local function recencyColor(title)
+  if title == nil then return app.GRAY4 end
+  local total = #Sparkline.ordinals(title)
+  if total == 0 then return app.GRAY3 end
+  local n = Sparkline.countWithin(title, kRecencyWindow)
+  if n == 0 then return app.GRAY4 end
+  if n <= 1 then return app.GRAY7 end
+  if n <= 3 then return app.GRAY10 end
+  if n <= 7 then return app.GRAY13 end
+  return app.WHITE
+end
 
 local topCategories = {
   "Essentials",
@@ -57,21 +77,29 @@ ChooserItem:include(MondrianControl)
 
 function ChooserItem:init(loadInfo, suppressLibraryName)
   MondrianControl.init(self)
-  local graphic
-  if isStandardUnit(loadInfo) then
-    graphic = app.FittedTextBox(loadInfo.title)
-    graphic:setCornerRadius(0, 0, 0, 0)
-    graphic:setBorderColor(app.GRAY10)
-  elseif suppressLibraryName then
-    graphic = app.FittedTextBox(loadInfo.title)
-    graphic:setCornerRadius(0, 5, 5, 0)
+  -- Leading type-glyph derived from loadInfo.keywords (first wins).
+  -- Adds 2 chars of label width but lets the eye anchor on family
+  -- shape instead of having to read the full name on every row.
+  local glyph = Glyph.forLoadInfo(loadInfo)
+  local body
+  if isStandardUnit(loadInfo) or suppressLibraryName then
+    body = loadInfo.title
   else
-    local x = Utils.shorten(loadInfo.libraryName, 40)
-    graphic = app.FittedTextBox(x .. ": " .. loadInfo.title)
+    body = Utils.shorten(loadInfo.libraryName, 40) .. ": " .. loadInfo.title
+  end
+  local graphic = app.FittedTextBox(glyph .. " " .. body)
+  if isStandardUnit(loadInfo) then
+    graphic:setCornerRadius(0, 0, 0, 0)
+  else
     graphic:setCornerRadius(0, 5, 5, 0)
   end
+  -- Favorite always wins for border (white); otherwise the border
+  -- encodes recency: bright for recently / frequently used, dim for
+  -- untouched. Lets the eye spot well-worn units on first sweep.
   if Chooser.favoriteHash[loadInfo.title] then
     graphic:setBorderColor(app.WHITE)
+  else
+    graphic:setBorderColor(recencyColor(loadInfo.title))
   end
   self:setControlGraphic(graphic)
   self.loadInfo = loadInfo
@@ -290,6 +318,11 @@ function Chooser:updateRecent(loadInfo)
     end
   end
   Chooser.recent = t
+  -- Long-tail recency history for the per-row border intensity.
+  -- Separate from the 5-deep Chooser.recent (which only feeds the
+  -- "Recent:" category header). Sparkline persists across reboots.
+  Sparkline.recordUse(loadInfo.title)
+  Sparkline.flushIfDirty()
 end
 
 function Chooser:isFavorite(title)
@@ -371,8 +404,10 @@ function Chooser:choose(loadInfo)
     if loadInfo ~= "paste" then
       self:toggleFavorite(loadInfo)
       -- Update border on all instances of this item without rebuilding.
+      -- Un-favoriting returns the row to its recency-derived color
+      -- so the brightness signal stays consistent across edit mode.
       local isFav = Chooser.favoriteHash[loadInfo.title]
-      local color = isFav and app.WHITE or app.GRAY7
+      local color = isFav and app.WHITE or recencyColor(loadInfo.title)
       for handle, control in pairs(self.controls) do
         if control.loadInfo and control.loadInfo.title == loadInfo.title then
           control.controlGraphic:setBorderColor(color)

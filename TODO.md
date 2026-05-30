@@ -13,6 +13,149 @@ Favorites persist across sessions (serialize alongside Recents in quicksave data
 ## v0.6.16 Port
 Port TXo I2C master mod to v0.6.16 stable firmware base. v0.7 breaks compatibility with all third-party packages (lojik, strike, sloop, polygon, etc.).
 
+## Unit Picker Readability + Editability
+Current picker (`xroot/Unit/Chooser/Default.lua` + `MondrianMenu`)
+presents units as a flat scrolling list of similarly-styled rounded
+rectangles. Differentiation is text-only, parsing is slow, and the
+M keys are consumed by box-intersection picking, which forecloses
+richer in-picker actions (sort, filter, hide). Cheap wins (type
+glyphs, recency intensity) are worth doing standalone; the bigger
+prize is a dense alternative layout, **selectable from the admin
+menu** so it coexists with the classic Mondrian view.
+
+### Cheap wins (no layout change, can ship alone)
+- **Type glyphs.** One-character prefix on each row encoding unit
+  family: `~` source, `>` processor, `$` modulator, `.` utility,
+  `?` random. Pure `loadInfo.title` munging, zero new graphics
+  primitives. Single biggest effort/payoff item.
+- **Recency intensity.** Recently-used units render full-white,
+  untouched-in-30-days render mid-gray. Reuses the existing
+  recents table + `setBorderColor`.
+- **Sub-display preview pane.** Replace the static help text with
+  live info on the focused unit: 1-line description, I/O fan,
+  CPU class, last-used time.
+
+### Dense alternative view (the test-drive target)
+Replace the Mondrian rectangle grid with a Tufte-style table laid
+out as **2 dense columns + an alphabet jump bar + M-key actions**.
+ASCII mock (256 x 64 main, 128 x 64 sub):
+
+```
++-----------------------------------------------------+
+|A B C D E F G H I J K L M[N]O P Q R S T U V W X Y Z  |  alphabet ribbon
+|                                                     |  [] = encoder snap on shift+turn
+|    ~ sine          ::: |   $ env-ar        :...     |
+|  *[> filter]       ::. | [$ env-adsr]     :::..     |  * = row cursor
+|    > vca           ::. |   . slew          ....     |  []   = live cells on row
+|    > compressor    :.  |   ? rand         :::::     |  trailing ::. = recency sparkline
+|                                                     |
+| [pickL]  [sort]  [type]  [pickR]  [hide]  [fav]     |
++-----------------------------------------------------+
+   ^M1     ^M2     ^M3     ^M4      ^M5     ^M6
+```
+
+After tapping M3 (type-filter, cycled to `~ source`):
+
+```
++-----------------------------------------------------+
+|A B C D E F G H I J K L M N O P[Q]R S T U V W X Y Z  |
+|                                                     |
+|    ~ noise         :::. |   ~ saw           ..      |
+|  *[~ quad-osc]     :::: | [~ sine]         :::::    |
+|    ~ ramp           .   |   ~ square        .       |
+|    ~ s&h-osc        :.  |   ~ sub-osc      :::.     |
+|                                                     |
+| [pickL]  [sort]  <TYPE:~>  [pickR]  [hide]  [fav]   |
++-----------------------------------------------------+
+```
+
+Dim ribbon letters mark "no match." Angle brackets on the M3 chip
+signal "filter active." Sub display surfaces filter state so the
+user never wonders why the inventory shrank.
+
+### Gestures
+- Encoder: move row cursor up/down (advances both cells together).
+- Shift + encoder: jump to next matching ribbon letter.
+- **M1 / M4**: pick / insert the left / right cell on the focused row.
+- **M2**: cycle sort order (see below).
+- **M3**: cycle type-filter (off / ~ / > / $ / . / ?).
+- **M5**: hidden-units visibility toggle (and shift+M5 in edit
+  mode hides the focused cell).
+- **M6**: toggle favorite on focused cell (shift cycles L vs R).
+- ENTER: same as M1 (left pick), for one-handed continuity.
+
+### Sort modes (the heavy lifter)
+M2 cycles the sort key. The dense layout collapses the package
+chrome the Mondrian view gave for free, so the sort key has to
+restore equivalent organization when the user wants it. Unit
+keywords already exist in `loadInfo` and should drive most of these:
+
+1. **Recents** (default) -- most-recently-used first, then alpha.
+2. **Alpha** -- pure A-Z, ribbon letter snapping is exact.
+3. **Type** -- group by leading glyph (~ > $ . ?), then alpha
+   within group. Mini section dividers between type blocks.
+4. **Package** (classic) -- group by `loadInfo.libraryName`, then
+   alpha. Section dividers reproduce the original Mondrian
+   category headers. This is the "restore what we collapsed"
+   mode and should be available for any user who prefers the
+   classic browsing model inside the new dense layout.
+5. **Keyword** -- group by primary `loadInfo.keywords[1]` (e.g.
+   "stereo", "envelope", "delay"). Keywords are already attached
+   to most units and are richer than libraryName. Pivot point:
+   the same unit can appear under multiple keyword groups, or
+   only its primary -- decide before shipping.
+6. **Favorites-first** -- favorited units at top, rest below in
+   the secondary sort (recents / alpha).
+7. **I/O fan** -- sort by input/output count. Useful when filling
+   a specific socket ("I need a 1-in / 1-out").
+
+Each mode shows its name in the M2 chip when active. Cycle order
+configurable in admin so users can skip modes they don't use.
+
+### Admin menu (the togglable axis)
+A new admin section "Unit Picker" with:
+- **Style**: `Classic (Mondrian)` / `Dense (2-col table)`.
+  Per-user preference, persisted alongside `favorites.lua` as
+  `picker_prefs.lua`. Default = Classic so existing users see no
+  change; new users get Dense.
+- **Sort cycle order**: checkbox list of which sort modes to
+  include in the M2 cycle, in what order. Default: Recents,
+  Alpha, Type, Package, Keyword, Favorites-first. I/O fan
+  off-by-default since it's a power-user mode.
+- **Type-filter cycle order**: same idea for M3 (`~ > $ . ?`).
+- **Hidden units**: list of unit titles currently hidden, with
+  per-row restore. Hide state persists in `hidden.lua`.
+- **Show row sparklines**: on/off. Recency sparkline adds visual
+  noise; users who don't care can suppress it for cleaner rows.
+
+### Implementation order
+1. Cheap wins (type glyphs + recency intensity + sub preview)
+   inside the existing Mondrian view. Ships standalone.
+2. Build the dense view as a parallel implementation behind an
+   admin toggle. Default off. Test-drive it against the classic
+   view on real picker tasks ("find sc.cv among the core units").
+3. If dense wins, promote it to default for fresh installs;
+   keep classic available indefinitely for users who prefer it.
+
+### Tufte angle (for the dense view specifically)
+The Tufte table chapter ("Visual Display" Ch. 6) and the
+sparklines in "Beautiful Evidence" map directly: each row carries
+3 visible bits (type glyph, name, recency sparkline) instead of
+one (text-in-rectangle), and the chrome that signified nothing
+in the Mondrian view (uniform borders, padding, rounded corners)
+becomes ink the eye spends parsing real data. The 2-column dense
+layout is plain prior art from Norton Commander / zsh tab
+completion / NetHack inventory; the alphabet jump bar is iPhone
+contacts / Cirklon pattern selection. None of these are novel
+individually -- the bet is that combining them with sort-as-
+primary-organizer fixes scan time on a 200+ unit inventory.
+
+### Out of scope for v1
+- Drag-reorder within a category (no good gesture).
+- Fuzzy text search (gated on the Slot Machine Text Input entry).
+- Stolmine→vanilla preset rewriter for picker prefs (prefs are
+  per-install, no preset rewrite needed).
+
 ## Screensaver Polish
 - Forest screensaver: full-screen coverage
 - Rain screensaver: splash particles
