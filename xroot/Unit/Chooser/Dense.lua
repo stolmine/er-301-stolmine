@@ -43,16 +43,24 @@ local kFontSub       = 10
 local kFontTitle     = 12
 local kRowHeight     = 9
 local kVisibleRows   = 5
-local kColLeftX      = 4         -- left column label X
-local kColRightX     = 132       -- right column label X
 local kCursorIndent  = 2         -- pad between row cursor and label
 local kCursorHeight  = 10
 local kColWidth      = 120       -- visual width per column cell
--- Right-edge favorite marker X. Single '+' char at font 9 ~= 5 px,
--- so position 7 px back from the column right edge. Left col right
--- edge is the divider at x=128; right col right edge is x=256.
-local kLeftFavX      = 121
-local kRightFavX     = 249
+
+-- Each column splits into 3 fixed slots so the eye perceives 6
+-- aligned sub-columns across the picker. Left column = slots
+-- 1L (glyph) / 2L (name) / 3L (fav). Right column = mirror at
+-- x=128. Glyph and fav are single-char positions; name owns the
+-- middle bulk of the row.
+local kLeftGlyphX  = 4
+local kLeftNameX   = 14
+local kLeftFavX    = 121
+local kRightGlyphX = 132
+local kRightNameX  = 142
+local kRightFavX   = 249
+-- Max name slot width in chars (font 9, ~5 px/char). Roughly the
+-- gap between name X and fav X for each column.
+local kMaxNameChars = 20
 
 -- Y baselines (bottom-up). Five visible rows + one extra slot at
 -- y=-1 used as the "slide-in" row during a smooth scroll: when
@@ -235,40 +243,45 @@ function Dense:init(ring)
   self.cursorAnimY   = nil
   self.cursorEasingY = false
 
-  -- Row label widgets (left col + right col, one per painted row),
-  -- plus a single-char favorite marker at the right edge of each
-  -- cell. The marker is persistent (not just visible in fav-edit
-  -- mode) so the user always sees which units are favorited.
-  -- kPaintRows = kVisibleRows + 1: the extra row slot at y=-1 is
-  -- used as the "slide-in" position during smooth scroll.
-  self.leftLabels  = {}
-  self.rightLabels = {}
+  -- Per painted row, six separate labels: glyph + name + fav for
+  -- each of the two columns. Splitting them gives fixed horizontal
+  -- alignment across the picker (the eye sees 6 sub-columns even
+  -- though logical cells are 2). The fav '+' marker is always
+  -- visible (independent of edit mode) so users see fav state at
+  -- a glance. kPaintRows = kVisibleRows + 1 so the extra row at
+  -- y=-1 acts as the slide-in position during smooth scroll.
+  self.leftGlyphs  = {}
+  self.leftNames   = {}
   self.leftFavs    = {}
+  self.rightGlyphs = {}
+  self.rightNames  = {}
   self.rightFavs   = {}
+  local function makeLabel(x, y)
+    local lbl = app.Label("", kFontMain)
+    lbl:setJustification(app.justifyLeft)
+    lbl:setPosition(x, y)
+    self:addMainGraphic(lbl)
+    return lbl
+  end
+  -- Fav marker uses setCenter so its glyph midpoint aligns with
+  -- the cursor box's vertical midpoint (cursor bottom = labelY+3,
+  -- height 10 -> midpoint = labelY+8). Each refresh re-runs
+  -- setCenter to keep alignment as rows slide.
+  local function makeFav(x, y)
+    local lbl = app.Label("", kFontMain)
+    lbl:setJustification(app.justifyCenter)
+    lbl:setCenter(x, y + 8)
+    self:addMainGraphic(lbl)
+    return lbl
+  end
   for r = 1, kPaintRows do
-    local lblL = app.Label("", kFontMain)
-    lblL:setJustification(app.justifyLeft)
-    lblL:setPosition(kColLeftX, kRowYs[r])
-    self:addMainGraphic(lblL)
-    self.leftLabels[r] = lblL
-
-    local lblR = app.Label("", kFontMain)
-    lblR:setJustification(app.justifyLeft)
-    lblR:setPosition(kColRightX, kRowYs[r])
-    self:addMainGraphic(lblR)
-    self.rightLabels[r] = lblR
-
-    local favL = app.Label("", kFontMain)
-    favL:setJustification(app.justifyLeft)
-    favL:setPosition(kLeftFavX, kRowYs[r])
-    self:addMainGraphic(favL)
-    self.leftFavs[r] = favL
-
-    local favR = app.Label("", kFontMain)
-    favR:setJustification(app.justifyLeft)
-    favR:setPosition(kRightFavX, kRowYs[r])
-    self:addMainGraphic(favR)
-    self.rightFavs[r] = favR
+    local y = kRowYs[r]
+    self.leftGlyphs[r]  = makeLabel(kLeftGlyphX,  y)
+    self.leftNames[r]   = makeLabel(kLeftNameX,   y)
+    self.leftFavs[r]    = makeFav  (kLeftFavX,    y)
+    self.rightGlyphs[r] = makeLabel(kRightGlyphX, y)
+    self.rightNames[r]  = makeLabel(kRightNameX,  y)
+    self.rightFavs[r]   = makeFav  (kRightFavX,   y)
   end
 
   -- Row-cursor box: a 1-px border around BOTH cells of the focused
@@ -583,19 +596,23 @@ end
 -- Render
 -- ---------------------------------------------------------------------------
 
--- Format a unit as "glyph name" truncated so the row leaves room
--- for the right-edge favorite marker. kMaxLabelChars sized for
--- ~110 px / ~5 px per char = ~22 chars, but trimmed to 21 to keep
--- a ~7 px gap before the marker column.
-local kMaxLabelChars = 21
-local function formatRowCell(loadInfo)
+-- Each cell renders into 3 separate slots (glyph / name / fav),
+-- so the picker reads as 6 vertically-aligned sub-columns across
+-- both halves of the screen. Glyph + name are split into their
+-- own labels; fav is rendered separately via favMarkerFor.
+
+local function glyphCellFor(loadInfo)
   if loadInfo == nil then return "" end
-  local glyph = Glyph.forLoadInfo(loadInfo)
-  local text  = glyph .. " " .. (loadInfo.title or "?")
-  if #text > kMaxLabelChars then
-    text = text:sub(1, kMaxLabelChars - 1) .. "."
+  return Glyph.forLoadInfo(loadInfo)
+end
+
+local function nameCellFor(loadInfo)
+  if loadInfo == nil then return "" end
+  local title = loadInfo.title or "?"
+  if #title > kMaxNameChars then
+    title = title:sub(1, kMaxNameChars - 1) .. "."
   end
-  return text
+  return title
 end
 
 -- Right-edge marker text: '+' if the unit is favorited, blank
@@ -610,13 +627,26 @@ end
 -- Per-cell color reflecting edit-mode state. In hide mode, units
 -- that are already hidden render dim (GRAY5) so the user sees the
 -- toggle state without needing a separate badge. In fav mode the
--- "+" prefix carries the signal; color stays WHITE.
+-- "+" marker carries the signal; color stays WHITE.
 local function rowColorFor(loadInfo, editMode)
   if loadInfo == nil then return app.WHITE end
   if editMode == "hide" and Hidden.isHidden(loadInfo.title or "") then
     return app.GRAY5
   end
   return app.WHITE
+end
+
+-- Glyph slot visibility + brightness rules:
+--   * alpha sort hides the glyph entirely (alpha is a "scan by
+--     name" mode, glyph adds noise)
+--   * type sort or active type filter -> WHITE (glyph is the
+--     primary semantic axis in that view)
+--   * everything else -> GRAY7 (present but quiet)
+-- Returns nil to suppress the glyph entirely, or a color constant.
+local function glyphColorFor(sortId, typeFilter)
+  if sortId == "alpha" then return nil end
+  if sortId == "type" or typeFilter ~= nil then return app.WHITE end
+  return app.GRAY7
 end
 
 function Dense:_refresh()
@@ -656,30 +686,56 @@ function Dense:_refresh()
   -- in sync during a scroll transition. Slot kPaintRows (bottom,
   -- y=-1 at rest) becomes visible at y=8 when subPx reaches the
   -- row pitch, providing the slide-in row.
+  local glyphSortId = sortModeAt(self.sortIdx).id
   for r = 1, kPaintRows do
     local rowIdx = startRow + (r - 1)
     local entry  = self:_rowEntry(rowIdx)
     local y      = kRowYs[r] + subPx
-    self.leftLabels[r]:setPosition(kColLeftX, y)
-    self.rightLabels[r]:setPosition(kColRightX, y)
-    self.leftFavs[r]:setPosition(kLeftFavX, y)
-    self.rightFavs[r]:setPosition(kRightFavX, y)
+    -- All 6 sub-cell labels share the same Y for the row. Glyph
+    -- and name use setPosition (left-justified at fixed X); fav
+    -- uses setCenter so its glyph midpoint stays at the cursor-
+    -- box midpoint (y+8) regardless of row position.
+    self.leftGlyphs[r]:setPosition(kLeftGlyphX,  y)
+    self.leftNames[r]:setPosition(kLeftNameX,    y)
+    self.leftFavs[r]:setCenter(kLeftFavX,        y + 8)
+    self.rightGlyphs[r]:setPosition(kRightGlyphX, y)
+    self.rightNames[r]:setPosition(kRightNameX,   y)
+    self.rightFavs[r]:setCenter(kRightFavX,       y + 8)
     if entry == nil then
-      self.leftLabels[r]:setText("")
-      self.rightLabels[r]:setText("")
+      self.leftGlyphs[r]:setText("")
+      self.leftNames[r]:setText("")
       self.leftFavs[r]:setText("")
+      self.rightGlyphs[r]:setText("")
+      self.rightNames[r]:setText("")
       self.rightFavs[r]:setText("")
     elseif entry.type == "divider" then
-      self.leftLabels[r]:setText("- " .. (entry.label or "") .. " -")
-      self.leftLabels[r]:setForegroundColor(app.GRAY7)
-      self.rightLabels[r]:setText("")
+      -- Divider spans the left column (glyph slot blank, name slot
+      -- holds "- label -"), right column blank. No favs on dividers.
+      self.leftGlyphs[r]:setText("")
+      self.leftNames[r]:setText("- " .. (entry.label or "") .. " -")
+      self.leftNames[r]:setForegroundColor(app.GRAY7)
+      self.rightGlyphs[r]:setText("")
+      self.rightNames[r]:setText("")
       self.leftFavs[r]:setText("")
       self.rightFavs[r]:setText("")
     else
-      self.leftLabels[r]:setText(formatRowCell(entry.left))
-      self.leftLabels[r]:setForegroundColor(rowColorFor(entry.left, self.editMode))
-      self.rightLabels[r]:setText(formatRowCell(entry.right))
-      self.rightLabels[r]:setForegroundColor(rowColorFor(entry.right, self.editMode))
+      local leftColor  = rowColorFor(entry.left,  self.editMode)
+      local rightColor = rowColorFor(entry.right, self.editMode)
+      local glyphColor = glyphColorFor(glyphSortId, self.typeFilter)
+      if glyphColor == nil then
+        -- alpha sort: glyph slot blank, alignment preserved.
+        self.leftGlyphs[r]:setText("")
+        self.rightGlyphs[r]:setText("")
+      else
+        self.leftGlyphs[r]:setText(glyphCellFor(entry.left))
+        self.leftGlyphs[r]:setForegroundColor(glyphColor)
+        self.rightGlyphs[r]:setText(glyphCellFor(entry.right))
+        self.rightGlyphs[r]:setForegroundColor(glyphColor)
+      end
+      self.leftNames[r]:setText(nameCellFor(entry.left))
+      self.leftNames[r]:setForegroundColor(leftColor)
+      self.rightNames[r]:setText(nameCellFor(entry.right))
+      self.rightNames[r]:setForegroundColor(rightColor)
       self.leftFavs[r]:setText(favMarkerFor(entry.left))
       self.rightFavs[r]:setText(favMarkerFor(entry.right))
     end
