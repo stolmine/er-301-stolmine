@@ -27,6 +27,7 @@ local Env = require "Env"
 local Factory = require "Unit.Factory"
 local Glyph = require "Unit.Chooser.Glyph"
 local Sparkline = require "Unit.Chooser.Sparkline"
+local Hidden = require "Unit.Chooser.Hidden"
 
 local Dense = Class {}
 Dense:include(Window)
@@ -48,6 +49,23 @@ local kColWidth      = 120       -- visual width per column cell
 
 -- Y baselines (bottom-up). Five rows, top to bottom visually.
 local kRowYs = { 44, 35, 26, 17, 8 }
+
+-- Footer chip baseline. Matches the sequencer's bottom-row pattern
+-- (kRowYs ends at -1 for the same reason: setPosition sets the
+-- BOTTOM of the label's bounding box, not the glyph baseline, so
+-- y=-1 puts the actual glyph at y=3..11 which clears the bottom
+-- edge for ascender-only text).
+local kFooterY = -1
+
+-- M-key chip centers from app.getButtonCenter(i) = (i-1)*43 + 20.
+-- M1=20, M2=63, M3=106, M4=149, M5=192, M6=235.
+local kMKeyX = { 20, 63, 106, 149, 192, 235 }
+-- Half-width estimate per chip (font 9 monospace, ~5 px/char). For
+-- 4-char chips ("sort", "type", "hide", etc.) the visible glyphs
+-- span ~20 px, so subtract 10 from the M-key center to find the
+-- left edge. We use setPosition (bottom-of-bbox) NOT setCenter so
+-- the Y semantics match the sequencer's cell rows.
+local kChipHalfWidth = 10
 
 -- Alphabet ribbon: 28 positions across the top row. Index 0 is the
 -- null position (no filter); 1..26 are A..Z; 27 is # (numerics +
@@ -151,6 +169,16 @@ local function sortModeAt(idx)
 end
 
 -- ---------------------------------------------------------------------------
+-- M-key chip labels per edit mode. Index 1..6 = M1..M6.
+-- ---------------------------------------------------------------------------
+
+local kChipLabels = {
+  pick = { "pick", "sort", "type", "pick", "hide", "fav"  },
+  hide = { "tagL", "sort", "type", "tagR", "done", "fav"  },
+  fav  = { "tagL", "sort", "type", "tagR", "hide", "done" },
+}
+
+-- ---------------------------------------------------------------------------
 -- Construction
 -- ---------------------------------------------------------------------------
 
@@ -169,6 +197,7 @@ function Dense:init(ring)
   self.ribbonCounts = nil        -- [0..27] = match count, lazily filled
   self.sortIdx      = 1          -- index into kSortModes; M2 advances
   self.typeFilter   = nil        -- nil = off; else a Glyph.* constant
+  self.editMode     = "pick"     -- "pick" | "hide" | "fav"
 
   -- Alphabet ribbon labels. One Label per position; brightness is
   -- updated each refresh based on selection state + match count.
@@ -215,6 +244,21 @@ function Dense:init(ring)
   instr:vline(128, 4, 50)
   self.divider:add(instr)
   self:addMainGraphic(self.divider)
+
+  -- Footer chip labels above M1-M6 showing what each key does.
+  -- Updated by _refresh based on current edit mode. Positioned
+  -- using setPosition (bottom-of-bbox semantics) at y=kFooterY,
+  -- with X pre-offset by half the chip width so the visible
+  -- glyphs straddle the M-key center.
+  self.footerLabels = {}
+  for i = 1, 6 do
+    local lbl = app.Label("", kFontMain)
+    lbl:setJustification(app.justifyLeft)
+    lbl:setPosition(kMKeyX[i] - kChipHalfWidth, kFooterY)
+    lbl:setForegroundColor(app.GRAY10)
+    self:addMainGraphic(lbl)
+    self.footerLabels[i] = lbl
+  end
 
   -- Sub display: BOTH focused units side-by-side, mirroring the
   -- row cursor (which selects both cells). Left half = left-column
@@ -289,14 +333,25 @@ end
 -- ribbon filter, type filter, and packing into row entries. Cheap
 -- to call; runs on ribbon position, sort cycle, or type filter.
 function Dense:_applyFilters()
-  -- Step 1: apply ribbon filter + type filter together (single pass).
+  -- Step 1: apply ribbon filter + type filter + hidden filter
+  -- together. Hidden units are excluded in "pick" mode, INCLUDED in
+  -- "hide" mode (so the user can unhide), and excluded in "fav"
+  -- mode (favoriting a hidden unit makes no sense).
+  -- Type filter is strict glyph match: a unit shows up under the
+  -- filter ONLY if its displayed glyph (= first keyword) equals
+  -- the filter. WYSIWYG: what the row label shows is what the
+  -- filter pulls in.
   local idx = self.ribbonIdx
   local tf  = self.typeFilter
+  local showHidden = self.editMode == "hide"
   local filtered = {}
   for _, u in ipairs(self.allUnits or {}) do
     local keep = true
     if idx ~= 0 and ribbonIndexForTitle(u.title) ~= idx then keep = false end
-    if keep and tf ~= nil and not Glyph.loadInfoMatchesGlyph(u, tf) then
+    if keep and tf ~= nil and Glyph.forLoadInfo(u) ~= tf then
+      keep = false
+    end
+    if keep and not showHidden and Hidden.isHidden(u.title) then
       keep = false
     end
     if keep then filtered[#filtered + 1] = u end
@@ -404,7 +459,7 @@ function Dense:_recomputeRibbonCounts()
   local tf = self.typeFilter
   local total = 0
   for _, u in ipairs(self.allUnits or {}) do
-    if tf == nil or Glyph.loadInfoMatchesGlyph(u, tf) then
+    if tf == nil or Glyph.forLoadInfo(u) == tf then
       local i = ribbonIndexForTitle(u.title)
       counts[i] = counts[i] + 1
       total = total + 1
@@ -439,16 +494,35 @@ end
 
 -- Format a unit as "glyph name" truncated to fit the column width.
 -- kMaxLabelChars is sized for ~120 px / ~5 px per char = ~24 chars,
--- minus 2 for safety / ellipsis on overflow.
+-- minus 2 for safety / ellipsis on overflow. When in fav edit mode,
+-- favorited units get a leading "+" marker that the user can
+-- visually scan to see what's already tagged.
 local kMaxLabelChars = 22
-local function formatRowCell(loadInfo)
+local function formatRowCell(loadInfo, editMode)
   if loadInfo == nil then return "" end
+  local Default = require "Unit.Chooser.Default"
+  local prefix = ""
+  if editMode == "fav" and Default.favoriteHash[loadInfo.title or ""] then
+    prefix = "+"
+  end
   local glyph = Glyph.forLoadInfo(loadInfo)
-  local text  = glyph .. " " .. (loadInfo.title or "?")
+  local text  = prefix .. glyph .. " " .. (loadInfo.title or "?")
   if #text > kMaxLabelChars then
     text = text:sub(1, kMaxLabelChars - 1) .. "."
   end
   return text
+end
+
+-- Per-cell color reflecting edit-mode state. In hide mode, units
+-- that are already hidden render dim (GRAY5) so the user sees the
+-- toggle state without needing a separate badge. In fav mode the
+-- "+" prefix carries the signal; color stays WHITE.
+local function rowColorFor(loadInfo, editMode)
+  if loadInfo == nil then return app.WHITE end
+  if editMode == "hide" and Hidden.isHidden(loadInfo.title or "") then
+    return app.GRAY5
+  end
+  return app.WHITE
 end
 
 function Dense:_refresh()
@@ -489,10 +563,10 @@ function Dense:_refresh()
       self.leftLabels[r]:setForegroundColor(app.GRAY7)
       self.rightLabels[r]:setText("")
     else
-      self.leftLabels[r]:setText(formatRowCell(entry.left))
-      self.leftLabels[r]:setForegroundColor(app.WHITE)
-      self.rightLabels[r]:setText(formatRowCell(entry.right))
-      self.rightLabels[r]:setForegroundColor(app.WHITE)
+      self.leftLabels[r]:setText(formatRowCell(entry.left, self.editMode))
+      self.leftLabels[r]:setForegroundColor(rowColorFor(entry.left, self.editMode))
+      self.rightLabels[r]:setText(formatRowCell(entry.right, self.editMode))
+      self.rightLabels[r]:setForegroundColor(rowColorFor(entry.right, self.editMode))
     end
   end
 
@@ -514,13 +588,27 @@ function Dense:_refresh()
   end
 
   -- Sub-display top status: active sort mode (M2 cycles) + active
-  -- type filter (M3 cycles) when on.
+  -- type filter (M3 cycles) when on + edit mode when non-pick.
   local mode = sortModeAt(self.sortIdx)
   local txt = string.format("sort:%s", mode.label)
   if self.typeFilter then
     txt = txt .. string.format("  type:%s", self.typeFilter)
   end
+  if self.editMode ~= "pick" then
+    txt = txt .. string.format("  edit:%s", self.editMode)
+  end
   self.subStatus:setText(txt)
+
+  -- Footer M-key chips per current edit mode. The active edit
+  -- mode's M-key (M5 in hide, M6 in fav) renders at WHITE so the
+  -- "tap again to exit" target stands out.
+  local chips = kChipLabels[self.editMode] or kChipLabels.pick
+  for i = 1, 6 do
+    self.footerLabels[i]:setText(chips[i])
+    local isExit = (self.editMode == "hide" and i == 5)
+                or (self.editMode == "fav"  and i == 6)
+    self.footerLabels[i]:setForegroundColor(isExit and app.WHITE or app.GRAY10)
+  end
 
   -- Sub-display: both row units, side-by-side.
   local focusLeft, focusRight = self:_unitsForRow(self.cursorRow)
@@ -630,9 +718,38 @@ function Dense:_pick(side)
   return true
 end
 
+-- Toggle hide on the cell in column `side` of the focused row.
+-- Refreshes in place (the unit stays visible because we're in
+-- "hide" mode); rebuild not needed.
+function Dense:_toggleHide(side)
+  local left, right = self:_unitsForRow(self.cursorRow)
+  local target = (side == "L") and left or right
+  if target == nil then return true end
+  Hidden.toggle(target.title)
+  Hidden.flushIfDirty()
+  self:_refresh()
+  return true
+end
+
+-- Toggle favorite on the cell in column `side` of the focused row.
+-- Delegates to the classic chooser's favorite hash so the two
+-- views share favorites.
+function Dense:_toggleFav(side)
+  local left, right = self:_unitsForRow(self.cursorRow)
+  local target = (side == "L") and left or right
+  if target == nil then return true end
+  local Default = require "Unit.Chooser.Default"
+  Default:toggleFavorite(target)
+  Default:saveFavoritesIfDirty()
+  self:_refresh()
+  return true
+end
+
 function Dense:mainReleased(i, shifted)
   if i == 1 then
     if shifted then return false end
+    if self.editMode == "hide" then return self:_toggleHide("L") end
+    if self.editMode == "fav"  then return self:_toggleFav("L")  end
     return self:_pick("L")
   elseif i == 2 then
     -- Cycle sort mode (shifted = reverse cycle).
@@ -652,7 +769,24 @@ function Dense:mainReleased(i, shifted)
     return true
   elseif i == 4 then
     if shifted then return false end
+    if self.editMode == "hide" then return self:_toggleHide("R") end
+    if self.editMode == "fav"  then return self:_toggleFav("R")  end
     return self:_pick("R")
+  elseif i == 5 then
+    -- Toggle hide-edit mode; if already in fav-edit, swap directly.
+    self.editMode = (self.editMode == "hide") and "pick" or "hide"
+    self.cursorRow = 0
+    self.viewTop = 0
+    self:_applyFilters()
+    self:_refresh()
+    return true
+  elseif i == 6 then
+    self.editMode = (self.editMode == "fav") and "pick" or "fav"
+    self.cursorRow = 0
+    self.viewTop = 0
+    self:_applyFilters()
+    self:_refresh()
+    return true
   end
   return true
 end
