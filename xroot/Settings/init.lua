@@ -183,6 +183,15 @@ local defaults = {
       "original"
     }
   },
+  pickerSectionDividers = {
+    category = "Units",
+    description = "Show section dividers in dense picker?",
+    value = "yes",
+    choices = {
+      "yes",
+      "no"
+    }
+  },
   fileRecorderChannelCount = {
     category = "Multitrack Recorder",
     description = "Channel Count:",

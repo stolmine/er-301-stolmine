@@ -81,6 +81,84 @@ end
 local kEncoderThreshold = Env.EncoderThreshold.Default
 
 -- ---------------------------------------------------------------------------
+-- Sort modes
+-- ---------------------------------------------------------------------------
+
+-- Comparator factories per sort mode. Each returns a function fit
+-- for table.sort that produces total order over loadInfo entries.
+-- Recency / favorite reads pull from Sparkline.ordinals and the
+-- shared favorites hash via the classic Default chooser.
+
+local function _alpha(a, b)
+  return (a.title or ""):upper() < (b.title or ""):upper()
+end
+
+local function _byRecency(a, b)
+  local aRec = #Sparkline.ordinals(a.title or "")
+  local bRec = #Sparkline.ordinals(b.title or "")
+  if aRec ~= bRec then return aRec > bRec end
+  return _alpha(a, b)
+end
+
+local function _byGlyph(a, b)
+  local ag = Glyph.forLoadInfo(a)
+  local bg = Glyph.forLoadInfo(b)
+  if ag ~= bg then return ag < bg end
+  return _alpha(a, b)
+end
+
+local function _byPackage(a, b)
+  local ap = a.libraryName or ""
+  local bp = b.libraryName or ""
+  if ap ~= bp then return ap < bp end
+  return _alpha(a, b)
+end
+
+local function _primaryKeyword(loadInfo)
+  local kws = loadInfo.keywords
+  if kws == nil or kws == "" then return "~unknown" end
+  return (kws:match("^%s*([^,]-)%s*,") or kws:match("^%s*(.-)%s*$") or ""):lower()
+end
+
+local function _byKeyword(a, b)
+  local ak = _primaryKeyword(a)
+  local bk = _primaryKeyword(b)
+  if ak ~= bk then return ak < bk end
+  return _alpha(a, b)
+end
+
+local function _byIOFan(a, b)
+  local aF = (a.inCount or 0) + (a.outCount or 0)
+  local bF = (b.inCount or 0) + (b.outCount or 0)
+  if aF ~= bF then return aF > bF end
+  return _alpha(a, b)
+end
+
+local function _byFavoritesFirst(a, b)
+  -- Pulled from the classic chooser so the favorite hash is shared.
+  local Default = require "Unit.Chooser.Default"
+  local af = Default.favoriteHash[a.title or ""] and 1 or 0
+  local bf = Default.favoriteHash[b.title or ""] and 1 or 0
+  if af ~= bf then return af > bf end
+  return _byRecency(a, b)
+end
+
+-- Ordered cycle the M2 button walks. Each entry: { id, label, cmp }.
+local kSortModes = {
+  { id = "recents",     label = "recents",   cmp = _byRecency        },
+  { id = "alpha",       label = "alpha",     cmp = _alpha            },
+  { id = "type",        label = "type",      cmp = _byGlyph          },
+  { id = "package",     label = "package",   cmp = _byPackage        },
+  { id = "keyword",     label = "keyword",   cmp = _byKeyword        },
+  { id = "favorites",   label = "favs",      cmp = _byFavoritesFirst },
+  { id = "iofan",       label = "I/O",       cmp = _byIOFan          },
+}
+
+local function sortModeAt(idx)
+  return kSortModes[((idx - 1) % #kSortModes) + 1]
+end
+
+-- ---------------------------------------------------------------------------
 -- Construction
 -- ---------------------------------------------------------------------------
 
@@ -97,6 +175,7 @@ function Dense:init(ring)
   self.encoderAccum = 0
   self.ribbonIdx    = 0          -- 0 = null (no filter)
   self.ribbonCounts = nil        -- [0..27] = match count, lazily filled
+  self.sortIdx      = 1          -- index into kSortModes; M2 advances
 
   -- Alphabet ribbon labels. One Label per position; brightness is
   -- updated each refresh based on selection state + match count.
@@ -156,29 +235,32 @@ function Dense:init(ring)
   self.subDivider:add(sdInstr)
   self:addSubGraphic(self.subDivider)
 
+  -- Status strip across the top of the sub display: shows the
+  -- active sort mode label so the user sees what M2 will cycle.
+  self.subStatus = app.Label("", kFontMain)
+  self.subStatus:setPosition(2, app.GRID4_LINE1)
+  self.subStatus:setJustification(app.justifyLeft)
+  self.subStatus:setForegroundColor(app.GRAY10)
+  self:addSubGraphic(self.subStatus)
+
   self.subLeft  = { header = "M1" }
   self.subRight = { header = "M4" }
   local function buildSide(side, xBase)
     side.label = app.Label(side.header, kFontMain)
-    side.label:setPosition(xBase, app.GRID4_LINE1)
+    side.label:setPosition(xBase, app.GRID4_LINE2)
     side.label:setJustification(app.justifyLeft)
     side.label:setForegroundColor(app.GRAY7)
     self:addSubGraphic(side.label)
 
     side.title = app.Label("", kFontSub)
-    side.title:setPosition(xBase, app.GRID4_LINE2)
+    side.title:setPosition(xBase, app.GRID4_LINE3)
     side.title:setJustification(app.justifyLeft)
     self:addSubGraphic(side.title)
 
     side.lib = app.Label("", kFontMain)
-    side.lib:setPosition(xBase, app.GRID4_LINE3)
+    side.lib:setPosition(xBase, app.GRID4_LINE4)
     side.lib:setJustification(app.justifyLeft)
     self:addSubGraphic(side.lib)
-
-    side.used = app.Label("", kFontMain)
-    side.used:setPosition(xBase, app.GRID4_LINE4)
-    side.used:setJustification(app.justifyLeft)
-    self:addSubGraphic(side.used)
   end
   buildSide(self.subLeft,  2)
   buildSide(self.subRight, 68)
@@ -191,44 +273,123 @@ end
 -- Unit list management
 -- ---------------------------------------------------------------------------
 
--- Pull all units from Factory once + cache. Sort by recency-then-
--- alpha. Apply the current ribbon filter (if any) to produce
+-- Pull all units from Factory once + cache. Apply the active sort
+-- comparator. Apply the current ribbon filter (if any) to produce
 -- self.units. Cache also feeds the ribbon's per-letter match counts.
 function Dense:_rebuildUnitList()
   local channelCount = self.ring and self.ring:getChannelCount() or nil
   local all = Factory.getUnits(nil, channelCount)
-  table.sort(all, function(a, b)
-    local aTitle = a.title or ""
-    local bTitle = b.title or ""
-    local aRec = #Sparkline.ordinals(aTitle)
-    local bRec = #Sparkline.ordinals(bTitle)
-    if aRec ~= bRec then return aRec > bRec end
-    return aTitle:upper() < bTitle:upper()
-  end)
+  table.sort(all, sortModeAt(self.sortIdx).cmp)
   self.allUnits = all
   self:_recomputeRibbonCounts()
   self:_applyFilters()
 end
 
--- Re-derive self.units from self.allUnits applying the active
--- ribbon filter. Cheap to call; runs on ribbon position change.
+-- Re-sort the cached unit list (without re-querying Factory) and
+-- re-apply ribbon filter. Cheap; runs on M2 sort cycle.
+function Dense:_resort()
+  if self.allUnits == nil then return self:_rebuildUnitList() end
+  table.sort(self.allUnits, sortModeAt(self.sortIdx).cmp)
+  self:_applyFilters()
+end
+
+-- Re-derive self.rows from self.allUnits applying the active
+-- ribbon filter and packing into row entries. Cheap to call; runs
+-- on ribbon position change or sort cycle.
 function Dense:_applyFilters()
+  -- Step 1: apply ribbon filter.
   local idx = self.ribbonIdx
+  local filtered
   if idx == 0 then
-    self.units = self.allUnits
+    filtered = self.allUnits or {}
   else
-    local out = {}
-    for _, u in ipairs(self.allUnits) do
+    filtered = {}
+    for _, u in ipairs(self.allUnits or {}) do
       if ribbonIndexForTitle(u.title) == idx then
-        out[#out + 1] = u
+        filtered[#filtered + 1] = u
       end
     end
-    self.units = out
   end
-  if self.cursorRow >= self:_rowCount() then
-    self.cursorRow = math.max(0, self:_rowCount() - 1)
+
+  -- Step 2: pack into row entries (with section dividers if the
+  -- active sort mode supports them AND dividers are enabled).
+  self.rows = self:_packIntoRows(filtered)
+
+  -- Step 3: snap cursor in-bounds and move off any divider row
+  -- (encoder cursor never sits on a non-selectable row).
+  if self.cursorRow >= #self.rows then
+    self.cursorRow = math.max(0, #self.rows - 1)
   end
   if self.cursorRow < 0 then self.cursorRow = 0 end
+  self.cursorRow = self:_nextSelectableRow(self.cursorRow, 1)
+                or self:_nextSelectableRow(self.cursorRow, -1)
+                or 0
+end
+
+-- Walk `filtered` in order, emitting divider rows at primary-key
+-- boundaries (when applicable) and packing pairs of units into
+-- "pair" rows. Returns a list of { type = "divider", label = X }
+-- and { type = "pair", left = L, right = R } entries.
+function Dense:_packIntoRows(filtered)
+  local mode = sortModeAt(self.sortIdx)
+  local Settings = require "Settings"
+  local dividersOn = Settings.get("pickerSectionDividers") ~= "no"
+  local keyFn = self:_dividerKeyFnFor(mode.id)
+
+  local rows = {}
+  local lastKey = nil
+  local pending = nil  -- one half-row buffered while we look for a partner
+  local function flushPending()
+    if pending then
+      rows[#rows + 1] = { type = "pair", left = pending, right = nil }
+      pending = nil
+    end
+  end
+  for _, u in ipairs(filtered) do
+    local key = keyFn and keyFn(u) or nil
+    if dividersOn and keyFn and key ~= lastKey then
+      -- Section boundary: flush any half-row from the previous
+      -- section so the next section starts cleanly on its own row.
+      flushPending()
+      rows[#rows + 1] = { type = "divider", label = key }
+      lastKey = key
+    end
+    if pending == nil then
+      pending = u
+    else
+      rows[#rows + 1] = { type = "pair", left = pending, right = u }
+      pending = nil
+    end
+  end
+  flushPending()
+  return rows
+end
+
+-- Returns a function (loadInfo) -> section-key for sort modes that
+-- group naturally. Modes without natural grouping return nil so
+-- _packIntoRows skips divider emission.
+function Dense:_dividerKeyFnFor(modeId)
+  if modeId == "type" then
+    return function(u) return Glyph.forLoadInfo(u) end
+  elseif modeId == "package" then
+    return function(u) return u.libraryName or "" end
+  elseif modeId == "keyword" then
+    return _primaryKeyword
+  end
+  return nil
+end
+
+-- Skip past divider rows in the given direction. Returns the next
+-- selectable row index, or nil if none exists in that direction.
+function Dense:_nextSelectableRow(start, dir)
+  local i = start
+  while i >= 0 and i < #self.rows do
+    if self.rows[i + 1] and self.rows[i + 1].type == "pair" then
+      return i
+    end
+    i = i + dir
+  end
+  return nil
 end
 
 -- Lazy per-letter match counts. Called on rebuild (and later on
@@ -246,15 +407,22 @@ function Dense:_recomputeRibbonCounts()
 end
 
 function Dense:_rowCount()
-  return math.ceil(#self.units / 2)
+  return self.rows and #self.rows or 0
 end
 
--- Returns (leftLoadInfo, rightLoadInfo) for row index r (0-based).
--- Either may be nil if the row is empty or partial.
+-- Returns the row entry for index r (0-based). May be nil if r is
+-- out of range, a "pair" row with left/right loadInfos, or a
+-- "divider" row with a label.
+function Dense:_rowEntry(r)
+  return self.rows and self.rows[r + 1] or nil
+end
+
+-- Returns (leftLoadInfo, rightLoadInfo) for the focused row. Both
+-- nil if the row is a divider or out of range.
 function Dense:_unitsForRow(r)
-  local leftIdx  = r * 2 + 1
-  local rightIdx = r * 2 + 2
-  return self.units[leftIdx], self.units[rightIdx]
+  local entry = self:_rowEntry(r)
+  if entry == nil or entry.type ~= "pair" then return nil, nil end
+  return entry.left, entry.right
 end
 
 -- ---------------------------------------------------------------------------
@@ -298,27 +466,47 @@ function Dense:_refresh()
     self.ribbonLabels[i]:setForegroundColor(color)
   end
 
-  -- Paint visible rows.
+  -- Paint visible rows. Divider rows render their label across the
+  -- whole left-column slot (clearing the right column) at GRAY7;
+  -- pair rows render left + right unit text as usual.
   for r = 1, kVisibleRows do
     local rowIdx = self.viewTop + (r - 1)
-    local left, right = self:_unitsForRow(rowIdx)
-    self.leftLabels[r]:setText(formatRowCell(left))
-    self.rightLabels[r]:setText(formatRowCell(right))
+    local entry = self:_rowEntry(rowIdx)
+    if entry == nil then
+      self.leftLabels[r]:setText("")
+      self.rightLabels[r]:setText("")
+    elseif entry.type == "divider" then
+      self.leftLabels[r]:setText("- " .. (entry.label or "") .. " -")
+      self.leftLabels[r]:setForegroundColor(app.GRAY7)
+      self.rightLabels[r]:setText("")
+    else
+      self.leftLabels[r]:setText(formatRowCell(entry.left))
+      self.leftLabels[r]:setForegroundColor(app.WHITE)
+      self.rightLabels[r]:setText(formatRowCell(entry.right))
+      self.rightLabels[r]:setForegroundColor(app.WHITE)
+    end
   end
 
   -- Position cursor box on the focused row.
   -- An app.Label at baseline y renders text from y+4 to y+textHeight+3.
   -- Per the sequencer's empirical tuning (GridView.lua:262), the
   -- cursor wraps the glyph cleanly when mBottom = labelY+3 and the
-  -- box height = 10.
+  -- box height = 10. Hidden when cursor lands off-screen or on a
+  -- divider (which shouldn't happen normally; safety net).
   local visIdx = self.cursorRow - self.viewTop  -- 0..kVisibleRows-1
-  if visIdx < 0 or visIdx >= kVisibleRows then
+  local entry  = self:_rowEntry(self.cursorRow)
+  if visIdx < 0 or visIdx >= kVisibleRows
+     or entry == nil or entry.type ~= "pair" then
     self.cursorBox:hide()
   else
     local y = kRowYs[visIdx + 1]
     self.cursorBox:setPosition(0, y + 3)
     self.cursorBox:show()
   end
+
+  -- Sub-display top status: active sort mode (M2 cycles).
+  local mode = sortModeAt(self.sortIdx)
+  self.subStatus:setText(string.format("sort:%s", mode.label))
 
   -- Sub-display: both row units, side-by-side.
   local focusLeft, focusRight = self:_unitsForRow(self.cursorRow)
@@ -340,13 +528,10 @@ function Dense:_refreshSubSide(side, loadInfo)
   if loadInfo == nil then
     side.title:setText("")
     side.lib:setText("")
-    side.used:setText("")
     return
   end
   side.title:setText(clip(loadInfo.title))
   side.lib:setText(clip(loadInfo.libraryName or ""))
-  local ord = #Sparkline.ordinals(loadInfo.title or "")
-  side.used:setText(string.format("used %dx", ord))
 end
 
 -- ---------------------------------------------------------------------------
@@ -368,18 +553,23 @@ function Dense:encoder(change, shifted)
       if self:_stepRibbon(-1) then moved = true end
     end
   else
-    -- Row cursor nav: step one row per threshold, no wrap.
+    -- Row cursor nav: step one row per threshold, no wrap. Divider
+    -- rows are non-selectable, so each step lands on the next
+    -- "pair" row (which may be 2+ raw rows away when a divider
+    -- sits between).
     while self.encoderAccum >= kEncoderThreshold do
       self.encoderAccum = self.encoderAccum - kEncoderThreshold
-      if self.cursorRow < self:_rowCount() - 1 then
-        self.cursorRow = self.cursorRow + 1
+      local target = self:_nextSelectableRow(self.cursorRow + 1, 1)
+      if target then
+        self.cursorRow = target
         moved = true
       end
     end
     while self.encoderAccum <= -kEncoderThreshold do
       self.encoderAccum = self.encoderAccum + kEncoderThreshold
-      if self.cursorRow > 0 then
-        self.cursorRow = self.cursorRow - 1
+      local target = self:_nextSelectableRow(self.cursorRow - 1, -1)
+      if target then
+        self.cursorRow = target
         moved = true
       end
     end
@@ -427,10 +617,20 @@ function Dense:_pick(side)
 end
 
 function Dense:mainReleased(i, shifted)
-  if shifted then return false end
   if i == 1 then
+    if shifted then return false end
     return self:_pick("L")
+  elseif i == 2 then
+    -- Cycle sort mode (shifted = reverse cycle).
+    local dir = shifted and -1 or 1
+    self.sortIdx = ((self.sortIdx - 1 + dir) % #kSortModes) + 1
+    self.cursorRow = 0
+    self.viewTop = 0
+    self:_resort()
+    self:_refresh()
+    return true
   elseif i == 4 then
+    if shifted then return false end
     return self:_pick("R")
   end
   return true

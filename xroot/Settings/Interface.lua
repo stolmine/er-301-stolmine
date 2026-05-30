@@ -80,6 +80,10 @@ menuItems[#menuItems + 1] = {
   "pickerStyle"
 }
 menuItems[#menuItems + 1] = {
+  "addVariable",
+  "pickerSectionDividers"
+}
+menuItems[#menuItems + 1] = {
   "addCategory",
   "QuickSaves"
 }
