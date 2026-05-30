@@ -49,6 +49,35 @@ local kColWidth      = 120       -- visual width per column cell
 -- Y baselines (bottom-up). Five rows, top to bottom visually.
 local kRowYs = { 44, 35, 26, 17, 8 }
 
+-- Alphabet ribbon: 28 positions across the top row. Index 0 is the
+-- null position (no filter); 1..26 are A..Z; 27 is # (numerics +
+-- specials). No wrap on scroll, so the user can blast either
+-- direction and stop at an extreme. HOME snaps to null;
+-- shift+HOME snaps to #.
+local kRibbonCount   = 28
+local kRibbonY       = 54
+local kRibbonNullCh  = "*"        -- placeholder for the null position
+local kRibbonHashCh  = "#"
+local kRibbonStep    = 9          -- 256 / 28 = ~9 px per cell
+local function ribbonChar(i)
+  if i == 0 then return kRibbonNullCh end
+  if i == kRibbonCount - 1 then return kRibbonHashCh end
+  return string.char(string.byte("A") + i - 1)
+end
+local function ribbonX(i) return i * kRibbonStep end
+
+-- Decide which ribbon index a unit belongs to from its title's
+-- first character. Returns 0 (null) is only used as the "no filter
+-- match" sentinel; real units always return 1..27.
+local function ribbonIndexForTitle(title)
+  if title == nil or title == "" then return kRibbonCount - 1 end
+  local c = title:sub(1, 1):upper()
+  if c >= "A" and c <= "Z" then
+    return c:byte() - string.byte("A") + 1
+  end
+  return kRibbonCount - 1
+end
+
 local kEncoderThreshold = Env.EncoderThreshold.Default
 
 -- ---------------------------------------------------------------------------
@@ -61,10 +90,24 @@ function Dense:init(ring)
   self.ring = ring
 
   -- Cursor state.
-  self.units       = {}         -- filtered + sorted loadInfo list
-  self.cursorRow   = 0
-  self.viewTop     = 0
+  self.units        = {}         -- filtered + sorted loadInfo list
+  self.allUnits     = nil        -- cached unfiltered list (for ribbon counts)
+  self.cursorRow    = 0
+  self.viewTop      = 0
   self.encoderAccum = 0
+  self.ribbonIdx    = 0          -- 0 = null (no filter)
+  self.ribbonCounts = nil        -- [0..27] = match count, lazily filled
+
+  -- Alphabet ribbon labels. One Label per position; brightness is
+  -- updated each refresh based on selection state + match count.
+  self.ribbonLabels = {}
+  for i = 0, kRibbonCount - 1 do
+    local lbl = app.Label(ribbonChar(i), kFontMain)
+    lbl:setPosition(ribbonX(i), kRibbonY)
+    lbl:setJustification(app.justifyLeft)
+    self:addMainGraphic(lbl)
+    self.ribbonLabels[i] = lbl
+  end
 
   -- Row label widgets (left col + right col, one per visible row).
   self.leftLabels  = {}
@@ -148,8 +191,9 @@ end
 -- Unit list management
 -- ---------------------------------------------------------------------------
 
--- Pull all units from Factory, filter by channel count, then sort.
--- First-cut sort: by recency count (desc), then alpha.
+-- Pull all units from Factory once + cache. Sort by recency-then-
+-- alpha. Apply the current ribbon filter (if any) to produce
+-- self.units. Cache also feeds the ribbon's per-letter match counts.
 function Dense:_rebuildUnitList()
   local channelCount = self.ring and self.ring:getChannelCount() or nil
   local all = Factory.getUnits(nil, channelCount)
@@ -161,10 +205,44 @@ function Dense:_rebuildUnitList()
     if aRec ~= bRec then return aRec > bRec end
     return aTitle:upper() < bTitle:upper()
   end)
-  self.units = all
+  self.allUnits = all
+  self:_recomputeRibbonCounts()
+  self:_applyFilters()
+end
+
+-- Re-derive self.units from self.allUnits applying the active
+-- ribbon filter. Cheap to call; runs on ribbon position change.
+function Dense:_applyFilters()
+  local idx = self.ribbonIdx
+  if idx == 0 then
+    self.units = self.allUnits
+  else
+    local out = {}
+    for _, u in ipairs(self.allUnits) do
+      if ribbonIndexForTitle(u.title) == idx then
+        out[#out + 1] = u
+      end
+    end
+    self.units = out
+  end
   if self.cursorRow >= self:_rowCount() then
     self.cursorRow = math.max(0, self:_rowCount() - 1)
   end
+  if self.cursorRow < 0 then self.cursorRow = 0 end
+end
+
+-- Lazy per-letter match counts. Called on rebuild (and later on
+-- sort / type-filter changes, when they exist). Read-only by the
+-- ribbon render path -- shift+encoder navigation reads the cache.
+function Dense:_recomputeRibbonCounts()
+  local counts = {}
+  for i = 0, kRibbonCount - 1 do counts[i] = 0 end
+  counts[0] = #(self.allUnits or {})  -- null = all
+  for _, u in ipairs(self.allUnits or {}) do
+    local i = ribbonIndexForTitle(u.title)
+    counts[i] = counts[i] + 1
+  end
+  self.ribbonCounts = counts
 end
 
 function Dense:_rowCount()
@@ -204,6 +282,21 @@ function Dense:_refresh()
     self.viewTop = self.cursorRow - (kVisibleRows - 1)
   end
   if self.viewTop < 0 then self.viewTop = 0 end
+
+  -- Paint ribbon: selected position bright, empty letters dim,
+  -- others mid-gray.
+  local counts = self.ribbonCounts or {}
+  for i = 0, kRibbonCount - 1 do
+    local color
+    if i == self.ribbonIdx then
+      color = app.WHITE
+    elseif (counts[i] or 0) == 0 then
+      color = app.GRAY3
+    else
+      color = app.GRAY7
+    end
+    self.ribbonLabels[i]:setForegroundColor(color)
+  end
 
   -- Paint visible rows.
   for r = 1, kVisibleRows do
@@ -263,22 +356,62 @@ end
 function Dense:encoder(change, shifted)
   self.encoderAccum = self.encoderAccum + change
   local moved = false
-  while self.encoderAccum >= kEncoderThreshold do
-    self.encoderAccum = self.encoderAccum - kEncoderThreshold
-    if self.cursorRow < self:_rowCount() - 1 then
-      self.cursorRow = self.cursorRow + 1
-      moved = true
+  if shifted then
+    -- Ribbon nav: step one position per threshold, no wrap, skip
+    -- empty letters (positions with 0 matches).
+    while self.encoderAccum >= kEncoderThreshold do
+      self.encoderAccum = self.encoderAccum - kEncoderThreshold
+      if self:_stepRibbon(1) then moved = true end
     end
-  end
-  while self.encoderAccum <= -kEncoderThreshold do
-    self.encoderAccum = self.encoderAccum + kEncoderThreshold
-    if self.cursorRow > 0 then
-      self.cursorRow = self.cursorRow - 1
-      moved = true
+    while self.encoderAccum <= -kEncoderThreshold do
+      self.encoderAccum = self.encoderAccum + kEncoderThreshold
+      if self:_stepRibbon(-1) then moved = true end
+    end
+  else
+    -- Row cursor nav: step one row per threshold, no wrap.
+    while self.encoderAccum >= kEncoderThreshold do
+      self.encoderAccum = self.encoderAccum - kEncoderThreshold
+      if self.cursorRow < self:_rowCount() - 1 then
+        self.cursorRow = self.cursorRow + 1
+        moved = true
+      end
+    end
+    while self.encoderAccum <= -kEncoderThreshold do
+      self.encoderAccum = self.encoderAccum + kEncoderThreshold
+      if self.cursorRow > 0 then
+        self.cursorRow = self.cursorRow - 1
+        moved = true
+      end
     end
   end
   if moved then self:_refresh() end
   return true
+end
+
+-- Advance ribbon by `dir` positions (+/-1) skipping empties. No
+-- wrap at extremes. Returns true if position actually changed.
+function Dense:_stepRibbon(dir)
+  local counts = self.ribbonCounts or {}
+  local i = self.ribbonIdx + dir
+  while i >= 0 and i < kRibbonCount do
+    if (counts[i] or 0) > 0 then
+      self.ribbonIdx = i
+      self:_applyFilters()
+      return true
+    end
+    i = i + dir
+  end
+  return false
+end
+
+-- Jump ribbon directly to position `i`. Used by HOME / shift+HOME.
+function Dense:_setRibbon(i)
+  if i < 0 then i = 0 elseif i >= kRibbonCount then i = kRibbonCount - 1 end
+  if self.ribbonIdx == i then return end
+  self.ribbonIdx = i
+  self.cursorRow = 0
+  self.viewTop = 0
+  self:_applyFilters()
 end
 
 -- Pick the unit in column `side` ("L" or "R") on the focused row.
@@ -316,9 +449,18 @@ function Dense:upReleased(shifted)
   return self.ring:upReleased(shifted)
 end
 
+-- HOME snaps the ribbon to the null position (clears any letter
+-- filter and resets the cursor to the top). shift+HOME (zeroReleased
+-- in firmware-speak) snaps to the # tail position for fast access
+-- to non-alphabetic titles.
 function Dense:homeReleased()
-  self.cursorRow = 0
-  self.viewTop = 0
+  self:_setRibbon(0)
+  self:_refresh()
+  return true
+end
+
+function Dense:zeroReleased()
+  self:_setRibbon(kRibbonCount - 1)
   self:_refresh()
   return true
 end
