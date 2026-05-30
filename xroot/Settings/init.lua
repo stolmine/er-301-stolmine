@@ -192,6 +192,19 @@ local defaults = {
       "no"
     }
   },
+  pickerDefaultSort = {
+    category = "Units",
+    description = "Dense picker default sort:",
+    value = "recents",
+    choices = {
+      "recents",
+      "alpha",
+      "type",
+      "package",
+      "keyword",
+      "favs"
+    }
+  },
   fileRecorderChannelCount = {
     category = "Multitrack Recorder",
     description = "Channel Count:",

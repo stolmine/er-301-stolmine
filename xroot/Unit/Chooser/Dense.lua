@@ -208,6 +208,15 @@ local function sortModeAt(idx)
   return kSortModes[((idx - 1) % #kSortModes) + 1]
 end
 
+-- Reverse lookup: sort-mode id ("recents" / "alpha" / ...) ->
+-- index into kSortModes. Returns 1 (recents) for unknown ids.
+local function sortIdxFor(id)
+  for i, m in ipairs(kSortModes) do
+    if m.id == id then return i end
+  end
+  return 1
+end
+
 -- ---------------------------------------------------------------------------
 -- M-key chip labels per edit mode. Index 1..6 = M1..M6.
 -- ---------------------------------------------------------------------------
@@ -234,7 +243,10 @@ function Dense:init(ring)
   self.encoderAccum  = 0
   self.ribbonIdx     = 0          -- 0 = null (no filter)
   self.ribbonCounts  = nil        -- [0..27] = match count, lazily filled
-  self.sortIdx       = 1          -- index into kSortModes; M2 advances
+  -- Sort mode index; M2 advances. Defaults to the user's admin
+  -- pickerDefaultSort preference (falls back to recents).
+  local Settings = require "Settings"
+  self.sortIdx       = sortIdxFor(Settings.get("pickerDefaultSort"))
   self.typeFilter    = nil        -- nil = off; else a Glyph.* constant
   self.editMode      = "pick"     -- "pick" | "hide" | "fav"
   self.encoderState  = Encoder.Fine -- toggled by dial press/release
@@ -1108,18 +1120,25 @@ function Dense:upReleased(shifted)
   return self.ring:upReleased(shifted)
 end
 
--- HOME snaps the ribbon to the null position (clears any letter
--- filter and resets the cursor to the top). shift+HOME (zeroReleased
--- in firmware-speak) snaps to the # tail position for fast access
--- to non-alphabetic titles.
+-- HOME = cursor to top of the CURRENT view (filters / sort stay
+-- intact). shift+HOME (zeroReleased) = full reset to the user's
+-- starting state: ribbon to null, type filter off, sort restored
+-- to the pickerDefaultSort admin preference, cursor to top.
 function Dense:homeReleased()
-  self:_setRibbon(0)
+  self.cursorRow  = self:_nextSelectableRow(0, 1) or 0
+  self.scrollFrac = nil
   self:_refresh()
   return true
 end
 
 function Dense:zeroReleased()
-  self:_setRibbon(kRibbonCount - 1)
+  local Settings = require "Settings"
+  self.ribbonIdx  = 0
+  self.typeFilter = nil
+  self.sortIdx    = sortIdxFor(Settings.get("pickerDefaultSort"))
+  self.cursorRow  = 0
+  self.scrollFrac = nil
+  self:_resort()
   self:_refresh()
   return true
 end
