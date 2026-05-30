@@ -55,7 +55,7 @@ local kRowYs = { 44, 35, 26, 17, 8 }
 -- direction and stop at an extreme. HOME snaps to null;
 -- shift+HOME snaps to #.
 local kRibbonCount   = 28
-local kRibbonY       = 54
+local kRibbonY       = 53        -- matches sequencer's kHeaderY: y=54 clips the top edge
 local kRibbonNullCh  = "*"        -- placeholder for the null position
 local kRibbonHashCh  = "#"
 local kRibbonStep    = 9          -- 256 / 28 = ~9 px per cell
