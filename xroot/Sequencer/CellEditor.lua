@@ -17,6 +17,7 @@ local app = app
 local Class = require "Base.Class"
 local Window = require "Base.Window"
 local Env = require "Env"
+local Format = require "Sequencer.Format"
 
 local CellEditor = Class {}
 CellEditor:include(Window)
@@ -614,7 +615,12 @@ function CellEditor:_targetReadout()
   end
   local colChar = kColLetters[targetCol + 1] or "?"
   local v       = seq:l1Value(self.slot, targetCol, targetRow)
-  return colChar .. rowTag, fmtNum(v)
+  -- fmtCellByCol gives us the same per-column rendering the L1 grid
+  -- uses (note names on cv1, '1/16' / 'TIE' on g1L/g2L, ticks on stL,
+  -- signed semitones on tr, etc.). The grid pads to 5 chars for
+  -- column alignment; the modal label looks better without leading/
+  -- trailing spaces, so trim.
+  return colChar .. rowTag, Format.trim(Format.fmtCellByCol(targetCol, v))
 end
 
 -- ---------------------------------------------------------------------------
