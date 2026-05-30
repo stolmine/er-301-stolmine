@@ -437,9 +437,10 @@ end
 -- Render
 -- ---------------------------------------------------------------------------
 
--- Format a unit as "glyph name" truncated to colWidth chars. Keeps
--- the same glyph dispatch the classic view uses for visual continuity.
-local kMaxLabelChars = 22  -- ~110 px at font 9 average glyph width
+-- Format a unit as "glyph name" truncated to fit the column width.
+-- kMaxLabelChars is sized for ~120 px / ~5 px per char = ~24 chars,
+-- minus 2 for safety / ellipsis on overflow.
+local kMaxLabelChars = 22
 local function formatRowCell(loadInfo)
   if loadInfo == nil then return "" end
   local glyph = Glyph.forLoadInfo(loadInfo)
@@ -475,8 +476,8 @@ function Dense:_refresh()
   end
 
   -- Paint visible rows. Divider rows render their label across the
-  -- whole left-column slot (clearing the right column) at GRAY7;
-  -- pair rows render left + right unit text as usual.
+  -- whole left-column slot at GRAY7; pair rows render left + right
+  -- unit text at WHITE.
   for r = 1, kVisibleRows do
     local rowIdx = self.viewTop + (r - 1)
     local entry = self:_rowEntry(rowIdx)
