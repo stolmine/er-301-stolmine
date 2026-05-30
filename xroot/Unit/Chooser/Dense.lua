@@ -254,6 +254,15 @@ function Dense:init(ring)
   self.scrollFrac    = nil        -- float row index of top visible slot
   self.cursorAnimY   = nil
   self.cursorEasingY = false
+  -- Hold-encoder gesture state. When M2 / M3 is held AND the
+  -- encoder fires, the encoder scrolls the corresponding cycle
+  -- (sort / type filter) instead of the row cursor. Suppress the
+  -- on-release tap action if the encoder consumed the hold so a
+  -- "hold + cycle + release" gesture doesn't extra-step on lift.
+  self.m2Held         = false
+  self.m3Held         = false
+  self.m2SuppressTap  = false
+  self.m3SuppressTap  = false
 
   -- Per painted row, six separate labels: glyph + name + fav for
   -- each of the two columns. Splitting them gives fixed horizontal
@@ -463,9 +472,20 @@ function Dense:_applyFilters()
     if keep then filtered[#filtered + 1] = u end
   end
 
-  -- Step 2: pack into row entries (with section dividers if the
-  -- active sort mode supports them AND dividers are enabled).
-  self.rows = self:_packIntoRows(filtered)
+  -- Step 2a: build pinned sections (favorites / recents) at the
+  -- top of the picker. Pinned units ALSO appear in the main
+  -- sorted list below -- mirrors the classic chooser's behavior
+  -- so users who internalized a unit's position in the sort
+  -- can still find it there.
+  local pinnedRows = self:_buildPinnedRows(filtered)
+
+  -- Step 2b: pack the full filtered list into row entries (with
+  -- section dividers if the active sort mode supports them AND
+  -- dividers are enabled), then prepend the pinned sections.
+  local mainRows = self:_packIntoRows(filtered)
+  self.rows = {}
+  for _, r in ipairs(pinnedRows) do self.rows[#self.rows + 1] = r end
+  for _, r in ipairs(mainRows)   do self.rows[#self.rows + 1] = r end
 
   -- Recompute ribbon counts so empty-letter dimming reflects the
   -- type filter too: when filter is "$ modulate", letters with no
@@ -481,6 +501,94 @@ function Dense:_applyFilters()
   self.cursorRow = self:_nextSelectableRow(self.cursorRow, 1)
                 or self:_nextSelectableRow(self.cursorRow, -1)
                 or 0
+end
+
+-- Build the pinned-favorites + pinned-recents sections that sit
+-- at the top of the picker when those admin settings are on.
+-- Returns a list of row entries. Pinned units intentionally also
+-- appear in the main sorted list (caller does not dedupe).
+--
+-- Pinned-section dividers are always shown (regardless of the
+-- pickerSectionDividers admin flag) because their labels are
+-- essential to distinguish pinned regions from the sorted body.
+-- Within the pinned sections themselves, recents dedupe against
+-- favorites so a unit isn't listed twice in the pin region.
+local kPinnedRecentsMax = 6  -- 3 rows * 2 cols
+function Dense:_buildPinnedRows(filtered)
+  local Settings = require "Settings"
+  local pinFav     = Settings.get("pickerPinFavorites") == "yes"
+  local pinRecents = Settings.get("pickerPinRecents")   == "yes"
+  if not pinFav and not pinRecents then return {} end
+
+  local Default = require "Unit.Chooser.Default"
+
+  -- Set of titles already pinned by a section, used only to dedupe
+  -- WITHIN the pinned region (favs vs recents). Main list is left
+  -- intact and may duplicate.
+  local pinned = {}
+
+  local function pairRowsFor(list)
+    local rows, pending = {}, nil
+    for _, u in ipairs(list) do
+      if pending == nil then
+        pending = u
+      else
+        rows[#rows + 1] = { type = "pair", left = pending, right = u }
+        pending = nil
+      end
+    end
+    if pending then
+      rows[#rows + 1] = { type = "pair", left = pending, right = nil }
+    end
+    return rows
+  end
+
+  local pinnedRows = {}
+
+  if pinFav then
+    local favs = {}
+    for _, u in ipairs(filtered) do
+      if Default.favoriteHash[u.title or ""] and not pinned[u.title or ""] then
+        favs[#favs + 1] = u
+        pinned[u.title or ""] = true
+      end
+    end
+    if #favs > 0 then
+      pinnedRows[#pinnedRows + 1] = { type = "divider", label = "favorites" }
+      for _, r in ipairs(pairRowsFor(favs)) do
+        pinnedRows[#pinnedRows + 1] = r
+      end
+    end
+  end
+
+  if pinRecents then
+    -- Walk Chooser.recent in its most-recent-first order so the
+    -- visual order matches "what I just used". Resolve each title
+    -- back to a loadInfo in `filtered` so the resulting entries
+    -- respect the current channel-count + ribbon + type filters.
+    local recents = {}
+    for _, recentInfo in ipairs(Default.recent) do
+      if #recents >= kPinnedRecentsMax then break end
+      local title = recentInfo.title
+      if title and not pinned[title] then
+        for _, u in ipairs(filtered) do
+          if (u.title or "") == title then
+            recents[#recents + 1] = u
+            pinned[title] = true
+            break
+          end
+        end
+      end
+    end
+    if #recents > 0 then
+      pinnedRows[#pinnedRows + 1] = { type = "divider", label = "recents" }
+      for _, r in ipairs(pairRowsFor(recents)) do
+        pinnedRows[#pinnedRows + 1] = r
+      end
+    end
+  end
+
+  return pinnedRows
 end
 
 -- Walk `filtered` in order, emitting divider rows at primary-key
@@ -924,6 +1032,49 @@ function Dense:encoder(change, shifted)
   self.encoderAccum = self.encoderAccum + change
   local moved = false
 
+  -- Hold-M2 + encoder = scroll sort mode (1 mode per threshold).
+  -- Hold-M3 + encoder = scroll type filter (off + 6 glyphs).
+  -- These override every other encoder behavior so the user can
+  -- scrub through modes in either direction without releasing M2/M3.
+  -- Sets the suppressTap flag so the eventual release doesn't fire
+  -- an extra discrete cycle.
+  if self.m2Held then
+    while self.encoderAccum >= kEncoderThreshold do
+      self.encoderAccum = self.encoderAccum - kEncoderThreshold
+      self.sortIdx       = ((self.sortIdx) % #kSortModes) + 1
+      self.m2SuppressTap = true
+      moved = true
+    end
+    while self.encoderAccum <= -kEncoderThreshold do
+      self.encoderAccum = self.encoderAccum + kEncoderThreshold
+      self.sortIdx       = ((self.sortIdx - 2) % #kSortModes) + 1
+      self.m2SuppressTap = true
+      moved = true
+    end
+    if moved then
+      self.cursorRow  = 0
+      self.scrollFrac = nil
+      self:_resort()
+      self:_refresh()
+    end
+    return true
+  end
+  if self.m3Held then
+    while self.encoderAccum >= kEncoderThreshold do
+      self.encoderAccum = self.encoderAccum - kEncoderThreshold
+      self:_cycleTypeFilter(1)
+      self.m3SuppressTap = true
+      moved = true
+    end
+    while self.encoderAccum <= -kEncoderThreshold do
+      self.encoderAccum = self.encoderAccum + kEncoderThreshold
+      self:_cycleTypeFilter(-1)
+      self.m3SuppressTap = true
+      moved = true
+    end
+    return true
+  end
+
   -- Coarse mode: jump cursor by section header in sort modes that
   -- have dividers. Falls back to per-row stepping in modes without
   -- dividers so the dial isn't a no-op anywhere.
@@ -1004,13 +1155,16 @@ function Dense:_setRibbon(i)
 end
 
 -- Pick the unit in column `side` ("L" or "R") on the focused row.
--- Records the pick into Sparkline + triggers the ring's load.
+-- Default:updateRecent handles both the shared 6-deep recents
+-- list (Chooser.recent, consumed by classic view + pin-recents
+-- here) AND the Sparkline ordinal stamp, so we don't need to call
+-- Sparkline.recordUse separately.
 function Dense:_pick(side)
   local left, right = self:_unitsForRow(self.cursorRow)
   local target = (side == "L") and left or right
   if target == nil then return true end
-  Sparkline.recordUse(target.title)
-  Sparkline.flushIfDirty()
+  local Default = require "Unit.Chooser.Default"
+  Default:updateRecent(target)
   self.ring:load(target)
   return true
 end
@@ -1042,6 +1196,22 @@ function Dense:_toggleFav(side)
   return true
 end
 
+function Dense:mainPressed(i, shifted)
+  -- Track hold state for M2 (sort) and M3 (type filter). Encoder
+  -- events while either is held drive the corresponding cycle
+  -- instead of moving the row cursor (see Dense:encoder).
+  if i == 2 then
+    self.m2Held        = true
+    self.m2SuppressTap = false
+    return true
+  elseif i == 3 then
+    self.m3Held        = true
+    self.m3SuppressTap = false
+    return true
+  end
+  return false
+end
+
 function Dense:mainReleased(i, shifted)
   if i == 1 then
     if shifted then return false end
@@ -1049,19 +1219,25 @@ function Dense:mainReleased(i, shifted)
     if self.editMode == "fav"  then return self:_toggleFav("L")  end
     return self:_pick("L")
   elseif i == 2 then
-    -- Cycle sort mode (shifted = reverse cycle).
+    -- Tap = discrete sort cycle. Held + encoder = handled live in
+    -- encoder(), so we just clear flags here and skip the tap.
+    local wasHeldRotated = self.m2SuppressTap
+    self.m2Held        = false
+    self.m2SuppressTap = false
+    if wasHeldRotated then return true end
     local dir = shifted and -1 or 1
-    self.sortIdx = ((self.sortIdx - 1 + dir) % #kSortModes) + 1
+    self.sortIdx    = ((self.sortIdx - 1 + dir) % #kSortModes) + 1
     self.cursorRow  = 0
     self.scrollFrac = nil
     self:_resort()
     self:_refresh()
     return true
   elseif i == 3 then
-    -- Cycle type filter: off -> ~ -> > -> $ -> * -> . -> ? -> off.
-    -- Overlap-aware: filter selects units whose keyword list
-    -- CONTAINS the target class, so a unit tagged "effect,
-    -- container" appears under both > and . filters.
+    -- Same tap-vs-hold pattern for the type-filter cycle.
+    local wasHeldRotated = self.m3SuppressTap
+    self.m3Held        = false
+    self.m3SuppressTap = false
+    if wasHeldRotated then return true end
     self:_cycleTypeFilter(shifted and -1 or 1)
     return true
   elseif i == 4 then

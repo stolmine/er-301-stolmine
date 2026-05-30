@@ -316,7 +316,7 @@ function Chooser:updateRecent(loadInfo)
   for i, u in ipairs(Chooser.recent) do
     if u.title ~= loadInfo.title then
       t[#t + 1] = u
-      if #t > 5 then
+      if #t > 6 then
         break
       end
     end

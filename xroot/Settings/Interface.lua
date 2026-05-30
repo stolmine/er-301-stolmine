@@ -88,6 +88,14 @@ menuItems[#menuItems + 1] = {
   "pickerDefaultSort"
 }
 menuItems[#menuItems + 1] = {
+  "addVariable",
+  "pickerPinFavorites"
+}
+menuItems[#menuItems + 1] = {
+  "addVariable",
+  "pickerPinRecents"
+}
+menuItems[#menuItems + 1] = {
   "addCategory",
   "QuickSaves"
 }

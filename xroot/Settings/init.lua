@@ -205,6 +205,24 @@ local defaults = {
       "favs"
     }
   },
+  pickerPinFavorites = {
+    category = "Units",
+    description = "Pin favorites to top of dense picker?",
+    value = "no",
+    choices = {
+      "yes",
+      "no"
+    }
+  },
+  pickerPinRecents = {
+    category = "Units",
+    description = "Pin recents to top of dense picker?",
+    value = "no",
+    choices = {
+      "yes",
+      "no"
+    }
+  },
   fileRecorderChannelCount = {
     category = "Multitrack Recorder",
     description = "Channel Count:",
