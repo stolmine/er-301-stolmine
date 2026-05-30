@@ -23,6 +23,22 @@ Glyph.cycleOrder = {
   Glyph.TIMING, Glyph.UTILITY, Glyph.UNKNOWN,
 }
 
+-- Human-readable class name for a given glyph. Used by section
+-- dividers in 'type' sort mode so users learn which glyph means
+-- what without having to memorize the legend separately.
+local kClassLabel = {
+  [Glyph.SOURCE]   = "source",
+  [Glyph.EFFECT]   = "effect",
+  [Glyph.MODULATE] = "modulate",
+  [Glyph.TIMING]   = "timing",
+  [Glyph.UTILITY]  = "utility",
+  [Glyph.UNKNOWN]  = "unknown",
+}
+
+function Glyph.labelFor(glyph)
+  return kClassLabel[glyph] or "unknown"
+end
+
 -- Keyword (lowercased) -> class glyph. Every keyword seen in any
 -- installed package's toc.lua gets a home; anything unlisted falls
 -- through to UNKNOWN.

@@ -127,13 +127,6 @@ local function _byKeyword(a, b)
   return _alpha(a, b)
 end
 
-local function _byIOFan(a, b)
-  local aF = (a.inCount or 0) + (a.outCount or 0)
-  local bF = (b.inCount or 0) + (b.outCount or 0)
-  if aF ~= bF then return aF > bF end
-  return _alpha(a, b)
-end
-
 local function _byFavoritesFirst(a, b)
   -- Pulled from the classic chooser so the favorite hash is shared.
   local Default = require "Unit.Chooser.Default"
@@ -151,7 +144,6 @@ local kSortModes = {
   { id = "package",     label = "package",   cmp = _byPackage        },
   { id = "keyword",     label = "keyword",   cmp = _byKeyword        },
   { id = "favorites",   label = "favs",      cmp = _byFavoritesFirst },
-  { id = "iofan",       label = "I/O",       cmp = _byIOFan          },
 }
 
 local function sortModeAt(idx)
@@ -370,7 +362,13 @@ end
 -- _packIntoRows skips divider emission.
 function Dense:_dividerKeyFnFor(modeId)
   if modeId == "type" then
-    return function(u) return Glyph.forLoadInfo(u) end
+    -- "glyph  label" so users learn the legend by repeated exposure
+    -- (e.g. "~  source", ">  effect"). The double space sets the
+    -- glyph apart visually inside the divider's "- ... -" frame.
+    return function(u)
+      local g = Glyph.forLoadInfo(u)
+      return g .. "  " .. Glyph.labelFor(g)
+    end
   elseif modeId == "package" then
     return function(u) return u.libraryName or "" end
   elseif modeId == "keyword" then
