@@ -322,7 +322,7 @@ function Dense:init(ring)
   self.topMask:setBackgroundColor(app.BLACK)
   self:addMainGraphic(self.topMask)
 
-  self.botMask = app.Graphic(0, 0, 256, 11)
+  self.botMask = app.Graphic(0, 0, 256, 10)
   self.botMask:setOpaque(true)
   self.botMask:setBackgroundColor(app.BLACK)
   self:addMainGraphic(self.botMask)
