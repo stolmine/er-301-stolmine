@@ -168,6 +168,7 @@ function Dense:init(ring)
   self.ribbonIdx    = 0          -- 0 = null (no filter)
   self.ribbonCounts = nil        -- [0..27] = match count, lazily filled
   self.sortIdx      = 1          -- index into kSortModes; M2 advances
+  self.typeFilter   = nil        -- nil = off; else a Glyph.* constant
 
   -- Alphabet ribbon labels. One Label per position; brightness is
   -- updated each refresh based on selection state + match count.
@@ -273,7 +274,6 @@ function Dense:_rebuildUnitList()
   local all = Factory.getUnits(nil, channelCount)
   table.sort(all, sortModeAt(self.sortIdx).cmp)
   self.allUnits = all
-  self:_recomputeRibbonCounts()
   self:_applyFilters()
 end
 
@@ -286,26 +286,30 @@ function Dense:_resort()
 end
 
 -- Re-derive self.rows from self.allUnits applying the active
--- ribbon filter and packing into row entries. Cheap to call; runs
--- on ribbon position change or sort cycle.
+-- ribbon filter, type filter, and packing into row entries. Cheap
+-- to call; runs on ribbon position, sort cycle, or type filter.
 function Dense:_applyFilters()
-  -- Step 1: apply ribbon filter.
+  -- Step 1: apply ribbon filter + type filter together (single pass).
   local idx = self.ribbonIdx
-  local filtered
-  if idx == 0 then
-    filtered = self.allUnits or {}
-  else
-    filtered = {}
-    for _, u in ipairs(self.allUnits or {}) do
-      if ribbonIndexForTitle(u.title) == idx then
-        filtered[#filtered + 1] = u
-      end
+  local tf  = self.typeFilter
+  local filtered = {}
+  for _, u in ipairs(self.allUnits or {}) do
+    local keep = true
+    if idx ~= 0 and ribbonIndexForTitle(u.title) ~= idx then keep = false end
+    if keep and tf ~= nil and not Glyph.loadInfoMatchesGlyph(u, tf) then
+      keep = false
     end
+    if keep then filtered[#filtered + 1] = u end
   end
 
   -- Step 2: pack into row entries (with section dividers if the
   -- active sort mode supports them AND dividers are enabled).
   self.rows = self:_packIntoRows(filtered)
+
+  -- Recompute ribbon counts so empty-letter dimming reflects the
+  -- type filter too: when filter is "$ modulate", letters with no
+  -- modulate units dim out.
+  self:_recomputeRibbonCounts()
 
   -- Step 3: snap cursor in-bounds and move off any divider row
   -- (encoder cursor never sits on a non-selectable row).
@@ -390,17 +394,23 @@ function Dense:_nextSelectableRow(start, dir)
   return nil
 end
 
--- Lazy per-letter match counts. Called on rebuild (and later on
--- sort / type-filter changes, when they exist). Read-only by the
--- ribbon render path -- shift+encoder navigation reads the cache.
+-- Per-letter match counts, honoring the active type filter so the
+-- ribbon's empty-letter dim reflects what the user will actually
+-- see. Recomputed on every _applyFilters call (rebuild, ribbon
+-- move, sort cycle, type filter change). Bounded O(units) work.
 function Dense:_recomputeRibbonCounts()
   local counts = {}
   for i = 0, kRibbonCount - 1 do counts[i] = 0 end
-  counts[0] = #(self.allUnits or {})  -- null = all
+  local tf = self.typeFilter
+  local total = 0
   for _, u in ipairs(self.allUnits or {}) do
-    local i = ribbonIndexForTitle(u.title)
-    counts[i] = counts[i] + 1
+    if tf == nil or Glyph.loadInfoMatchesGlyph(u, tf) then
+      local i = ribbonIndexForTitle(u.title)
+      counts[i] = counts[i] + 1
+      total = total + 1
+    end
   end
+  counts[0] = total  -- null = total under current type filter
   self.ribbonCounts = counts
 end
 
@@ -502,9 +512,14 @@ function Dense:_refresh()
     self.cursorBox:show()
   end
 
-  -- Sub-display top status: active sort mode (M2 cycles).
+  -- Sub-display top status: active sort mode (M2 cycles) + active
+  -- type filter (M3 cycles) when on.
   local mode = sortModeAt(self.sortIdx)
-  self.subStatus:setText(string.format("sort:%s", mode.label))
+  local txt = string.format("sort:%s", mode.label)
+  if self.typeFilter then
+    txt = txt .. string.format("  type:%s", self.typeFilter)
+  end
+  self.subStatus:setText(txt)
 
   -- Sub-display: both row units, side-by-side.
   local focusLeft, focusRight = self:_unitsForRow(self.cursorRow)
@@ -627,11 +642,37 @@ function Dense:mainReleased(i, shifted)
     self:_resort()
     self:_refresh()
     return true
+  elseif i == 3 then
+    -- Cycle type filter: off -> ~ -> > -> $ -> * -> . -> ? -> off.
+    -- Overlap-aware: filter selects units whose keyword list
+    -- CONTAINS the target class, so a unit tagged "effect,
+    -- container" appears under both > and . filters.
+    self:_cycleTypeFilter(shifted and -1 or 1)
+    return true
   elseif i == 4 then
     if shifted then return false end
     return self:_pick("R")
   end
   return true
+end
+
+function Dense:_cycleTypeFilter(dir)
+  local order = Glyph.cycleOrder
+  -- Index 0 = off; 1..#order map to the cycle glyphs.
+  local cur = 0
+  if self.typeFilter then
+    for i, g in ipairs(order) do
+      if g == self.typeFilter then cur = i; break end
+    end
+  end
+  local n = #order + 1   -- +1 for the "off" slot
+  cur = (cur + dir) % n
+  if cur < 0 then cur = cur + n end
+  self.typeFilter = (cur == 0) and nil or order[cur]
+  self.cursorRow = 0
+  self.viewTop = 0
+  self:_applyFilters()
+  self:_refresh()
 end
 
 function Dense:enterReleased(shifted)
