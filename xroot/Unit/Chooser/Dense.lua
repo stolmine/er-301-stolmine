@@ -772,6 +772,22 @@ local function glyphColorFor(sortId, typeFilter)
   return app.GRAY7
 end
 
+-- True iff scroll or cursor easing has frames left to run. The
+-- per-frame callback uses this to skip work on an idle picker.
+-- Cheap O(1) check: scroll eases until floor(scrollFrac) ==
+-- targetStart AND scrollFrac is integer (no subPx in flight);
+-- cursor eases only while cursorEasingY is true.
+function Dense:_isAnimating()
+  if self.cursorEasingY then return true end
+  if self.scrollFrac == nil then return true end  -- first paint
+  local maxStart    = math.max(0, self:_rowCount() - kVisibleRows)
+  local targetStart = clamp(self.cursorRow - kCursorOffset, 0, maxStart)
+  if math.abs(self.scrollFrac - targetStart) >= kScrollSnapRows then
+    return true
+  end
+  return false
+end
+
 function Dense:_refresh()
   -- Smooth-scroll target: keep cursor at row 3 of 5 visible (per
   -- kCursorOffset) except when clamped at the list extremes.
@@ -965,10 +981,20 @@ function Dense:onShow()
   -- easings animate instead of only updating on input events.
   -- Snap all easing state so the first paint after a hide+show
   -- doesn't animate in from the stale last-on-screen position.
+  --
+  -- The callback bails early when nothing is animating: a full
+  -- _refresh() does ~36 label setText/setForegroundColor calls
+  -- plus 28 ribbon label updates, each touching getTextSize. Run
+  -- per-frame on an idle picker, that work starves the encoder
+  -- poller and feels like "encoder capture" (same root cause as
+  -- the perlin screensaver fix in od/UIThread.cpp:702fa). So we
+  -- only tick when the cursor or scroll is mid-ease.
   self.cursorAnimY   = nil
   self.cursorEasingY = false
   self.scrollFrac    = nil
-  self.frameCallback = function() self:_refresh() end
+  self.frameCallback = function()
+    if self:_isAnimating() then self:_refresh() end
+  end
   Signal.register("onDisplayFrame", self.frameCallback)
 end
 
