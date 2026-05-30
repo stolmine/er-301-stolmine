@@ -174,6 +174,15 @@ local defaults = {
     description = "Show favorites in unit browser?",
     value = true
   },
+  pickerStyle = {
+    category = "Units",
+    description = "Unit picker style:",
+    value = "new",
+    choices = {
+      "new",
+      "original"
+    }
+  },
   fileRecorderChannelCount = {
     category = "Multitrack Recorder",
     description = "Channel Count:",

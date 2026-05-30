@@ -77,28 +77,32 @@ ChooserItem:include(MondrianControl)
 
 function ChooserItem:init(loadInfo, suppressLibraryName)
   MondrianControl.init(self)
-  -- Leading type-glyph derived from loadInfo.keywords (first wins).
-  -- Adds 2 chars of label width but lets the eye anchor on family
-  -- shape instead of having to read the full name on every row.
-  local glyph = Glyph.forLoadInfo(loadInfo)
+  -- "new" style: leading type-glyph derived from keywords +
+  -- recency-encoded border intensity. "original" style: untouched
+  -- legacy Mondrian rendering (no glyph, GRAY10 for builtins,
+  -- default border elsewhere). Setting flips at next picker open.
+  local Settings = require "Settings"
+  local enhanced = Settings.get("pickerStyle") ~= "original"
   local body
   if isStandardUnit(loadInfo) or suppressLibraryName then
     body = loadInfo.title
   else
     body = Utils.shorten(loadInfo.libraryName, 40) .. ": " .. loadInfo.title
   end
-  local graphic = app.FittedTextBox(glyph .. " " .. body)
+  local label = enhanced and (Glyph.forLoadInfo(loadInfo) .. " " .. body) or body
+  local graphic = app.FittedTextBox(label)
   if isStandardUnit(loadInfo) then
     graphic:setCornerRadius(0, 0, 0, 0)
+    if not enhanced then graphic:setBorderColor(app.GRAY10) end
   else
     graphic:setCornerRadius(0, 5, 5, 0)
   end
-  -- Favorite always wins for border (white); otherwise the border
-  -- encodes recency: bright for recently / frequently used, dim for
-  -- untouched. Lets the eye spot well-worn units on first sweep.
+  -- Favorite always wins for border (white); otherwise in enhanced
+  -- mode the border encodes recency, in original mode we leave the
+  -- per-branch default (set above for builtins, unset elsewhere).
   if Chooser.favoriteHash[loadInfo.title] then
     graphic:setBorderColor(app.WHITE)
-  else
+  elseif enhanced then
     graphic:setBorderColor(recencyColor(loadInfo.title))
   end
   self:setControlGraphic(graphic)
@@ -404,10 +408,19 @@ function Chooser:choose(loadInfo)
     if loadInfo ~= "paste" then
       self:toggleFavorite(loadInfo)
       -- Update border on all instances of this item without rebuilding.
-      -- Un-favoriting returns the row to its recency-derived color
-      -- so the brightness signal stays consistent across edit mode.
+      -- Un-favoriting returns the row to recency color in "new" mode
+      -- or to the legacy GRAY7 in "original" mode.
+      local Settings = require "Settings"
+      local enhanced = Settings.get("pickerStyle") ~= "original"
       local isFav = Chooser.favoriteHash[loadInfo.title]
-      local color = isFav and app.WHITE or recencyColor(loadInfo.title)
+      local color
+      if isFav then
+        color = app.WHITE
+      elseif enhanced then
+        color = recencyColor(loadInfo.title)
+      else
+        color = app.GRAY7
+      end
       for handle, control in pairs(self.controls) do
         if control.loadInfo and control.loadInfo.title == loadInfo.title then
           control.controlGraphic:setBorderColor(color)

@@ -76,6 +76,10 @@ menuItems[#menuItems + 1] = {
   "showFavorites"
 }
 menuItems[#menuItems + 1] = {
+  "addVariable",
+  "pickerStyle"
+}
+menuItems[#menuItems + 1] = {
   "addCategory",
   "QuickSaves"
 }
