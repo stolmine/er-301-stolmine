@@ -156,6 +156,38 @@ primary-organizer fixes scan time on a 200+ unit inventory.
 - Stolmine→vanilla preset rewriter for picker prefs (prefs are
   per-install, no preset rewrite needed).
 
+## Core Package Keyword + Type Revamp
+The dense picker's type-glyph dispatch and the sort-by-keyword
+mode both consume `loadInfo.keywords` from each package's `toc.lua`.
+Coverage of the core package is uneven (some units are tagged with
+2 keywords, others none) and the existing keyword set predates the
+6-class type taxonomy (~ source / > effect / $ modulate / * timing
+/ . utility / ? unknown).
+
+Tasks:
+- **Add `sampling` as a first-class type** (7th glyph). Today
+  sampling-related units fall under `>` effect (because their first
+  keyword is usually "effect, sampling" or "sampling, effect"), but
+  sampling is a distinct conceptual class: file/sample-based units
+  with their own performance profile (disk I/O, RAM buffers, slice
+  state). Pick a glyph (`%` candidate; visually distinct, not used
+  elsewhere) and add to xroot/Unit/Chooser/Glyph.lua's cycleOrder +
+  kClassLabel + kKeywordToGlyph mapping.
+- **Audit every core unit's keywords** for consistency. Make sure
+  the FIRST keyword reflects the primary type for the glyph
+  dispatch. Drop redundant keywords. Standardize on the canonical
+  forms (`modulate` not `modulation`, `cv` not `CV`, `oscillator`
+  not `generator`). Edit `mods/core/assets/toc.lua`.
+- **Backfill missing keywords** on units currently rendering as
+  `?` unknown.
+- **Apply to all in-house packages** (multiout, txo, teletype) for
+  consistency.
+
+Out of scope: editing third-party packages (mi, biome, kryos, etc.)
+since those have their own release cadences. Authors of those
+packages can normalize on their own schedule; the dispatch table
+in `Glyph.lua` already accepts the variants they currently use.
+
 ## Screensaver Polish
 - Forest screensaver: full-screen coverage
 - Rain screensaver: splash particles
