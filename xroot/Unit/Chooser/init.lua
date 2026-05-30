@@ -26,6 +26,23 @@ function Chooser:init(opts)
     self.goal = "replace"
   end
 
+  -- pickerStyle == "new": skip the classic 3-mode wrapper entirely
+  -- and host the dense view as the sole current chooser. Dense owns
+  -- its own sub display, sort cycle, and type filter, so the
+  -- Category / A-to-Z / Presets sub-mode toggles aren't relevant.
+  local Settings = require "Settings"
+  if Settings.get("pickerStyle") == "new" then
+    self.style = "new"
+    self.panels = {}
+    local Dense = require "Unit.Chooser.Dense"
+    self.dense = Dense(self)
+    self.current = self.dense
+    self.favoritesEditMode = false
+    Signal.weakRegister("onUnitListChanged", self)
+    return
+  end
+  self.style = "original"
+
   self.panels = {}
   local graphic = app.Graphic(0, 0, 128, 64)
   local Drawings = require "Drawings"
@@ -83,6 +100,10 @@ function Chooser:init(opts)
 end
 
 function Chooser:onUnitListChanged()
+  if self.dense then
+    self.dense:_rebuildUnitList()
+    self.dense:_refresh()
+  end
   if self.categoric then
     self.categoric:refresh()
   end
@@ -132,6 +153,9 @@ function Chooser:subReleased(i, shifted)
   if shifted then
     return false
   end
+  -- Dense view owns its own S-key bindings; the wrapper's sub-mode
+  -- toggle doesn't apply.
+  if self.style == "new" then return false end
   if self.favoritesEditMode then
     self:handleFavoritesAction(i)
     return true
@@ -144,6 +168,9 @@ function Chooser:subReleased(i, shifted)
 end
 
 function Chooser:toggleFavoritesEditMode()
+  -- Dense view will get its own edit mode in phase 3; classic-only
+  -- gesture for now.
+  if self.style == "new" then return end
   self.favoritesEditMode = not self.favoritesEditMode
   if self.favoritesEditMode then
     self.panels[1]:setText("")
