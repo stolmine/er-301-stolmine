@@ -24,6 +24,7 @@ local app = app
 local Class = require "Base.Class"
 local Window = require "Base.Window"
 local Env = require "Env"
+local Signal = require "Signal"
 local Factory = require "Unit.Factory"
 local Encoder = require "Encoder"
 local Glyph = require "Unit.Chooser.Glyph"
@@ -53,8 +54,17 @@ local kColWidth      = 120       -- visual width per column cell
 local kLeftFavX      = 121
 local kRightFavX     = 249
 
--- Y baselines (bottom-up). Five rows, top to bottom visually.
-local kRowYs = { 44, 35, 26, 17, 8 }
+-- Y baselines (bottom-up). Five visible rows + one extra slot at
+-- y=-1 used as the "slide-in" row during a smooth scroll: when
+-- scrollFrac eases between integer startRow values, subPx > 0
+-- shifts every row upward, and the extra slot at the bottom comes
+-- into view as the top slot exits behind the ribbon.
+local kRowYs       = { 44, 35, 26, 17, 8, -1 }
+local kPaintRows   = 6
+-- Where the cursor "wants" to sit in the visible window: row 3
+-- of 5 (zero-indexed: targetStart = cursorRow - 2). Matches the
+-- sequencer's "focus head sits at the 3rd visible row" pattern.
+local kCursorOffset = 2
 
 -- Footer chip baseline. Matches the sequencer's bottom-row pattern
 -- (kRowYs ends at -1 for the same reason: setPosition sets the
@@ -103,6 +113,22 @@ local function ribbonIndexForTitle(title)
 end
 
 local kEncoderThreshold = Env.EncoderThreshold.Default
+
+local function clamp(v, lo, hi)
+  if v < lo then return lo end
+  if v > hi then return hi end
+  return v
+end
+
+-- Easing constants (aped from sequencer GridView.lua:558-580).
+-- 55 Hz refresh; 0.4 lerp converges to ~95% in 6 frames (~110 ms).
+-- Snap thresholds (kCursorSnapEps / kScrollSnapRows) prevent
+-- sub-pixel jitter near the target.
+local kCursorEase    = 0.4
+local kCursorSnapEps = 0.5
+local kCursorJumpPx  = 5     -- > kJumpPx delta enters easing mode; smaller deltas snap (used during smooth scroll)
+local kScrollLerp    = 0.4
+local kScrollSnapRows = 1 / kRowHeight
 
 -- ---------------------------------------------------------------------------
 -- Sort modes
@@ -193,39 +219,33 @@ function Dense:init(ring)
   self:setClassName("Unit.Chooser.Dense")
   self.ring = ring
 
-  -- Cursor state.
-  self.units        = {}         -- filtered + sorted loadInfo list
-  self.allUnits     = nil        -- cached unfiltered list (for ribbon counts)
-  self.cursorRow    = 0
-  self.viewTop      = 0
-  self.encoderAccum = 0
-  self.ribbonIdx    = 0          -- 0 = null (no filter)
-  self.ribbonCounts = nil        -- [0..27] = match count, lazily filled
-  self.sortIdx      = 1          -- index into kSortModes; M2 advances
-  self.typeFilter   = nil        -- nil = off; else a Glyph.* constant
-  self.editMode     = "pick"     -- "pick" | "hide" | "fav"
-  self.encoderState = Encoder.Fine  -- toggled by dial press/release
+  -- Cursor + scroll state.
+  self.units         = {}         -- filtered + sorted loadInfo list
+  self.allUnits      = nil        -- cached unfiltered list (for ribbon counts)
+  self.cursorRow     = 0
+  self.encoderAccum  = 0
+  self.ribbonIdx     = 0          -- 0 = null (no filter)
+  self.ribbonCounts  = nil        -- [0..27] = match count, lazily filled
+  self.sortIdx       = 1          -- index into kSortModes; M2 advances
+  self.typeFilter    = nil        -- nil = off; else a Glyph.* constant
+  self.editMode      = "pick"     -- "pick" | "hide" | "fav"
+  self.encoderState  = Encoder.Fine -- toggled by dial press/release
+  -- Animation state. Nil values snap on first paint after onShow.
+  self.scrollFrac    = nil        -- float row index of top visible slot
+  self.cursorAnimY   = nil
+  self.cursorEasingY = false
 
-  -- Alphabet ribbon labels. One Label per position; brightness is
-  -- updated each refresh based on selection state + match count.
-  self.ribbonLabels = {}
-  for i = 0, kRibbonCount - 1 do
-    local lbl = app.Label(ribbonChar(i), kFontMain)
-    lbl:setPosition(ribbonX(i), kRibbonY)
-    lbl:setJustification(app.justifyLeft)
-    self:addMainGraphic(lbl)
-    self.ribbonLabels[i] = lbl
-  end
-
-  -- Row label widgets (left col + right col, one per visible row),
+  -- Row label widgets (left col + right col, one per painted row),
   -- plus a single-char favorite marker at the right edge of each
   -- cell. The marker is persistent (not just visible in fav-edit
   -- mode) so the user always sees which units are favorited.
+  -- kPaintRows = kVisibleRows + 1: the extra row slot at y=-1 is
+  -- used as the "slide-in" position during smooth scroll.
   self.leftLabels  = {}
   self.rightLabels = {}
   self.leftFavs    = {}
   self.rightFavs   = {}
-  for r = 1, kVisibleRows do
+  for r = 1, kPaintRows do
     local lblL = app.Label("", kFontMain)
     lblL:setJustification(app.justifyLeft)
     lblL:setPosition(kColLeftX, kRowYs[r])
@@ -253,7 +273,7 @@ function Dense:init(ring)
 
   -- Row-cursor box: a 1-px border around BOTH cells of the focused
   -- row (full 256 px wide). Drawn behind labels so labels still read
-  -- clearly. Positioned per refresh based on cursorRow vs viewTop.
+  -- clearly. Positioned per refresh based on cursorRow vs scrollFrac.
   self.cursorBox = app.Graphic(0, 0, 256, kCursorHeight)
   self.cursorBox:setBorder(1)
   self.cursorBox:setBorderColor(app.GRAY7)
@@ -268,6 +288,43 @@ function Dense:init(ring)
   instr:vline(128, 4, 50)
   self.divider:add(instr)
   self:addMainGraphic(self.divider)
+
+  -- Occluder rectangles for the ribbon row (top) and the chip row
+  -- (bottom). Without these, smooth-scrolling rows visually poke
+  -- into the ribbon and chip text bands. The masks are drawn AFTER
+  -- the row labels (so they erase the slide-over text) and BEFORE
+  -- the ribbon / footer labels (so those still render on top).
+  --
+  -- Implementation: app.Graphic with setOpaque(true) +
+  -- setBackgroundColor(BLACK). Graphic::draw routes that combo to
+  -- fb.clear() which TRULY erases pixels (set, not blend).
+  -- DrawingInstructions:fill with BLACK is a no-op because fb.fill
+  -- uses blend semantics (OR), and ORing 0 leaves the pixel as-is.
+  -- Top mask starts at y=57 (text-bottom of the ribbon glyphs and
+  -- 1 px above row 1's text top at y=56), so row 1 is fully visible
+  -- when not sliding but any pixels that slide ABOVE y=56 get
+  -- erased before the ribbon labels draw on top.
+  self.topMask = app.Graphic(0, 57, 256, 7)
+  self.topMask:setOpaque(true)
+  self.topMask:setBackgroundColor(app.BLACK)
+  self:addMainGraphic(self.topMask)
+
+  self.botMask = app.Graphic(0, 0, 256, 11)
+  self.botMask:setOpaque(true)
+  self.botMask:setBackgroundColor(app.BLACK)
+  self:addMainGraphic(self.botMask)
+
+  -- Alphabet ribbon labels. Re-created AFTER the occluder mask so
+  -- they render on top of it. One Label per position; brightness
+  -- updated each refresh based on selection + match count.
+  self.ribbonLabels = {}
+  for i = 0, kRibbonCount - 1 do
+    local lbl = app.Label(ribbonChar(i), kFontMain)
+    lbl:setPosition(ribbonX(i), kRibbonY)
+    lbl:setJustification(app.justifyLeft)
+    self:addMainGraphic(lbl)
+    self.ribbonLabels[i] = lbl
+  end
 
   -- Footer chip labels above M1-M6 showing what each key does.
   -- Updated by _refresh based on current edit mode. Positioned
@@ -563,13 +620,21 @@ local function rowColorFor(loadInfo, editMode)
 end
 
 function Dense:_refresh()
-  -- Adjust view window so cursor stays visible.
-  if self.cursorRow < self.viewTop then
-    self.viewTop = self.cursorRow
-  elseif self.cursorRow >= self.viewTop + kVisibleRows then
-    self.viewTop = self.cursorRow - (kVisibleRows - 1)
+  -- Smooth-scroll target: keep cursor at row 3 of 5 visible (per
+  -- kCursorOffset) except when clamped at the list extremes.
+  local maxStart = math.max(0, self:_rowCount() - kVisibleRows)
+  local targetStart = clamp(self.cursorRow - kCursorOffset, 0, maxStart)
+  if self.scrollFrac == nil then
+    self.scrollFrac = targetStart
+  else
+    self.scrollFrac = self.scrollFrac * (1 - kScrollLerp)
+                       + targetStart * kScrollLerp
+    if math.abs(self.scrollFrac - targetStart) < kScrollSnapRows then
+      self.scrollFrac = targetStart
+    end
   end
-  if self.viewTop < 0 then self.viewTop = 0 end
+  local startRow = math.floor(self.scrollFrac)
+  local subPx    = (self.scrollFrac - startRow) * kRowHeight
 
   -- Paint ribbon: selected position bright, empty letters dim,
   -- others mid-gray.
@@ -586,13 +651,19 @@ function Dense:_refresh()
     self.ribbonLabels[i]:setForegroundColor(color)
   end
 
-  -- Paint visible rows. Divider rows render their label across the
-  -- whole left-column slot at GRAY7 (clearing both fav markers);
-  -- pair rows render left + right unit text plus the right-edge
-  -- favorite marker.
-  for r = 1, kVisibleRows do
-    local rowIdx = self.viewTop + (r - 1)
-    local entry = self:_rowEntry(rowIdx)
+  -- Paint kPaintRows rows. Each slot's Y is its base position plus
+  -- the smooth-scroll subPx offset, so all rows slide vertically
+  -- in sync during a scroll transition. Slot kPaintRows (bottom,
+  -- y=-1 at rest) becomes visible at y=8 when subPx reaches the
+  -- row pitch, providing the slide-in row.
+  for r = 1, kPaintRows do
+    local rowIdx = startRow + (r - 1)
+    local entry  = self:_rowEntry(rowIdx)
+    local y      = kRowYs[r] + subPx
+    self.leftLabels[r]:setPosition(kColLeftX, y)
+    self.rightLabels[r]:setPosition(kColRightX, y)
+    self.leftFavs[r]:setPosition(kLeftFavX, y)
+    self.rightFavs[r]:setPosition(kRightFavX, y)
     if entry == nil then
       self.leftLabels[r]:setText("")
       self.rightLabels[r]:setText("")
@@ -614,20 +685,43 @@ function Dense:_refresh()
     end
   end
 
-  -- Position cursor box on the focused row.
-  -- An app.Label at baseline y renders text from y+4 to y+textHeight+3.
-  -- Per the sequencer's empirical tuning (GridView.lua:262), the
-  -- cursor wraps the glyph cleanly when mBottom = labelY+3 and the
-  -- box height = 10. Hidden when cursor lands off-screen or on a
-  -- divider (which shouldn't happen normally; safety net).
-  local visIdx = self.cursorRow - self.viewTop  -- 0..kVisibleRows-1
+  -- Position cursor box on the focused row. Target Y tracks the
+  -- (already smooth-scrolling) row baselines so the cursor slides
+  -- with the data during a scroll transition. The cursorEasingY
+  -- flag controls when to ease vs snap (per sequencer's pattern):
+  --   * small deltas (within kCursorJumpPx) snap directly, which
+  --     keeps the cursor glued to its row as subPx slides ~1.8
+  --     px/frame.
+  --   * big deltas (row jump on boundary or HOME) enter easing
+  --     mode and lerp at kCursorEase per frame until within
+  --     kCursorSnapEps, then snap + exit easing mode. This is the
+  --     "settle" feel the sequencer has.
+  local visIdx = self.cursorRow - startRow  -- 0..kPaintRows-1
   local entry  = self:_rowEntry(self.cursorRow)
-  if visIdx < 0 or visIdx >= kVisibleRows
+  if visIdx < 0 or visIdx >= kPaintRows
      or entry == nil or entry.type ~= "pair" then
     self.cursorBox:hide()
   else
-    local y = kRowYs[visIdx + 1]
-    self.cursorBox:setPosition(0, y + 3)
+    local targetY = kRowYs[visIdx + 1] + subPx + 3
+    if self.cursorAnimY == nil then
+      self.cursorAnimY   = targetY
+      self.cursorEasingY = false
+    else
+      local delta = targetY - self.cursorAnimY
+      if math.abs(delta) > kCursorJumpPx then
+        self.cursorEasingY = true
+      end
+      if self.cursorEasingY then
+        self.cursorAnimY = self.cursorAnimY + delta * kCursorEase
+        if math.abs(self.cursorAnimY - targetY) < kCursorSnapEps then
+          self.cursorAnimY   = targetY
+          self.cursorEasingY = false
+        end
+      else
+        self.cursorAnimY = targetY
+      end
+    end
+    self.cursorBox:setPosition(0, math.floor(self.cursorAnimY + 0.5))
     self.cursorBox:show()
   end
 
@@ -688,6 +782,22 @@ function Dense:onShow()
   -- Re-assert encoder rate on each picker open so the previous
   -- window's setting doesn't carry over.
   Encoder.set(self.encoderState)
+  -- Drive the per-frame refresh (55 Hz) so the cursor + scroll
+  -- easings animate instead of only updating on input events.
+  -- Snap all easing state so the first paint after a hide+show
+  -- doesn't animate in from the stale last-on-screen position.
+  self.cursorAnimY   = nil
+  self.cursorEasingY = false
+  self.scrollFrac    = nil
+  self.frameCallback = function() self:_refresh() end
+  Signal.register("onDisplayFrame", self.frameCallback)
+end
+
+function Dense:onHide()
+  if self.frameCallback then
+    Signal.remove("onDisplayFrame", self.frameCallback)
+    self.frameCallback = nil
+  end
 end
 
 function Dense:dialPressed(shifted)
@@ -819,9 +929,9 @@ end
 function Dense:_setRibbon(i)
   if i < 0 then i = 0 elseif i >= kRibbonCount then i = kRibbonCount - 1 end
   if self.ribbonIdx == i then return end
-  self.ribbonIdx = i
-  self.cursorRow = 0
-  self.viewTop = 0
+  self.ribbonIdx  = i
+  self.cursorRow  = 0
+  self.scrollFrac = nil
   self:_applyFilters()
 end
 
@@ -874,8 +984,8 @@ function Dense:mainReleased(i, shifted)
     -- Cycle sort mode (shifted = reverse cycle).
     local dir = shifted and -1 or 1
     self.sortIdx = ((self.sortIdx - 1 + dir) % #kSortModes) + 1
-    self.cursorRow = 0
-    self.viewTop = 0
+    self.cursorRow  = 0
+    self.scrollFrac = nil
     self:_resort()
     self:_refresh()
     return true
@@ -894,15 +1004,15 @@ function Dense:mainReleased(i, shifted)
   elseif i == 5 then
     -- Toggle hide-edit mode; if already in fav-edit, swap directly.
     self.editMode = (self.editMode == "hide") and "pick" or "hide"
-    self.cursorRow = 0
-    self.viewTop = 0
+    self.cursorRow  = 0
+    self.scrollFrac = nil
     self:_applyFilters()
     self:_refresh()
     return true
   elseif i == 6 then
     self.editMode = (self.editMode == "fav") and "pick" or "fav"
-    self.cursorRow = 0
-    self.viewTop = 0
+    self.cursorRow  = 0
+    self.scrollFrac = nil
     self:_applyFilters()
     self:_refresh()
     return true
@@ -923,8 +1033,8 @@ function Dense:_cycleTypeFilter(dir)
   cur = (cur + dir) % n
   if cur < 0 then cur = cur + n end
   self.typeFilter = (cur == 0) and nil or order[cur]
-  self.cursorRow = 0
-  self.viewTop = 0
+  self.cursorRow  = 0
+  self.scrollFrac = nil
   self:_applyFilters()
   self:_refresh()
 end
