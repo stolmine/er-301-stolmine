@@ -25,6 +25,7 @@ local Class = require "Base.Class"
 local Window = require "Base.Window"
 local Env = require "Env"
 local Factory = require "Unit.Factory"
+local Encoder = require "Encoder"
 local Glyph = require "Unit.Chooser.Glyph"
 local Sparkline = require "Unit.Chooser.Sparkline"
 local Hidden = require "Unit.Chooser.Hidden"
@@ -46,6 +47,11 @@ local kColRightX     = 132       -- right column label X
 local kCursorIndent  = 2         -- pad between row cursor and label
 local kCursorHeight  = 10
 local kColWidth      = 120       -- visual width per column cell
+-- Right-edge favorite marker X. Single '+' char at font 9 ~= 5 px,
+-- so position 7 px back from the column right edge. Left col right
+-- edge is the divider at x=128; right col right edge is x=256.
+local kLeftFavX      = 121
+local kRightFavX     = 249
 
 -- Y baselines (bottom-up). Five rows, top to bottom visually.
 local kRowYs = { 44, 35, 26, 17, 8 }
@@ -198,6 +204,7 @@ function Dense:init(ring)
   self.sortIdx      = 1          -- index into kSortModes; M2 advances
   self.typeFilter   = nil        -- nil = off; else a Glyph.* constant
   self.editMode     = "pick"     -- "pick" | "hide" | "fav"
+  self.encoderState = Encoder.Fine  -- toggled by dial press/release
 
   -- Alphabet ribbon labels. One Label per position; brightness is
   -- updated each refresh based on selection state + match count.
@@ -210,9 +217,14 @@ function Dense:init(ring)
     self.ribbonLabels[i] = lbl
   end
 
-  -- Row label widgets (left col + right col, one per visible row).
+  -- Row label widgets (left col + right col, one per visible row),
+  -- plus a single-char favorite marker at the right edge of each
+  -- cell. The marker is persistent (not just visible in fav-edit
+  -- mode) so the user always sees which units are favorited.
   self.leftLabels  = {}
   self.rightLabels = {}
+  self.leftFavs    = {}
+  self.rightFavs   = {}
   for r = 1, kVisibleRows do
     local lblL = app.Label("", kFontMain)
     lblL:setJustification(app.justifyLeft)
@@ -225,6 +237,18 @@ function Dense:init(ring)
     lblR:setPosition(kColRightX, kRowYs[r])
     self:addMainGraphic(lblR)
     self.rightLabels[r] = lblR
+
+    local favL = app.Label("", kFontMain)
+    favL:setJustification(app.justifyLeft)
+    favL:setPosition(kLeftFavX, kRowYs[r])
+    self:addMainGraphic(favL)
+    self.leftFavs[r] = favL
+
+    local favR = app.Label("", kFontMain)
+    favR:setJustification(app.justifyLeft)
+    favR:setPosition(kRightFavX, kRowYs[r])
+    self:addMainGraphic(favR)
+    self.rightFavs[r] = favR
   end
 
   -- Row-cursor box: a 1-px border around BOTH cells of the focused
@@ -432,6 +456,16 @@ function Dense:_dividerKeyFnFor(modeId)
     return function(u) return u.libraryName or "" end
   elseif modeId == "keyword" then
     return _primaryKeyword
+  elseif modeId == "alpha" then
+    -- One divider per starting letter. Non-letter titles (digits,
+    -- underscores) collapse into a single "#" section that sits
+    -- at the natural sort position before "A".
+    return function(u)
+      local t = u.title or ""
+      local c = t:sub(1, 1):upper()
+      if c >= "A" and c <= "Z" then return c end
+      return "#"
+    end
   end
   return nil
 end
@@ -492,25 +526,28 @@ end
 -- Render
 -- ---------------------------------------------------------------------------
 
--- Format a unit as "glyph name" truncated to fit the column width.
--- kMaxLabelChars is sized for ~120 px / ~5 px per char = ~24 chars,
--- minus 2 for safety / ellipsis on overflow. When in fav edit mode,
--- favorited units get a leading "+" marker that the user can
--- visually scan to see what's already tagged.
-local kMaxLabelChars = 22
-local function formatRowCell(loadInfo, editMode)
+-- Format a unit as "glyph name" truncated so the row leaves room
+-- for the right-edge favorite marker. kMaxLabelChars sized for
+-- ~110 px / ~5 px per char = ~22 chars, but trimmed to 21 to keep
+-- a ~7 px gap before the marker column.
+local kMaxLabelChars = 21
+local function formatRowCell(loadInfo)
   if loadInfo == nil then return "" end
-  local Default = require "Unit.Chooser.Default"
-  local prefix = ""
-  if editMode == "fav" and Default.favoriteHash[loadInfo.title or ""] then
-    prefix = "+"
-  end
   local glyph = Glyph.forLoadInfo(loadInfo)
-  local text  = prefix .. glyph .. " " .. (loadInfo.title or "?")
+  local text  = glyph .. " " .. (loadInfo.title or "?")
   if #text > kMaxLabelChars then
     text = text:sub(1, kMaxLabelChars - 1) .. "."
   end
   return text
+end
+
+-- Right-edge marker text: '+' if the unit is favorited, blank
+-- otherwise. Always visible (not gated on edit mode) so the user
+-- sees fav state at a glance from any view.
+local function favMarkerFor(loadInfo)
+  if loadInfo == nil then return "" end
+  local Default = require "Unit.Chooser.Default"
+  return Default.favoriteHash[loadInfo.title or ""] and "+" or ""
 end
 
 -- Per-cell color reflecting edit-mode state. In hide mode, units
@@ -550,23 +587,30 @@ function Dense:_refresh()
   end
 
   -- Paint visible rows. Divider rows render their label across the
-  -- whole left-column slot at GRAY7; pair rows render left + right
-  -- unit text at WHITE.
+  -- whole left-column slot at GRAY7 (clearing both fav markers);
+  -- pair rows render left + right unit text plus the right-edge
+  -- favorite marker.
   for r = 1, kVisibleRows do
     local rowIdx = self.viewTop + (r - 1)
     local entry = self:_rowEntry(rowIdx)
     if entry == nil then
       self.leftLabels[r]:setText("")
       self.rightLabels[r]:setText("")
+      self.leftFavs[r]:setText("")
+      self.rightFavs[r]:setText("")
     elseif entry.type == "divider" then
       self.leftLabels[r]:setText("- " .. (entry.label or "") .. " -")
       self.leftLabels[r]:setForegroundColor(app.GRAY7)
       self.rightLabels[r]:setText("")
+      self.leftFavs[r]:setText("")
+      self.rightFavs[r]:setText("")
     else
-      self.leftLabels[r]:setText(formatRowCell(entry.left, self.editMode))
+      self.leftLabels[r]:setText(formatRowCell(entry.left))
       self.leftLabels[r]:setForegroundColor(rowColorFor(entry.left, self.editMode))
-      self.rightLabels[r]:setText(formatRowCell(entry.right, self.editMode))
+      self.rightLabels[r]:setText(formatRowCell(entry.right))
       self.rightLabels[r]:setForegroundColor(rowColorFor(entry.right, self.editMode))
+      self.leftFavs[r]:setText(favMarkerFor(entry.left))
+      self.rightFavs[r]:setText(favMarkerFor(entry.right))
     end
   end
 
@@ -640,9 +684,84 @@ end
 -- Input handlers
 -- ---------------------------------------------------------------------------
 
+function Dense:onShow()
+  -- Re-assert encoder rate on each picker open so the previous
+  -- window's setting doesn't carry over.
+  Encoder.set(self.encoderState)
+end
+
+function Dense:dialPressed(shifted)
+  self.encoderState = Encoder.Coarse
+  Encoder.set(self.encoderState)
+  return true
+end
+
+function Dense:dialReleased(shifted)
+  self.encoderState = Encoder.Fine
+  Encoder.set(self.encoderState)
+  return true
+end
+
+-- Jump cursor to the first selectable row of the next section in
+-- `dir` (+1 / -1). Section boundaries are the divider rows.
+--
+-- Going DOWN: the first divider below the cursor IS the next
+-- section's divider, so landing on "first selectable past it" is
+-- the correct first hit.
+--
+-- Going UP: the first divider above the cursor is the CURRENT
+-- section's divider, whose landing position equals where we
+-- already are (top of our own section). Skip those and keep
+-- walking up until the landing position is strictly above the
+-- current cursor row.
+function Dense:_jumpToHeader(dir)
+  if self.rows == nil or #self.rows == 0 then return false end
+  local i = self.cursorRow + dir
+  while i >= 0 and i < #self.rows do
+    if self.rows[i + 1].type == "divider" then
+      local target = self:_nextSelectableRow(i + 1, 1)
+      if target then
+        local progress = (dir > 0) and (target > self.cursorRow)
+                                   or  (target < self.cursorRow)
+        if progress then
+          self.cursorRow = target
+          return true
+        end
+      end
+    end
+    i = i + dir
+  end
+  -- No more dividers in this direction: snap to the extreme
+  -- selectable row.
+  local extreme = (dir > 0) and (#self.rows - 1) or 0
+  local target = self:_nextSelectableRow(extreme, -dir)
+  if target and target ~= self.cursorRow then
+    self.cursorRow = target
+    return true
+  end
+  return false
+end
+
 function Dense:encoder(change, shifted)
   self.encoderAccum = self.encoderAccum + change
   local moved = false
+
+  -- Coarse mode: jump cursor by section header in sort modes that
+  -- have dividers. Falls back to per-row stepping in modes without
+  -- dividers so the dial isn't a no-op anywhere.
+  if self.encoderState == Encoder.Coarse and not shifted then
+    while self.encoderAccum >= kEncoderThreshold do
+      self.encoderAccum = self.encoderAccum - kEncoderThreshold
+      if self:_jumpToHeader(1) then moved = true end
+    end
+    while self.encoderAccum <= -kEncoderThreshold do
+      self.encoderAccum = self.encoderAccum + kEncoderThreshold
+      if self:_jumpToHeader(-1) then moved = true end
+    end
+    if moved then self:_refresh() end
+    return true
+  end
+
   if shifted then
     -- Ribbon nav: step one position per threshold, no wrap, skip
     -- empty letters (positions with 0 matches).

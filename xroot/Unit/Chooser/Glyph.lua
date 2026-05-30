@@ -39,6 +39,35 @@ function Glyph.labelFor(glyph)
   return kClassLabel[glyph] or "unknown"
 end
 
+-- Category dispatch (higher-priority signal than keywords). Core
+-- units use functional categories ("Oscillators", "Filtering",
+-- etc.) that map cleanly to the glyph taxonomy. Third-party
+-- packages mostly use vendor-name categories ("Biome", "MI",
+-- "Peaks", ...) that carry no type info -- those don't appear in
+-- this table and fall through to keyword dispatch.
+--
+-- Empty / mixed-bag categories ("Essentials", "Experimental")
+-- intentionally NOT mapped here so they fall through to per-unit
+-- keyword dispatch -- a mixed category shouldn't force every unit
+-- in it to the same glyph.
+local kCategoryToGlyph = {
+  ["Oscillators"]                = Glyph.SOURCE,
+  ["Noise"]                      = Glyph.SOURCE,
+  ["Sample Playback"]            = Glyph.SOURCE,
+  ["Granular Playback"]          = Glyph.SOURCE,
+  ["Filtering"]                  = Glyph.EFFECT,
+  ["Delays and Reverb"]          = Glyph.EFFECT,
+  ["Effect"]                     = Glyph.EFFECT,
+  ["Envelopes"]                  = Glyph.MODULATE,
+  ["Modulation"]                 = Glyph.MODULATE,
+  ["Mapping and Control"]        = Glyph.MODULATE,
+  ["Timing"]                     = Glyph.TIMING,
+  ["Measurement"]                = Glyph.UTILITY,
+  ["Measurement and Conversion"] = Glyph.UTILITY,
+  ["Containers"]                 = Glyph.UTILITY,
+  ["Recording and Looping"]      = Glyph.UTILITY,
+}
+
 -- Keyword (lowercased) -> class glyph. Every keyword seen in any
 -- installed package's toc.lua gets a home; anything unlisted falls
 -- through to UNKNOWN.
@@ -206,14 +235,24 @@ local kKeywordToGlyph = {
   spreadsheet  = Glyph.UTILITY,
 }
 
--- Primary entry point: return the glyph for a loadInfo. Robust to
--- a nil or empty keywords field, surrounding whitespace, case, and
--- unknown keywords. Returns one of the Glyph.* constants.
+-- Primary entry point: return the glyph for a loadInfo. Cascading
+-- dispatch:
+--   1. category lookup (high-confidence signal for core units;
+--      most third-party vendor-name categories miss and fall
+--      through to step 2)
+--   2. first keyword in the comma-separated keywords field
+--   3. UNKNOWN
+-- Robust to nil / empty / whitespace / case.
 function Glyph.forLoadInfo(loadInfo)
   if loadInfo == nil then return Glyph.UNKNOWN end
+  -- Step 1: category dispatch.
+  local cat = loadInfo.category
+  if cat and kCategoryToGlyph[cat] then
+    return kCategoryToGlyph[cat]
+  end
+  -- Step 2: first-keyword dispatch.
   local kws = loadInfo.keywords
   if kws == nil or kws == "" then return Glyph.UNKNOWN end
-  -- First comma-separated token, trimmed and lowercased.
   local first = kws:match("^%s*([^,]-)%s*,") or kws:match("^%s*(.-)%s*$")
   if first == nil or first == "" then return Glyph.UNKNOWN end
   return kKeywordToGlyph[first:lower()] or Glyph.UNKNOWN
