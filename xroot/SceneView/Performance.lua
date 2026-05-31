@@ -218,8 +218,17 @@ function Performance:encoder(change, shifted)
 end
 
 function Performance:mainReleased(i, shifted)
-  if shifted then return false end
   if i < 1 or i > 6 then return true end
+  -- shift+M on an occupied slot triggers delete-with-confirmation.
+  -- shift+M on M1 / the "+" / blank plies is a no-op.
+  if shifted then
+    if i >= 2 then
+      local sceneIdx = i - 1
+      local scene = self.sceneView:getScene(sceneIdx)
+      if scene then return self:_confirmDelete(sceneIdx, scene) end
+    end
+    return true
+  end
   local plusCol = self:_plusCol()
   if i == plusCol then
     -- Tap on the "+" placeholder: create a new scene + move
@@ -239,9 +248,119 @@ function Performance:mainReleased(i, shifted)
   return true
 end
 
+function Performance:_confirmDelete(sceneIdx, scene)
+  local Verification = require "Verification"
+  local dlg = Verification.Sub(
+    string.format("Delete scene %d (%s)?", sceneIdx, scene:getName()),
+    "")
+  dlg:subscribe("done", function(ans)
+    if ans then
+      self.sceneView:removeScene(sceneIdx)
+      -- Snap cursor back into bounds if we just deleted the
+      -- currently-selected slot (or any slot past the now-shrunk
+      -- range).
+      local maxCol = self:_maxSelectableCol()
+      if self.cursorCol > maxCol then self.cursorCol = maxCol end
+      self:_refresh()
+    end
+  end)
+  dlg:show()
+  return true
+end
+
 function Performance:homeReleased()
   self.cursorCol = 1
   self:_refresh()
+  return true
+end
+
+-- S-key dispatch depends on what's at the cursor:
+--   on M1 (CV widget): S3 opens the CV input picker.
+--   on a slot ply:     S1 cycles the slot's crossfader role
+--                      (off -> A -> B -> off); S2 renames the
+--                      slot; S3 enters Authoring view (stubbed
+--                      pending phase 3).
+function Performance:subReleased(i, shifted)
+  if shifted then return false end
+  local col = self.cursorCol
+  if col == 1 then
+    if i == 3 then return self:_openCvPicker() end
+    return false
+  end
+  -- Slot plies.
+  local sceneIdx = col - 1
+  local scene = self.sceneView:getScene(sceneIdx)
+  if scene == nil then return false end
+  if i == 1 then
+    return self:_cycleCrossfaderRole(sceneIdx)
+  elseif i == 2 then
+    return self:_renameScene(sceneIdx, scene)
+  elseif i == 3 then
+    return self:_enterAuthoring(sceneIdx)
+  end
+  return false
+end
+
+function Performance:_openCvPicker()
+  local SourceChooser = require "Source.Chooser"
+  local chooser = self.chain and SourceChooser(self.chain) or SourceChooser()
+  chooser:subscribe("choose", function(src)
+    -- Source:serialize returns a string for Externals (the CV
+    -- jack name) and a richer table for Internal sources. Either
+    -- form round-trips through SceneView.serialize.
+    self.sceneView:setCvInput(src and src:serialize() or nil)
+    self:_refresh()
+  end)
+  chooser:show()
+  return true
+end
+
+-- Cycle the slot's crossfader role through off -> A -> B -> off.
+-- If sceneIdx is already assigned to the OTHER endpoint, the
+-- cycle skips over that side (e.g. if it's currently B and B is
+-- taken, the next tap unsets it instead of trying to claim A
+-- when A is also taken). Slot-takes-precedence: if another slot
+-- currently holds A and this slot grabs A, the other slot loses
+-- its role (handled by SceneView:setCrossfaderA enforcing
+-- one-slot-per-endpoint via the assignment itself).
+function Performance:_cycleCrossfaderRole(sceneIdx)
+  local a = self.sceneView:getCrossfaderA()
+  local b = self.sceneView:getCrossfaderB()
+  if a == sceneIdx then
+    -- Currently A -> become B (displaces any existing B).
+    self.sceneView:setCrossfaderA(0)
+    self.sceneView:setCrossfaderB(sceneIdx)
+  elseif b == sceneIdx then
+    -- Currently B -> unassign.
+    self.sceneView:setCrossfaderB(0)
+  else
+    -- Currently off -> become A (displaces any existing A).
+    self.sceneView:setCrossfaderA(sceneIdx)
+  end
+  self:_refresh()
+  return true
+end
+
+function Performance:_renameScene(sceneIdx, scene)
+  local Keyboard = require "Keyboard"
+  local kb = Keyboard("Rename scene", scene:getName(), true, "NamingStuff")
+  kb:subscribe("done", function(text)
+    if text and text ~= "" then
+      scene:setName(text)
+      self:_refresh()
+    end
+  end)
+  kb:show()
+  return true
+end
+
+-- Authoring view dive. Phase 2 stub: just flash a message so the
+-- user sees the gesture registered. Phase 3 swaps this for the
+-- real Authoring view.
+function Performance:_enterAuthoring(sceneIdx)
+  local Overlay = require "Overlay"
+  Overlay.flashMainMessage(
+    string.format("scene %d authoring: not yet (phase 3)", sceneIdx))
   return true
 end
 
