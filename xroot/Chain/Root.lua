@@ -14,16 +14,14 @@ function Root:init(args)
   self.isRoot = true
   self.scopeView = ScopeView(self)
   self.pinView = PinView(self)
-  -- usesScenes flag (default false): when true, the chain hosts
-  -- a SceneView in addition to the legacy PinView. Phase 1 of the
-  -- hold-mode-scenes rework keeps PinView active so dev work
-  -- doesn't break existing flows; later phases flip the default
-  -- once the new view reaches feature parity and gets promoted
-  -- to replace hold mode entirely.
-  self.usesScenes = args.usesScenes or false
-  if self.usesScenes then
-    self.sceneView = SceneView(self)
-  end
+  -- SceneView always created (cheap; just a state container with
+  -- no UI until shown). Whether the front-panel hold switch
+  -- routes to the legacy PinView vs the new SceneView Performance
+  -- view is gated by the Settings.sceneMode admin preference,
+  -- checked dynamically in Channels.Group.setMode("hold"). Always
+  -- creating both lets the user flip the preference live without
+  -- re-instantiating chains.
+  self.sceneView = SceneView(self)
   self.sequencerView = SequencerView(self)
 end
 
@@ -69,10 +67,8 @@ end
 
 function Root:serialize()
   local t = Chain.serialize(self)
-  t.pinView = self.pinView:serialize()
-  if self.sceneView then
-    t.sceneView = self.sceneView:serialize()
-  end
+  t.pinView   = self.pinView:serialize()
+  t.sceneView = self.sceneView:serialize()
   return t
 end
 
@@ -83,20 +79,20 @@ function Root:deserialize(t)
   else
     self.pinView:removeAllPinSets()
   end
-  if self.sceneView then
-    if t.sceneView then
-      self.sceneView:deserialize(t.sceneView)
-    else
-      self.sceneView:removeAllScenes()
-    end
-    -- Legacy-pinset detection: if a chain with usesScenes=true
-    -- loads a preset that still has non-empty pinView data,
-    -- surface a one-time dismiss overlay so the user knows their
-    -- old pinsets won't migrate. Pinset data is left in the
-    -- preset file for safety (they can flip usesScenes off and
-    -- still see their old pinsets); we just don't show them in
-    -- the new scene surface.
-    if t.pinView and t.pinView.pinSets and #t.pinView.pinSets > 0 then
+  if t.sceneView then
+    self.sceneView:deserialize(t.sceneView)
+  else
+    self.sceneView:removeAllScenes()
+  end
+  -- Legacy-pinset detection: when scene mode is on AND we load a
+  -- preset that still carries non-empty pinView data, surface a
+  -- one-time dismiss overlay so the user knows their old pinsets
+  -- won't migrate. Pinset data is left in the preset file for
+  -- safety (toggling scene mode off still surfaces old pinsets);
+  -- we just don't show them in the new scene surface.
+  if t.pinView and t.pinView.pinSets and #t.pinView.pinSets > 0 then
+    local Settings = require "Settings"
+    if Settings.get("sceneMode") == "on" then
       local Overlay = require "Overlay"
       Overlay.flashMainMessage(
         "Legacy hold-mode pinsets can't migrate. Recreate as scenes.")
@@ -135,9 +131,7 @@ end
 
 function Root:releaseResources()
   self.pinView:releaseResources()
-  if self.sceneView then
-    self.sceneView:releaseResources()
-  end
+  self.sceneView:releaseResources()
   self.scopeView:releaseResources()
   Chain.releaseResources(self)
 end

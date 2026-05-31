@@ -96,6 +96,10 @@ menuItems[#menuItems + 1] = {
   "pickerPinRecents"
 }
 menuItems[#menuItems + 1] = {
+  "addVariable",
+  "sceneMode"
+}
+menuItems[#menuItems + 1] = {
   "addCategory",
   "QuickSaves"
 }

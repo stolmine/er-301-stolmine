@@ -45,7 +45,14 @@ function ChannelGroup:init(left, right)
   self.editContext = Context(chain.title .. " edit", chain)
   self.scopeContext = Context(chain.title .. " scope", chain.scopeView)
   self.sequencerContext = Context(chain.title .. " sequencer", chain.sequencerView)
+  -- Two hold-mode contexts: the legacy pinView path and the new
+  -- scene Performance path. setMode("hold") picks between them
+  -- via Settings.sceneMode. The scene context lazy-instantiates
+  -- the Performance view on first request, so chains without
+  -- scenes pay no UI cost when scene mode is off.
   self.holdContext = Context(chain.title .. " hold", chain.pinView)
+  self.sceneHoldContext = Context(chain.title .. " scene",
+                                   chain.sceneView:getPerformanceView())
   self.activeContext = self.editContext
   self.mode = "unknown"
   self.scopeSubView = "scope"   -- "scope" | "sequencer" (sub-views of scope mode)
@@ -86,6 +93,7 @@ function ChannelGroup:setMode(mode)
       self.chain:leaveScopeView()
     else
       self.chain:leaveHoldMode()
+      self.chain.sceneView:leavePerformanceView()
     end
     self:setActiveContext(self.editContext)
   elseif mode == "scope" then
@@ -97,8 +105,17 @@ function ChannelGroup:setMode(mode)
       self:setActiveContext(self.scopeContext)
     end
   elseif mode == "hold" then
-    self.chain:enterHoldMode()
-    self:setActiveContext(self.holdContext)
+    -- Route to scene Performance view when scene mode is on;
+    -- legacy pinView path otherwise. Setting checked each entry
+    -- so the user can flip the preference live without rebooting.
+    local Settings = require "Settings"
+    if Settings.get("sceneMode") == "on" then
+      self.chain.sceneView:enterPerformanceView()
+      self:setActiveContext(self.sceneHoldContext)
+    else
+      self.chain:enterHoldMode()
+      self:setActiveContext(self.holdContext)
+    end
   end
   self.mode = mode
 end

@@ -97,8 +97,19 @@ function SceneView:getCvInput()
   return self.cvInput
 end
 
+-- Lazy-instantiate the Performance view Window the user lands in
+-- when scene mode is on and the panel hold switch fires. Created
+-- on first access so chains without scenes pay no UI cost.
+function SceneView:getPerformanceView()
+  if self.performanceView == nil then
+    local Performance = require "SceneView.Performance"
+    self.performanceView = Performance(self)
+  end
+  return self.performanceView
+end
+
 -- Phase-1 lifecycle stubs. Wired up in later phases; defined now
--- so Chain.Root can call them unconditionally without nil-guards.
+-- so Chain.Root + Channels.Group can call them unconditionally.
 function SceneView:enterPerformanceView() end
 function SceneView:leavePerformanceView() end
 function SceneView:releaseResources()   end

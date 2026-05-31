@@ -223,6 +223,15 @@ local defaults = {
       "no"
     }
   },
+  sceneMode = {
+    category = "Units",
+    description = "Scene mode (replaces hold mode):",
+    value = "off",
+    choices = {
+      "off",
+      "on"
+    }
+  },
   fileRecorderChannelCount = {
     category = "Multitrack Recorder",
     description = "Channel Count:",
