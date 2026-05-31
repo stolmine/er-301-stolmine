@@ -23,6 +23,7 @@ local Class = require "Base.Class"
 local Window = require "Base.Window"
 local Env = require "Env"
 local Signal = require "Signal"
+local SlotControl = require "SceneView.SlotControl"
 
 local Performance = Class {}
 Performance:include(Window)
@@ -62,15 +63,12 @@ function Performance:init(sceneView)
   self.cvPanel:setOpaque(true)
   self:addMainGraphic(self.cvPanel)
 
-  -- M2..M6: slot panels. Created up front but text + visibility
-  -- updated each refresh based on the scene store's state.
-  self.slotPanels = {}
+  -- M2..M6: SlotControl widgets. Each renders one scene's name +
+  -- A/B chip overlay + delta count. Performance just tells each
+  -- one which scene (if any) it represents on every refresh.
+  self.slots = {}
   for col = 2, 6 do
-    local panel = app.TextPanel("", col)
-    panel:setBackgroundColor(app.GRAY2)
-    panel:setOpaque(true)
-    self:addMainGraphic(panel)
-    self.slotPanels[col] = panel
+    self.slots[col] = SlotControl { window = self, column = col }
   end
 
   -- Floating "+" placeholder: sits at the first un-populated ply
@@ -122,17 +120,19 @@ function Performance:_refresh()
   local cvRef = self.sceneView:getCvInput()
   self.cvPanel:setText(cvRef or "CV in")
 
-  -- M2..M6 slot panels. Occupied slots render the scene name;
-  -- unoccupied slots render blank (the floating "+" will sit on
-  -- top of one of them).
+  -- M2..M6 slots. SlotControl handles name + A/B chip + delta
+  -- count rendering; we just hand it the scene + crossfader role.
+  local a = self.sceneView:getCrossfaderA()
+  local b = self.sceneView:getCrossfaderB()
   for col = 2, 6 do
     local sceneIdx = col - 1
     local scene = self.sceneView:getScene(sceneIdx)
+    local role
     if scene then
-      self.slotPanels[col]:setText(scene:getName())
-    else
-      self.slotPanels[col]:setText("")
+      if a == sceneIdx then role = "A"
+      elseif b == sceneIdx then role = "B" end
     end
+    self.slots[col]:setScene(scene, role)
   end
 
   -- "+" placeholder position and visibility.
