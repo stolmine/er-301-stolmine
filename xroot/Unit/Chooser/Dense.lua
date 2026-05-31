@@ -48,20 +48,19 @@ local kCursorIndent  = 2         -- pad between row cursor and label
 local kCursorHeight  = 10
 local kColWidth      = 120       -- visual width per column cell
 
--- Each column splits into 3 fixed slots so the eye perceives 6
--- aligned sub-columns across the picker. Left column = slots
--- 1L (glyph) / 2L (name) / 3L (fav). Right column = mirror at
--- x=128. Glyph and fav are single-char positions; name owns the
--- middle bulk of the row.
-local kLeftGlyphX  = 4
-local kLeftNameX   = 14
+-- Each column splits into 2 fixed slots: name (left-justified)
+-- and fav (right-edge marker). Eye perceives 4 aligned sub-
+-- columns across the picker (L-name, L-fav, R-name, R-fav).
+-- Type glyphs used to occupy a 1-char slot before the name but
+-- were removed -- the divider labels in type / package / keyword
+-- sort modes carry the type signal where it matters.
+local kLeftNameX   = 4
 local kLeftFavX    = 121
-local kRightGlyphX = 132
-local kRightNameX  = 142
+local kRightNameX  = 132
 local kRightFavX   = 249
 -- Max name slot width in chars (font 9, ~5 px/char). Roughly the
--- gap between name X and fav X for each column.
-local kMaxNameChars = 20
+-- gap between name X and fav X for each column, minus pad.
+local kMaxNameChars = 23
 
 -- Y baselines (bottom-up). Five visible rows + one extra slot at
 -- y=-1 used as the "slide-in" row during a smooth scroll: when
@@ -265,19 +264,16 @@ function Dense:init(ring)
   self.m2SuppressTap  = false
   self.m3SuppressTap  = false
 
-  -- Per painted row, six separate labels: glyph + name + fav for
-  -- each of the two columns. Splitting them gives fixed horizontal
-  -- alignment across the picker (the eye sees 6 sub-columns even
-  -- though logical cells are 2). The fav '+' marker is always
-  -- visible (independent of edit mode) so users see fav state at
-  -- a glance. kPaintRows = kVisibleRows + 1 so the extra row at
-  -- y=-1 acts as the slide-in position during smooth scroll.
-  self.leftGlyphs  = {}
-  self.leftNames   = {}
-  self.leftFavs    = {}
-  self.rightGlyphs = {}
-  self.rightNames  = {}
-  self.rightFavs   = {}
+  -- Per painted row, four separate labels: name + fav for each of
+  -- the two columns. Names are left-justified at the column edge;
+  -- favs sit at the column's right edge as a persistent '+' marker
+  -- (independent of edit mode). kPaintRows = kVisibleRows + 1 so
+  -- the extra row at y=-1 acts as the slide-in position during
+  -- smooth scroll.
+  self.leftNames  = {}
+  self.leftFavs   = {}
+  self.rightNames = {}
+  self.rightFavs  = {}
   local function makeLabel(x, y)
     local lbl = app.Label("", kFontMain)
     lbl:setJustification(app.justifyLeft)
@@ -298,12 +294,10 @@ function Dense:init(ring)
   end
   for r = 1, kPaintRows do
     local y = kRowYs[r]
-    self.leftGlyphs[r]  = makeLabel(kLeftGlyphX,  y)
-    self.leftNames[r]   = makeLabel(kLeftNameX,   y)
-    self.leftFavs[r]    = makeFav  (kLeftFavX,    y)
-    self.rightGlyphs[r] = makeLabel(kRightGlyphX, y)
-    self.rightNames[r]  = makeLabel(kRightNameX,  y)
-    self.rightFavs[r]   = makeFav  (kRightFavX,   y)
+    self.leftNames[r]  = makeLabel(kLeftNameX,  y)
+    self.leftFavs[r]   = makeFav  (kLeftFavX,   y)
+    self.rightNames[r] = makeLabel(kRightNameX, y)
+    self.rightFavs[r]  = makeFav  (kRightFavX,  y)
   end
 
   -- Row-cursor box: a 1-px border around BOTH cells of the focused
@@ -638,13 +632,9 @@ end
 -- _packIntoRows skips divider emission.
 function Dense:_dividerKeyFnFor(modeId)
   if modeId == "type" then
-    -- "glyph  label" so users learn the legend by repeated exposure
-    -- (e.g. "~  source", ">  effect"). The double space sets the
-    -- glyph apart visually inside the divider's "- ... -" frame.
-    return function(u)
-      local g = Glyph.forLoadInfo(u)
-      return g .. "  " .. Glyph.labelFor(g)
-    end
+    -- Plain class label ("source", "effect", "modulate", ...).
+    -- Per-row glyph was removed so the legend isn't needed.
+    return function(u) return Glyph.labelFor(Glyph.forLoadInfo(u)) end
   elseif modeId == "package" then
     return function(u) return u.libraryName or "" end
   elseif modeId == "keyword" then
@@ -719,15 +709,8 @@ end
 -- Render
 -- ---------------------------------------------------------------------------
 
--- Each cell renders into 3 separate slots (glyph / name / fav),
--- so the picker reads as 6 vertically-aligned sub-columns across
--- both halves of the screen. Glyph + name are split into their
--- own labels; fav is rendered separately via favMarkerFor.
-
-local function glyphCellFor(loadInfo)
-  if loadInfo == nil then return "" end
-  return Glyph.forLoadInfo(loadInfo)
-end
+-- Each cell renders into 2 separate slots (name / fav). Eye sees
+-- 4 aligned sub-columns across both halves of the screen.
 
 local function nameCellFor(loadInfo)
   if loadInfo == nil then return "" end
@@ -757,19 +740,6 @@ local function rowColorFor(loadInfo, editMode)
     return app.GRAY5
   end
   return app.WHITE
-end
-
--- Glyph slot visibility + brightness rules:
---   * alpha sort hides the glyph entirely (alpha is a "scan by
---     name" mode, glyph adds noise)
---   * type sort or active type filter -> WHITE (glyph is the
---     primary semantic axis in that view)
---   * everything else -> GRAY7 (present but quiet)
--- Returns nil to suppress the glyph entirely, or a color constant.
-local function glyphColorFor(sortId, typeFilter)
-  if sortId == "alpha" then return nil end
-  if sortId == "type" or typeFilter ~= nil then return app.WHITE end
-  return app.GRAY7
 end
 
 -- True iff scroll or cursor easing has frames left to run. The
@@ -825,52 +795,34 @@ function Dense:_refresh()
   -- in sync during a scroll transition. Slot kPaintRows (bottom,
   -- y=-1 at rest) becomes visible at y=8 when subPx reaches the
   -- row pitch, providing the slide-in row.
-  local glyphSortId = sortModeAt(self.sortIdx).id
   for r = 1, kPaintRows do
     local rowIdx = startRow + (r - 1)
     local entry  = self:_rowEntry(rowIdx)
     local y      = kRowYs[r] + subPx
-    -- All 6 sub-cell labels share the same Y for the row. Glyph
-    -- and name use setPosition (left-justified at fixed X); fav
-    -- uses setCenter so its glyph midpoint stays at the cursor-
-    -- box midpoint (y+8) regardless of row position.
-    self.leftGlyphs[r]:setPosition(kLeftGlyphX,  y)
-    self.leftNames[r]:setPosition(kLeftNameX,    y)
-    self.leftFavs[r]:setCenter(kLeftFavX,        y + 8)
-    self.rightGlyphs[r]:setPosition(kRightGlyphX, y)
-    self.rightNames[r]:setPosition(kRightNameX,   y)
-    self.rightFavs[r]:setCenter(kRightFavX,       y + 8)
+    -- Both cell labels share the row's Y. Name uses setPosition
+    -- (left-justified at column edge); fav uses setCenter so its
+    -- glyph midpoint stays at the cursor-box midpoint (y+8)
+    -- regardless of row position.
+    self.leftNames[r]:setPosition(kLeftNameX,   y)
+    self.leftFavs[r]:setCenter(kLeftFavX,       y + 8)
+    self.rightNames[r]:setPosition(kRightNameX, y)
+    self.rightFavs[r]:setCenter(kRightFavX,     y + 8)
     if entry == nil then
-      self.leftGlyphs[r]:setText("")
       self.leftNames[r]:setText("")
       self.leftFavs[r]:setText("")
-      self.rightGlyphs[r]:setText("")
       self.rightNames[r]:setText("")
       self.rightFavs[r]:setText("")
     elseif entry.type == "divider" then
-      -- Divider spans the left column (glyph slot blank, name slot
-      -- holds "- label -"), right column blank. No favs on dividers.
-      self.leftGlyphs[r]:setText("")
+      -- Divider holds "- label -" in the left name slot; right
+      -- column blank. No favs on dividers.
       self.leftNames[r]:setText("- " .. (entry.label or "") .. " -")
       self.leftNames[r]:setForegroundColor(app.GRAY7)
-      self.rightGlyphs[r]:setText("")
       self.rightNames[r]:setText("")
       self.leftFavs[r]:setText("")
       self.rightFavs[r]:setText("")
     else
       local leftColor  = rowColorFor(entry.left,  self.editMode)
       local rightColor = rowColorFor(entry.right, self.editMode)
-      local glyphColor = glyphColorFor(glyphSortId, self.typeFilter)
-      if glyphColor == nil then
-        -- alpha sort: glyph slot blank, alignment preserved.
-        self.leftGlyphs[r]:setText("")
-        self.rightGlyphs[r]:setText("")
-      else
-        self.leftGlyphs[r]:setText(glyphCellFor(entry.left))
-        self.leftGlyphs[r]:setForegroundColor(glyphColor)
-        self.rightGlyphs[r]:setText(glyphCellFor(entry.right))
-        self.rightGlyphs[r]:setForegroundColor(glyphColor)
-      end
       self.leftNames[r]:setText(nameCellFor(entry.left))
       self.leftNames[r]:setForegroundColor(leftColor)
       self.rightNames[r]:setText(nameCellFor(entry.right))
@@ -925,7 +877,7 @@ function Dense:_refresh()
   local mode = sortModeAt(self.sortIdx)
   local txt = string.format("sort:%s", mode.label)
   if self.typeFilter then
-    txt = txt .. string.format("  type:%s", self.typeFilter)
+    txt = txt .. string.format("  type:%s", Glyph.labelFor(self.typeFilter))
   end
   if self.editMode ~= "pick" then
     txt = txt .. string.format("  edit:%s", self.editMode)
