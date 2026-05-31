@@ -45,14 +45,11 @@ function ChannelGroup:init(left, right)
   self.editContext = Context(chain.title .. " edit", chain)
   self.scopeContext = Context(chain.title .. " scope", chain.scopeView)
   self.sequencerContext = Context(chain.title .. " sequencer", chain.sequencerView)
-  -- Two hold-mode contexts: the legacy pinView path and the new
-  -- scene Performance path. setMode("hold") picks between them
-  -- via Settings.sceneMode. The scene context lazy-instantiates
-  -- the Performance view on first request, so chains without
-  -- scenes pay no UI cost when scene mode is off.
   self.holdContext = Context(chain.title .. " hold", chain.pinView)
-  self.sceneHoldContext = Context(chain.title .. " scene",
-                                   chain.sceneView:getPerformanceView())
+  -- sceneHoldContext is built lazily on first scene-mode entry
+  -- via _getSceneHoldContext(). This keeps SceneView + Performance
+  -- view init completely off the boot path; chains never visited
+  -- in scene mode pay zero cost.
   self.activeContext = self.editContext
   self.mode = "unknown"
   self.scopeSubView = "scope"   -- "scope" | "sequencer" (sub-views of scope mode)
@@ -67,6 +64,17 @@ function ChannelGroup:contentChanged()
   if self.mode == "scope" then
     self.chain:enterScopeView()
   end
+end
+
+-- Lazy-build the scene-mode hold context on first entry. Keeps
+-- Performance view init entirely off the boot path.
+function ChannelGroup:_getSceneHoldContext()
+  if self.sceneHoldContext == nil then
+    local sceneView = self.chain:getSceneView()
+    self.sceneHoldContext = Context(self.chain.title .. " scene",
+                                     sceneView:getPerformanceView())
+  end
+  return self.sceneHoldContext
 end
 
 function ChannelGroup:show()
@@ -93,7 +101,9 @@ function ChannelGroup:setMode(mode)
       self.chain:leaveScopeView()
     else
       self.chain:leaveHoldMode()
-      self.chain.sceneView:leavePerformanceView()
+      if self.chain.sceneView then
+        self.chain.sceneView:leavePerformanceView()
+      end
     end
     self:setActiveContext(self.editContext)
   elseif mode == "scope" then
@@ -105,13 +115,13 @@ function ChannelGroup:setMode(mode)
       self:setActiveContext(self.scopeContext)
     end
   elseif mode == "hold" then
-    -- Route to scene Performance view when scene mode is on;
-    -- legacy pinView path otherwise. Setting checked each entry
-    -- so the user can flip the preference live without rebooting.
+    -- Scene mode replaces hold mode entirely when the admin
+    -- setting is on; otherwise legacy PinView hold mode runs.
+    -- Checked on each entry so the setting flip is live.
     local Settings = require "Settings"
     if Settings.get("sceneMode") == "on" then
-      self.chain.sceneView:enterPerformanceView()
-      self:setActiveContext(self.sceneHoldContext)
+      self.chain:getSceneView():enterPerformanceView()
+      self:setActiveContext(self:_getSceneHoldContext())
     else
       self.chain:enterHoldMode()
       self:setActiveContext(self.holdContext)

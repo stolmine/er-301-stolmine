@@ -2,7 +2,6 @@ local Class = require "Base.Class"
 local Chain = require "Chain"
 local ScopeView = require "Chain.ScopeView"
 local PinView = require "PinView"
-local SceneView = require "SceneView"
 local SequencerView = require "Sequencer.GridView"
 
 local Root = Class {}
@@ -14,15 +13,20 @@ function Root:init(args)
   self.isRoot = true
   self.scopeView = ScopeView(self)
   self.pinView = PinView(self)
-  -- SceneView always created (cheap; just a state container with
-  -- no UI until shown). Whether the front-panel hold switch
-  -- routes to the legacy PinView vs the new SceneView Performance
-  -- view is gated by the Settings.sceneMode admin preference,
-  -- checked dynamically in Channels.Group.setMode("hold"). Always
-  -- creating both lets the user flip the preference live without
-  -- re-instantiating chains.
-  self.sceneView = SceneView(self)
   self.sequencerView = SequencerView(self)
+  -- SceneView state container is created LAZILY (see getSceneView).
+  -- The scene mode rework is in-development; users with scene
+  -- mode never enabled pay zero boot cost from it. The state
+  -- container itself is cheap, but lazy avoids any chance of an
+  -- in-flight SceneView change side-effecting the chain init path.
+end
+
+function Root:getSceneView()
+  if self.sceneView == nil then
+    local SceneView = require "SceneView"
+    self.sceneView = SceneView(self)
+  end
+  return self.sceneView
 end
 
 function Root:getRootChain()
@@ -67,8 +71,13 @@ end
 
 function Root:serialize()
   local t = Chain.serialize(self)
-  t.pinView   = self.pinView:serialize()
-  t.sceneView = self.sceneView:serialize()
+  t.pinView = self.pinView:serialize()
+  -- Only serialize scene state if SceneView has actually been
+  -- created (user enabled scene mode at some point). Lazy init
+  -- means most users get nothing extra written to their presets.
+  if self.sceneView then
+    t.sceneView = self.sceneView:serialize()
+  end
   return t
 end
 
@@ -80,23 +89,9 @@ function Root:deserialize(t)
     self.pinView:removeAllPinSets()
   end
   if t.sceneView then
-    self.sceneView:deserialize(t.sceneView)
-  else
-    self.sceneView:removeAllScenes()
-  end
-  -- Legacy-pinset detection: when scene mode is on AND we load a
-  -- preset that still carries non-empty pinView data, surface a
-  -- one-time dismiss overlay so the user knows their old pinsets
-  -- won't migrate. Pinset data is left in the preset file for
-  -- safety (toggling scene mode off still surfaces old pinsets);
-  -- we just don't show them in the new scene surface.
-  if t.pinView and t.pinView.pinSets and #t.pinView.pinSets > 0 then
-    local Settings = require "Settings"
-    if Settings.get("sceneMode") == "on" then
-      local Overlay = require "Overlay"
-      Overlay.flashMainMessage(
-        "Legacy hold-mode pinsets can't migrate. Recreate as scenes.")
-    end
+    -- Force-create SceneView only if the preset actually carries
+    -- scene state. Restores the data verbatim.
+    self:getSceneView():deserialize(t.sceneView)
   end
 end
 
@@ -131,7 +126,9 @@ end
 
 function Root:releaseResources()
   self.pinView:releaseResources()
-  self.sceneView:releaseResources()
+  if self.sceneView then
+    self.sceneView:releaseResources()
+  end
   self.scopeView:releaseResources()
   Chain.releaseResources(self)
 end
