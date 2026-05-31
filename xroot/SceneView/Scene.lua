@@ -4,8 +4,10 @@
 -- consumes the delta map to drive the ParamSetMorph.
 
 local Class = require "Base.Class"
+local Object = require "Base.Object"
 
 local Scene = Class {}
+Scene:include(Object)
 
 function Scene:init(args)
   self:setClassName("SceneView.Scene")

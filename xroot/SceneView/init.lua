@@ -8,9 +8,11 @@
 -- 2-3; ParamSetMorph wiring lands in phase 4.
 
 local Class = require "Base.Class"
+local Object = require "Base.Object"
 local Scene = require "SceneView.Scene"
 
 local SceneView = Class {}
+SceneView:include(Object)
 
 -- Max number of scenes per chain. Per docs/planning/hold-mode-
 -- scenes-impl.md, 16 is plenty for the expected performance
