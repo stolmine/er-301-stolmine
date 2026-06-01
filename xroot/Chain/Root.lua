@@ -1,6 +1,5 @@
 local Class = require "Base.Class"
 local Chain = require "Chain"
-local ChainBase = require "Chain.Base"
 local ScopeView = require "Chain.ScopeView"
 local PinView = require "PinView"
 local SequencerView = require "Sequencer.GridView"
@@ -290,13 +289,6 @@ end
 
 function Root:upReleased(shifted)
   if _leaveAuthoringIfArmed(self) then return true end
-end
-
--- SHIFT opens the MarkMenu (cut / copy / paste of marked units);
--- all structural. Block during authoring.
-function Root:shiftReleased()
-  if self:rejectSceneAuthoringEdit() then return true end
-  return ChainBase.shiftReleased(self)
 end
 
 function Root:cancelReleased(shifted)

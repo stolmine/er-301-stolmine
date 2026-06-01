@@ -563,6 +563,14 @@ function ChainBase:homeReleased()
 end
 
 function ChainBase:shiftReleased()
+  -- MarkMenu lets the user cut / copy / paste marked units: all
+  -- structural edits. Block during scene authoring from any chain
+  -- depth, not just the root (3c.3 pushdown). Reaches Root via
+  -- getRootChain, which Patch / Branch / Root all override.
+  local root = self:getRootChain()
+  if root and root.rejectSceneAuthoringEdit and root:rejectSceneAuthoringEdit() then
+    return true
+  end
   if self:getMarkCount() > 0 then
     local menu = MarkMenu(self)
     menu:show()
