@@ -406,13 +406,15 @@ function Root:_getOrCreateBaseParam(unitKey, ctrlId)
   return p
 end
 
--- Walk every delta-able control and add a 3-Parameter morpher item
--- per (audio target, sceneA endpoint, sceneB endpoint). Endpoints
--- resolve to the scene's persistent Parameter when the scene has
--- a delta for that control, else the chain's base Parameter
--- (= "no delta" endpoint, stays at the user-mode value snapshot).
--- Crossfader role of kEndpointBase (0) means "this side is base"
--- so both endpoints become baseParam = zero movement on that side.
+-- Walk every delta-able control and add a 4-Parameter VEE morpher
+-- item per (audio target, base, sceneA endpoint, sceneB endpoint).
+-- The VEE blend keeps the live audio param at the user's pre-scene
+-- value (base) when the bias is at center, and only pulls toward
+-- a scene's stored value as the user moves bias to that side.
+--
+-- Unassigned endpoints pass baseParam as the "scene" so the
+-- per-side multiplier collapses to (1-w)*base + w*base = base
+-- and the side has no audible effect.
 function Root:_buildSceneMorphItems()
   if self.sceneView == nil then return end
   local morph = self._sceneMorph
@@ -432,21 +434,17 @@ function Root:_buildSceneMorphItems()
         local baseParam  = self:_getOrCreateBaseParam(unitKey, ctrlId)
         local baseVal    = control:getSceneBaseValue()
 
-        local aParam
+        local aParam = baseParam
         if sceneA and sceneA:hasDelta(unitKey, ctrlId) then
           aParam = sceneA:getOrCreateParam(unitKey, ctrlId, baseVal)
-        else
-          aParam = baseParam
         end
 
-        local bParam
+        local bParam = baseParam
         if sceneB and sceneB:hasDelta(unitKey, ctrlId) then
           bParam = sceneB:getOrCreateParam(unitKey, ctrlId, baseVal)
-        else
-          bParam = baseParam
         end
 
-        morph:add(audioParam, aParam, bParam)
+        morph:addVee(audioParam, baseParam, aParam, bParam)
       end
     end
   end)
@@ -520,6 +518,49 @@ function Root:disengageSceneMorph()
 
   if self._sceneMorph then
     self._sceneMorph:clear()
+  end
+
+  -- Hard-restore every audio param to its user-edit value before
+  -- handing control back to user-edit mode.
+  --
+  -- Background: the morpher writes to live audio Parameters via
+  -- softSet on every apply(). When the user disengages, the
+  -- morpher stops running, but the audio Parameters' targets are
+  -- whatever the morpher last computed (e.g. midpoint blend at
+  -- bias=0 with a scene at A). Without an explicit restore the
+  -- user returns to user-edit and sees parameter values shifted
+  -- by however much the morpher had been blending. Re-engaging
+  -- later then snapshots THESE shifted values as the new "base"
+  -- (since baseParam is refreshed from audioParam:target() at
+  -- engage), so each engage/disengage cycle drifts audio
+  -- further from the user's actual setting.
+  --
+  -- The base Parameter map (_sceneBaseParams) holds the original
+  -- user-edit target() captured at the most recent engage. We
+  -- hardSet every audio Parameter back to that snapshot here,
+  -- erasing the morpher's contribution to the audio path.
+  --
+  -- Order: this runs AFTER removeTask + morpher:clear, so the
+  -- morpher is gone before we restore and can't overwrite us on
+  -- the next audio frame.
+  if self._sceneBaseParams then
+    _walkAllUnits(self, function(unit)
+      if not unit.controls then return end
+      local unitKey = unit:getInstanceKey()
+      local perUnit = self._sceneBaseParams[unitKey]
+      if not perUnit then return end
+      for ctrlId, control in pairs(unit.controls) do
+        if control.getSceneAudioParam then
+          local baseParam = perUnit[ctrlId]
+          if baseParam then
+            local audioParam = control:getSceneAudioParam()
+            if audioParam then
+              audioParam:hardSet(baseParam:target())
+            end
+          end
+        end
+      end
+    end)
   end
 
   if self.sceneView then

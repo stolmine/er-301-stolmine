@@ -18,25 +18,43 @@ namespace od
 
     void ParamSetMorph::process()
     {
-        // Audio-rate weight drive. CV is interpreted in the
-        // bipolar [-1, +1] domain so the scene crossfader can sit
-        // at A (cv=+1), B (cv=-1), or a blend (cv between):
-        //   weight = (1 - cv) * 0.5
-        //   cv=+1 -> weight=0 (full A endpoint)
-        //   cv= 0 -> weight=0.5 (midpoint)
-        //   cv=-1 -> weight=1 (full B endpoint)
-        // Unconnected mCV -> Inlet::buffer() returns ZeroOutput,
-        // so cv=0 -> weight=0.5 (midpoint). Guard with
-        // isConnected so PinView's encoder-driven mWeight is not
-        // overwritten on its own morpher (which doesn't connect
-        // this inlet).
+        // Audio-rate weight drive. Two CV->weight mappings:
+        //
+        //   Vee mode (scene crossfader): CV is interpreted as a
+        //   bipolar bias in [-1, +1] and stored verbatim into
+        //   mWeight. VEE items read it as bias directly:
+        //     bias=+1 -> full sceneA, bias=-1 -> full sceneB,
+        //     bias= 0 -> audio at base (no scene contribution).
+        //
+        //   Linear mode (the legacy PinView path): CV in [-1, +1]
+        //   maps to mWeight in [0, 1] via (1 - cv) * 0.5 so the
+        //   morpher's apply does the standard linear blend
+        //     (1-w)*start + w*end
+        //   between cached / live endpoints. Unchanged from before
+        //   the VEE work landed.
+        //
+        // Unconnected mCV -> Inlet::buffer() returns ZeroOutput
+        // (sample=0). Vee: bias=0 -> audio at base. Linear:
+        // weight=0.5 -> midpoint. Guard with isConnected so
+        // PinView's encoder-driven mWeight isn't overwritten on
+        // its own morpher (which doesn't connect this inlet).
         if (mCV.isConnected())
         {
             float *buf = mCV.buffer();
             float sample = buf[FRAMELENGTH - 1];
-            float weight = (1.0f - sample) * 0.5f;
-            if (weight < 0.0f) weight = 0.0f;
-            else if (weight > 1.0f) weight = 1.0f;
+            float weight;
+            if (mVeeMode)
+            {
+                weight = sample;
+                if (weight < -1.0f) weight = -1.0f;
+                else if (weight > 1.0f) weight = 1.0f;
+            }
+            else
+            {
+                weight = (1.0f - sample) * 0.5f;
+                if (weight < 0.0f) weight = 0.0f;
+                else if (weight > 1.0f) weight = 1.0f;
+            }
             mWeight.hardSet(weight);
         }
         apply();
@@ -58,19 +76,49 @@ namespace od
 
             for (Item &item : mItems)
             {
-                float startVal, endVal;
                 bool isDB = item.param->mEnableDecibelMorph;
 
+                if (item.kind == Item::kVee4)
+                {
+                    // VEE blend. w2 is the bipolar bias in [-1, +1].
+                    // sceneA stored in startParam, sceneB in endParam,
+                    // base in baseParam.
+                    float bias = w2;
+                    float base = isDB ? toDecibels(item.baseParam->target())
+                                      : item.baseParam->target();
+                    float x;
+                    if (bias > 0.0f && item.startParam != nullptr)
+                    {
+                        float sceneA = isDB
+                            ? toDecibels(item.startParam->target())
+                            : item.startParam->target();
+                        x = (1.0f - bias) * base + bias * sceneA;
+                    }
+                    else if (bias < 0.0f && item.endParam != nullptr)
+                    {
+                        float sceneB = isDB
+                            ? toDecibels(item.endParam->target())
+                            : item.endParam->target();
+                        float absB = -bias;
+                        x = (1.0f - absB) * base + absB * sceneB;
+                    }
+                    else
+                    {
+                        x = base;
+                    }
+                    item.param->softSet(isDB ? fromDecibels(x) : x);
+                    continue;
+                }
+
+                // 2-arg / 3-arg linear blend path.
+                float startVal, endVal;
                 if (item.startParam != nullptr)
                 {
-                    // 3-arg variant: read live from start Parameter
                     startVal = isDB ? toDecibels(item.startParam->target())
                                     : item.startParam->target();
                 }
                 else
                 {
-                    // 2-arg variant: use cached start value (already
-                    // in dB-space if isDB; see Item ctor)
                     startVal = item.startValue;
                 }
 
@@ -105,9 +153,10 @@ namespace od
         mWeight.hardSet(0);
         for (Item &item : mItems)
         {
-            // 3-arg variant reads startParam->target() live in
-            // apply(); nothing to snapshot.
-            if (item.startParam != nullptr) continue;
+            // Only the 2-arg cached variant has anything to
+            // snapshot. Live (3-arg) + VEE (4-arg) read their
+            // endpoints from Parameters every apply.
+            if (item.kind != Item::kCached2) continue;
 
             if (item.param->mEnableDecibelMorph)
             {
@@ -123,6 +172,7 @@ namespace od
 
     ParamSetMorph::Item::Item(Parameter *p, float _endValue) : param(p)
     {
+        kind = kCached2;
         if (param != nullptr)
         {
             param->attach();
@@ -147,46 +197,48 @@ namespace od
     ParamSetMorph::Item::Item(Parameter *_target, Parameter *_startParam, Parameter *_endParam)
         : param(_target), startParam(_startParam), endParam(_endParam)
     {
-        if (param != nullptr)
-        {
-            param->attach();
-        }
-        if (startParam != nullptr)
-        {
-            startParam->attach();
-        }
-        if (endParam != nullptr)
-        {
-            endParam->attach();
-        }
+        kind = kLive3;
+        if (param != nullptr) param->attach();
+        if (startParam != nullptr) startParam->attach();
+        if (endParam != nullptr) endParam->attach();
+    }
+
+    // 4-arg VEE ctor: base + scene A + scene B, all live. apply
+    // picks active scene per-frame from the sign of mWeight (the
+    // bipolar bias). scenes stored in startParam (=A) and
+    // endParam (=B) to reuse the existing fields.
+    ParamSetMorph::Item::Item(Parameter *_target, Parameter *_baseParam,
+                              Parameter *_sceneA, Parameter *_sceneB)
+        : param(_target), startParam(_sceneA), endParam(_sceneB), baseParam(_baseParam)
+    {
+        kind = kVee4;
+        if (param != nullptr) param->attach();
+        if (baseParam != nullptr) baseParam->attach();
+        if (startParam != nullptr) startParam->attach();
+        if (endParam != nullptr) endParam->attach();
     }
 
     ParamSetMorph::Item::Item(ParamSetMorph::Item &&other)
-        : param(other.param),
+        : kind(other.kind),
+          param(other.param),
           startParam(other.startParam),
           endParam(other.endParam),
+          baseParam(other.baseParam),
           startValue(other.startValue),
           endValue(other.endValue)
     {
         other.param = nullptr;
         other.startParam = nullptr;
         other.endParam = nullptr;
+        other.baseParam = nullptr;
     }
 
     ParamSetMorph::Item::~Item()
     {
-        if (param != nullptr)
-        {
-            param->release();
-        }
-        if (startParam != nullptr)
-        {
-            startParam->release();
-        }
-        if (endParam != nullptr)
-        {
-            endParam->release();
-        }
+        if (param != nullptr) param->release();
+        if (startParam != nullptr) startParam->release();
+        if (endParam != nullptr) endParam->release();
+        if (baseParam != nullptr) baseParam->release();
     }
 
     bool ParamSetMorph::Item::operator==(const Parameter *x)
@@ -199,28 +251,23 @@ namespace od
     {
         if (this != &other)
         {
-            if (param != nullptr)
-            {
-                param->release();
-            }
-            if (startParam != nullptr)
-            {
-                startParam->release();
-            }
-            if (endParam != nullptr)
-            {
-                endParam->release();
-            }
+            if (param != nullptr) param->release();
+            if (startParam != nullptr) startParam->release();
+            if (endParam != nullptr) endParam->release();
+            if (baseParam != nullptr) baseParam->release();
 
+            kind = other.kind;
             param = other.param;
             startParam = other.startParam;
             endParam = other.endParam;
+            baseParam = other.baseParam;
             startValue = other.startValue;
             endValue = other.endValue;
 
             other.param = nullptr;
             other.startParam = nullptr;
             other.endParam = nullptr;
+            other.baseParam = nullptr;
         }
 
         return *this;
@@ -247,6 +294,19 @@ namespace od
         }
     }
 
+    void ParamSetMorph::addVee(Parameter *target, Parameter *baseParam,
+                                Parameter *sceneA, Parameter *sceneB)
+    {
+        auto i = std::find(mItems.begin(), mItems.end(), target);
+        if (i == mItems.end())
+        {
+            mItems.emplace_back(target, baseParam, sceneA, sceneB);
+            mUpdateNeeded = true;
+            mHasLiveItems = true;
+            mVeeMode = true;
+        }
+    }
+
     void ParamSetMorph::remove(Parameter *param)
     {
         auto i = std::find(mItems.begin(), mItems.end(), param);
@@ -254,15 +314,19 @@ namespace od
         {
             mItems.erase(i);
             mUpdateNeeded = true;
-            // Recompute the live-items flag in case the removed
-            // item was the only 3-arg variant.
+            // Recompute flags in case the removed item was the
+            // only one of its kind.
             mHasLiveItems = false;
+            mVeeMode = false;
             for (Item &item : mItems)
             {
-                if (item.startParam != nullptr || item.endParam != nullptr)
+                if (item.kind == Item::kLive3 || item.kind == Item::kVee4)
                 {
                     mHasLiveItems = true;
-                    break;
+                }
+                if (item.kind == Item::kVee4)
+                {
+                    mVeeMode = true;
                 }
             }
         }
@@ -272,6 +336,7 @@ namespace od
     {
         mItems.clear();
         mHasLiveItems = false;
+        mVeeMode = false;
         hardSet(0.0f);
     }
 
