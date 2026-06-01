@@ -543,15 +543,21 @@ local function _leaveAuthoringIfArmed(self)
   return true
 end
 
+-- Egress mappings (revised after hardware bench 2026-06-01):
+--   shift+UP   -> leave authoring (the canonical "jump back to
+--                 Performance" gesture, parallels shift+UP
+--                 escape semantics elsewhere)
+--   CANCEL     -> leave authoring (still works since CANCEL
+--                 isn't usable for anything else inside scene
+--                 authoring -- structural edits are locked)
+-- ZERO is intentionally NOT mapped here anymore: it conflicts
+-- with the in-control "zero this readout" gesture, which is
+-- absolutely needed during authoring.
 function Root:upReleased(shifted)
-  if _leaveAuthoringIfArmed(self) then return true end
+  if shifted and _leaveAuthoringIfArmed(self) then return true end
 end
 
 function Root:cancelReleased(shifted)
-  if _leaveAuthoringIfArmed(self) then return true end
-end
-
-function Root:zeroReleased()
   if _leaveAuthoringIfArmed(self) then return true end
 end
 

@@ -40,6 +40,15 @@ namespace od
     void setCornerRadius(int bl, int tl, int tr, int br);
     void setOpaque(bool value);
 
+    // Cursor-state setters: most built-in widgets pin their cursor
+    // orientation + anchor in C++ (Fader sets cursorRight in init,
+    // DurationControl uses cursorDown, etc). These let Lua-side
+    // controllers (e.g. Performance view's navigation indicator)
+    // pick the orientation + anchor without subclassing.
+    // orientation: 0=cursorDown, 1=cursorUp, 2=cursorLeft, 3=cursorRight.
+    void setCursorOrientation(int orientation);
+    void setCursorPosition(int x, int y);
+
     virtual void setPosition(int left, int bottom);
     virtual void setSize(int width, int height, bool updateSaved = true);
     void setCenter(int x, int y);

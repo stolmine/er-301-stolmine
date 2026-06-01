@@ -18,20 +18,26 @@ namespace od
 
     void ParamSetMorph::process()
     {
-        // Audio-rate weight drive. When mCV is unconnected,
-        // Inlet::buffer() returns ZeroOutput so we hardSet weight
-        // to 0 = full-A endpoint on every frame -- PinView never
-        // connects mCV and so its weight stays user-driven via
-        // MorphFader's encoder writes to mWeight (which we'd
-        // immediately overwrite). Guard with isConnected so
-        // PinView's encoder path keeps working.
+        // Audio-rate weight drive. CV is interpreted in the
+        // bipolar [-1, +1] domain so the scene crossfader can sit
+        // at A (cv=+1), B (cv=-1), or a blend (cv between):
+        //   weight = (1 - cv) * 0.5
+        //   cv=+1 -> weight=0 (full A endpoint)
+        //   cv= 0 -> weight=0.5 (midpoint)
+        //   cv=-1 -> weight=1 (full B endpoint)
+        // Unconnected mCV -> Inlet::buffer() returns ZeroOutput,
+        // so cv=0 -> weight=0.5 (midpoint). Guard with
+        // isConnected so PinView's encoder-driven mWeight is not
+        // overwritten on its own morpher (which doesn't connect
+        // this inlet).
         if (mCV.isConnected())
         {
             float *buf = mCV.buffer();
             float sample = buf[FRAMELENGTH - 1];
-            if (sample < 0.0f) sample = 0.0f;
-            else if (sample > 1.0f) sample = 1.0f;
-            mWeight.hardSet(sample);
+            float weight = (1.0f - sample) * 0.5f;
+            if (weight < 0.0f) weight = 0.0f;
+            else if (weight > 1.0f) weight = 1.0f;
+            mWeight.hardSet(weight);
         }
         apply();
     }

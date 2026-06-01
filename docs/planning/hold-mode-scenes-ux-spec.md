@@ -73,23 +73,53 @@ M1   M2   M3   M4   M5   M6
   new scene and jumps to it.
 - HOME: snaps to M1.
 
-### Main and sub bouncing carets
+### Main and sub bouncing carets (revised 2026-06-01)
 
-Both follow the standard `Widget:setMainCursorController` /
-`setSubCursorController` mechanism, which fires the context's
-`onEncoderFocusChanged` to update the GraphicContext.
+Two distinct cursor states, mutually exclusive: a downward "▼ this
+ply is selected by navigation" caret above the ply, and a leftward
+"▶ this control is focused for editing" caret on the focused
+control. Same convention as the standard chain edit view: ▼ for
+nav, ▶ for selection, never both at once.
 
-Performance is its own focused widget (`Window:getFocusedWidget`
-returns `self` when no child has grabbed focus), so the
-`mainCursorController` and `subCursorController` fields on
+Performance owns a tiny `app.Graphic` `navCaret` configured with
+`setCursorOrientation(cursorDown)` and `setCursorPosition` set to
+the X center of the current ply at Y=64 (top of the ply). The
+GraphicContext's main cursor controller swaps between:
+
+- `navCaret` → renders ▼ above the current ply. Used for slot
+  columns (M2..M6) always, and for M1 when no readout is focused.
+- `nil` (no main caret) → used for M1 when a readout is focused.
+  The sub controller takes over with ▶ at the readout.
+
+The sub controller still follows `m1FocusedReadout` -- nil when
+nothing is focused (no sub caret), else the readout itself (which
+has cursorRight orientation built in, so ▶ at its left edge).
+
+Slot plies have no top-level controls to focus into, so they only
+ever show the ▼ navigation caret.
+
+Cursor controllers go through `Widget:setMainCursorController` /
+`setSubCursorController`, which fire the context's
+`onEncoderFocusChanged` to update the GraphicContext. Performance
+is its own focused widget (`Window:getFocusedWidget` returns
+`self` when no child has grabbed focus) so the fields on
 Performance itself drive both contexts.
 
-- **Main caret** position:
-  - `cursorCol == 1` → `cvFader` (caret at left of the bias value)
-  - `cursorCol > 1`  → that column's `SlotControl.panel`
-- **Sub caret** position:
-  - `cursorCol == 1` + a focused readout → that readout
-  - everywhere else → `nil` (no caret)
+The C++ `Graphic` class gained `setCursorOrientation(int)` and
+`setCursorPosition(int x, int y)` setters (the orientations are
+the `CursorOrientation` enum int values: 0=cursorDown,
+1=cursorUp, 2=cursorLeft, 3=cursorRight) so a plain Graphic can
+host a cursor state without subclassing. Used here to make
+`navCaret` work without writing a new C++ widget.
+
+### M-key auto-focus (revised 2026-06-01)
+
+Tapping **M1** moves the cursor to column 1 AND auto-focuses the
+bias readout via `_setM1FocusedReadout(self.m1Bias)`. The user
+can immediately turn the encoder to set the crossfader weight
+without an additional S3 press. Tapping the M-key for an
+occupied slot just moves the cursor (slots have no auto-focus
+target).
 
 ## Focus / unfocus protocol (M1)
 
@@ -203,14 +233,20 @@ Each gated callsite consults `chain:getRootChain():
 rejectSceneAuthoringEdit()`, which flashes "Locked while editing
 scene." and returns `true`.
 
-### Egress
+### Egress (revised 2026-06-01)
 
 From the chain edit view during authoring, returning to
 Performance:
 - **HOLD** button (panel): special-cased in `ChannelGroup.setMode`
   to call `leaveSceneAuthoring` instead of no-op'ing.
-- **UP**, **CANCEL**, **shift+HOME** (= `zeroReleased` at the
-  chain root): routed through `Channels.leaveSceneAuthoring`.
+- **shift+UP**: routes through `Channels.leaveSceneAuthoring`.
+  Replaces the previous shift+HOME (zeroReleased) binding so
+  ZERO can do its normal "snap focused readout to 0" job inside
+  authoring without surprising the user.
+- **CANCEL**: also routes through `Channels.leaveSceneAuthoring`.
+  CANCEL has no other meaning during authoring (structural edits
+  are locked, and CANCEL on a readout is owned by the readout
+  itself which handles it before bubbling up here).
 
 `leaveSceneAuthoring` calls `chain:exitSceneAuthoring` (which
 captures deltas, drops the persistent param for any control whose
@@ -222,18 +258,27 @@ then activates `sceneHoldContext`.
 in order before activating editContext, so the user can't strand
 the chain with armed controls.
 
-## Crossfader
+## Crossfader (revised 2026-06-01)
 
 - `sceneView:getCrossfaderA()` / `getCrossfaderB()` return either
   a 1-based scene index or `0` ("base" sentinel).
+- The M1 bias slider is a bipolar `LinearDialMap(-1, +1)` with
+  zero at the midpoint. **+1 = full scene A**, **-1 = full
+  scene B**, **0 = 50/50 blend**.
 - Weight is the `mWeight` Parameter on the chain's `ParamSetMorph`,
-  driven at audio rate by `gb.Out` (the scene-cv GainBias's output)
-  via the morpher's `mCV` Inlet.
-- Linear blend: `audio = (1-w) * sceneA_param + w * sceneB_param`.
-- "Base" endpoint (index 0) resolves to the chain's per-control
-  base Parameter (refreshed from `audioParam:target()` on every
-  engage). At w=0 with A=base, no movement on the A side; at w=1
-  with B=base, no movement on the B side.
+  but it's stored in the `[0, 1]` domain internally (matching the
+  legacy PinView path). `ParamSetMorph::process()` remaps the
+  bipolar CV signal at audio rate via `weight = (1 - cv) * 0.5`
+  before `hardSet`ting `mWeight`.
+- Linear blend at the apply step:
+  `audio = (1-w) * sceneA_param + w * sceneB_param`. Combined
+  with the CV remap that puts cv=+1 at w=0 and cv=-1 at w=1, the
+  net effect is "cv=+1 → audio sits on sceneA".
+- An unconnected CV inlet falls through to cv=0 → w=0.5, i.e. a
+  fixed 50/50 blend until the user wires a source. The bias
+  knob then doesn't drive audio unless its modulation is also
+  wired -- consistent with how `app.GainBias` produces nonzero
+  output at a nonzero bias regardless of input.
 - Per delta-able control, the morpher Item references the scene's
   persistent Parameter for that control IF the scene has a delta,
   else the base Parameter. Rebuild triggers:
@@ -340,30 +385,41 @@ What does not serialize:
   bounces between Performance and authoring, and any other mode
   press (USER / ENV / MOD) runs the disengage path.
 
-## Habitat shift-handling alignment
+## Habitat shift-handling alignment (revised 2026-06-01)
 
-Performance is a `Base.Window`, not a Pattern A `Unit.ViewControl`.
-The full habitat Pattern A protocol (paramMode swap of the
-sub-display + `shiftHeld` / `shiftUsed` / snapshot guard against
-toggling during encoder hold) does not apply because:
+Performance is a `Base.Window`, not a Pattern A `Unit.ViewControl`,
+but it now follows habitat Pattern A semantics for the
+sub-display label toggle:
 
-- There is no second sub-display to swap to. Shift only reveals
-  the alternate labels of the existing S1/S2/S3 buttons.
-- The release does not fire a mode-toggle. The labels just snap
-  back to their unshifted text.
+- `shiftPressed` sets `shiftHeld = true`, clears `shiftUsed`.
+  Does NOT redraw -- holding shift alone does not preview
+  anything.
+- The `encoder` handler sets `shiftUsed = true` whenever the
+  encoder turns while `shiftHeld`. This is habitat Decision 1 (B):
+  any encoder touch during shift hold suppresses the toggle.
+- `shiftReleased`: a clean tap (`shiftHeld and not shiftUsed`)
+  flips `shiftMode`. `shiftMode` is the persistent label set.
 
-Performance therefore uses the minimal conformant shape:
-`shiftPressed` sets `shiftHeld = true` + `_refreshSub`;
-`shiftReleased` clears + refreshes. Both return `true` to consume
-the event. No `shiftUsed` flag because there is nothing to
-suppress.
+The slot S-button labels and the M1 S2/S3 labels both follow
+`shiftMode`, not `shiftHeld`. The bindings (rename / delete /
+decimal keyboard / etc) trigger on the OR of the panel `shifted`
+arg and the persistent `shiftMode` -- either route lands at the
+same action so the user can choose tap-toggle or shift+S press
+naturally.
 
-If a future scene-mode feature adds a "shift toggles between two
-sub-display modes" (e.g. a second slot detail view), adopt the
-full Pattern A: `shiftHeld` + `shiftUsed` + value snapshot guard,
-and have `shiftReleased` fire the toggle only when
-`shiftHeld and not shiftUsed and snapshot unchanged`. See the
-habitat doc for the canonical implementation.
+Slot-level shift swap means:
+- `shiftMode = false`: S1 toggle A, S2 toggle B, S3 edit.
+- `shiftMode = true`: S1 unused, S2 rename, S3 delete.
+
+M1-level shift swap means:
+- `shiftMode = false`: S1 dive branch, S2 focus gain, S3 focus
+  bias.
+- `shiftMode = true`: S1 dive branch, S2 set gain (decimal kb),
+  S3 set bias (decimal kb).
+
+This makes the mode visible at all times (the labels reflect
+what S1/S2/S3 will do right now) and matches the habitat
+discipline of "tap = toggle, encoder during hold = no toggle".
 
 ## Implementation pointers
 

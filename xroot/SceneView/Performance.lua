@@ -89,6 +89,17 @@ function Performance:init(sceneView)
   self.cursorCol    = 1
   self.encoderAccum = 0
 
+  -- Navigation caret (downward, sits above the current ply).
+  -- Standalone Graphic whose only purpose is to host a cursor
+  -- state that the GraphicContext reads when this is the main
+  -- cursor controller. Slots use this exclusively; M1 swaps to
+  -- the cvFader's built-in cursorRight when its bias readout is
+  -- focused (so navigation ▼ and editing ▶ are mutually exclusive
+  -- like in the standard chain edit view).
+  self.navCaret = app.Graphic(0, 0, 1, 1)
+  self.navCaret:setCursorOrientation(0)  -- 0 = cursorDown
+  self.navCaret:setCursorPosition(plyX(1) + ply // 2, 64)
+
   -- M1: crossfader weight control. A Fader bound to the chain's
   -- scene-cv GainBias bias parameter. Encoder-on-M1 drives the
   -- focused readout (bias by default; S2/S3 swap between gain
@@ -109,8 +120,15 @@ function Performance:init(sceneView)
     self._biasParam = gb:getParameter("Bias")
     self._gainParam:enableSerialization()
     self._biasParam:enableSerialization()
+    -- Bipolar -1..+1 weight range: +1 = full scene A, -1 = full
+    -- scene B (matching ParamSetMorph.process's CV->weight remap).
+    -- Bias starts at 0 (midpoint) so a freshly-entered Performance
+    -- view sits at 50/50 unless the user has wired a CV that
+    -- pulls the value to an endpoint.
+    self._biasMap = app.LinearDialMap(-1, 1)
+    self._biasMap:setSteps(0.5, 0.1, 0.01, 0.001)
     self.cvFader:setParameter(self._biasParam)
-    self.cvFader:setMap(Encoder.getMap("default"))
+    self.cvFader:setMap(self._biasMap)
     self.cvFader:setUnits(app.unitNone)
     self.cvFader:setPrecision(2)
     if self.chain.getSceneCVRange then
@@ -146,7 +164,7 @@ function Performance:init(sceneView)
     self.m1Bias = app.Readout(0, 0, ply, 10)
     self.m1Bias:setParameter(self._biasParam)
     self.m1Bias:setCenter(subCol3, subCenter4)
-    self.m1Bias:setMap(Encoder.getMap("default"))
+    self.m1Bias:setMap(self._biasMap)
     self.m1Bias:setUnits(app.unitNone)
     self.m1Bias:setPrecision(2)
     self.m1SubGroup:addChild(self.m1Bias)
@@ -232,7 +250,14 @@ function Performance:init(sceneView)
   self.slotSubGroup:addChild(self.slotS1)
   self.slotSubGroup:addChild(self.slotS2)
   self.slotSubGroup:addChild(self.slotS3)
+  -- Shift state. `shiftHeld` is the panel-key state (used only
+  -- to distinguish tap from encoder-touched-during-hold). `shiftMode`
+  -- is the persistent sub-display label flag, toggled by a clean
+  -- tap of SHIFT (no encoder activity during the hold) per
+  -- habitat Pattern A.
   self.shiftHeld = false
+  self.shiftUsed = false
+  self.shiftMode = false
 
   -- Main encoder cursor starts on the M1 bias fader so the
   -- bouncing caret is visible from the moment the user lands in
@@ -288,18 +313,23 @@ function Performance:_refresh()
   -- Cursor box: 1-px outline at the selected column.
   self.cursorBox:setPosition(plyX(self.cursorCol), kSlotY)
 
-  -- Move the bouncing main caret to track the selected ply.
-  -- M1 owns the bias fader's left-of-bias caret; slot columns
-  -- use their SlotControl panel so the caret hugs the slot.
-  -- The sub caret follows m1FocusedReadout (nil when nothing
-  -- is focused: the sub display still renders the GainBias-
-  -- style layout but no caret hangs off either readout).
-  if self.cursorCol == 1 then
-    self:setMainCursorController(self.cvFader)
+  -- Navigation caret position: above the current ply, centered.
+  self.navCaret:setCursorPosition(plyX(self.cursorCol) + ply // 2, 64)
+
+  -- Caret protocol: ▼ above for "this ply is selected by nav",
+  -- ▶ at the focused control for "actively editing." Mutually
+  -- exclusive (only one of the two carets renders at a time):
+  -- on M1 with bias focused, navigation ▼ disappears and editing
+  -- ▶ appears at the bias readout. On slots the navigation ▼
+  -- always shows since slot plies have no top-level control to
+  -- focus into.
+  if self.cursorCol == 1 and self.m1FocusedReadout then
+    -- Editing the M1 bias / gain readout: ▶ at left of readout
+    -- (the readout's own cursorState), no nav ▼.
+    self:setMainCursorController(nil)
     self:setSubCursorController(self.m1FocusedReadout)
   else
-    local slot = self.slots and self.slots[self.cursorCol]
-    self:setMainCursorController(slot and slot.panel or nil)
+    self:setMainCursorController(self.navCaret)
     self:setSubCursorController(nil)
   end
 
@@ -317,10 +347,10 @@ function Performance:_refreshSub()
     if self.m1SubGroup then self.m1SubGroup:show() end
     if self.slotSubGroup then self.slotSubGroup:hide() end
     if self.m1S2 then
-      self.m1S2:setText(self.shiftHeld and "set" or "gain")
+      self.m1S2:setText(self.shiftMode and "set" or "gain")
     end
     if self.m1S3 then
-      self.m1S3:setText(self.shiftHeld and "set" or "bias")
+      self.m1S3:setText(self.shiftMode and "set" or "bias")
     end
     return
   end
@@ -341,7 +371,7 @@ function Performance:_refreshSub()
     end
     self.subStatus:setText(string.format("scene %d: %s%s",
                                           sceneIdx, scene:getName(), chip))
-    if self.shiftHeld then
+    if self.shiftMode then
       -- Shifted bindings: S1 has none, S2 = rename, S3 = delete.
       self.slotS1:setText("")
       self.slotS2:setText("rename")
@@ -417,21 +447,23 @@ function Performance:_m1GainSet()
   kb:show()
 end
 
--- Shift held / released. Repaints the S-button labels under the
--- cursor so the user can see what shifted bindings exist (rename
--- / delete on a slot; decimal-keyboard entry on M1) before
--- committing. Mirrors the convention from spreadsheet's
--- BandControl: shift grabs are tracked at the widget level and
--- the visible sub-display content reflects the held state.
+-- Shift is a tap-toggle, not a held-preview, per the habitat
+-- shift-handling convention (planning/shift-handling.md): the
+-- canonical Pattern A uses tap-shift to flip the sub-display
+-- between two modes. We track shiftUsed so an encoder turn
+-- during the hold suppresses the toggle (Decision 1 B).
 function Performance:shiftPressed()
-  self.shiftHeld = true
-  self:_refreshSub()
+  self.shiftHeld   = true
+  self.shiftUsed   = false
   return true
 end
 
 function Performance:shiftReleased()
+  if self.shiftHeld and not self.shiftUsed then
+    self.shiftMode = not self.shiftMode
+    self:_refreshSub()
+  end
   self.shiftHeld = false
-  self:_refreshSub()
   return true
 end
 
@@ -520,6 +552,10 @@ end
 -- ---------------------------------------------------------------------------
 
 function Performance:encoder(change, shifted)
+  -- Habitat Decision 1 (B): any encoder touch during shift hold
+  -- suppresses the tap-shift toggle, so a deliberate value nudge
+  -- doesn't accidentally flip the sub-display mode.
+  if self.shiftHeld then self.shiftUsed = true end
   -- Cursor on M1 + a readout focused: encoder drives that
   -- readout. M1 with no focus falls through to the navigation
   -- path so the encoder still scrolls the cursor between
@@ -578,9 +614,17 @@ function Performance:mainReleased(i, shifted)
     self:_refresh()
     return true
   end
-  -- Tap on M1 or any occupied slot: just move the cursor there.
+  -- Tap on M1: move cursor + auto-focus the bias readout (so the
+  -- user can immediately turn the encoder to set the crossfader
+  -- weight). Tap on an occupied slot: just move cursor.
   -- Past-the-end (no scene, not the "+" ply): no-op.
-  if i == 1 or self.sceneView:getScene(i - 1) then
+  if i == 1 then
+    self.cursorCol = 1
+    if self.m1Bias then self:_setM1FocusedReadout(self.m1Bias) end
+    self:_refresh()
+    return true
+  end
+  if self.sceneView:getScene(i - 1) then
     self.cursorCol = i
     self:_refresh()
     return true
@@ -622,13 +666,18 @@ end
 --                      slot; S3 enters Authoring view (stubbed
 --                      pending phase 3).
 function Performance:subReleased(i, shifted)
+  -- "Shifted" for binding-selection purposes is the OR of the
+  -- panel-key state (`shifted` arg) and the persistent tap-toggle
+  -- (`shiftMode`). Both routes lead to the same shifted bindings
+  -- so the user can use whichever feels natural.
+  local effShifted = shifted or self.shiftMode
   local col = self.cursorCol
   if col == 1 then
     -- M1 = GainBias-style crossfader weight control.
     -- shifted: S2 / S3 -> decimal keyboard for direct gain / bias
     -- entry (like the OG GainBias unit control). S1 unused when
     -- shifted.
-    if shifted then
+    if effShifted then
       if i == 2 then self:_m1GainSet(); return true
       elseif i == 3 then self:_m1BiasSet(); return true
       end
@@ -665,8 +714,8 @@ function Performance:subReleased(i, shifted)
   if scene == nil then return false end
 
   -- Shifted: S2 -> rename, S3 -> delete (parallels the
-  -- sub-display SubButton labels under shift).
-  if shifted then
+  -- sub-display SubButton labels in shiftMode).
+  if effShifted then
     if i == 2 then return self:_renameScene(sceneIdx, scene) end
     if i == 3 then return self:_confirmDelete(sceneIdx, scene) end
     return false
