@@ -450,6 +450,12 @@ function Root:engageSceneMorph()
   self._sceneTask:unlock()
 
   app.AudioThread.addTask(self._sceneTask, 0)
+  -- Start the scene-cv branch so any CV-source units the user
+  -- has inserted there get scheduled by AudioThread. start() is
+  -- refcounted (stopCount) -- safe to call across engages.
+  if self._sceneCVBranch then
+    self._sceneCVBranch:start()
+  end
   self._sceneEngaged = true
 end
 
@@ -458,6 +464,12 @@ end
 -- survive). Base Parameters stay -- cheap, reused next engage.
 function Root:disengageSceneMorph()
   if not self._sceneEngaged then return end
+
+  -- Stop the scene-cv branch first so its units stop processing
+  -- before we tear down the GainBias they feed into.
+  if self._sceneCVBranch then
+    self._sceneCVBranch:stop()
+  end
 
   app.AudioThread.removeTask(self._sceneTask)
 

@@ -23,7 +23,39 @@ local Class = require "Base.Class"
 local Window = require "Base.Window"
 local Env = require "Env"
 local Signal = require "Signal"
+local Encoder = require "Encoder"
 local SlotControl = require "SceneView.SlotControl"
+
+-- GainBias sub-display layout (mirrors Unit.ViewControl.GainBias).
+-- Centers + lines come from app.GRID5_* / app.BUTTON*_CENTER so
+-- the readouts and SubButtons line up with the panel-paint
+-- positions of S1/S2/S3.
+local subLine1   = app.GRID5_LINE1
+local subLine4   = app.GRID5_LINE4
+local subCenter1 = app.GRID5_CENTER1
+local subCenter3 = app.GRID5_CENTER3
+local subCenter4 = app.GRID5_CENTER4
+local subCol1    = app.BUTTON1_CENTER
+local subCol2    = app.BUTTON2_CENTER
+local subCol3    = app.BUTTON3_CENTER
+
+-- mult-and-sum diagram (= GainBias unit-control's sub-display
+-- instructions). Built once at module load.
+local subInstructions = app.DrawingInstructions()
+subInstructions:circle(subCol2, subCenter3, 8)
+subInstructions:line(subCol2 - 3, subCenter3 - 3,
+                     subCol2 + 3, subCenter3 + 3)
+subInstructions:line(subCol2 - 3, subCenter3 + 3,
+                     subCol2 + 3, subCenter3 - 3)
+subInstructions:circle(subCol3, subCenter3, 8)
+subInstructions:hline(subCol3 - 5, subCol3 + 5, subCenter3)
+subInstructions:vline(subCol3, subCenter3 - 5, subCenter3 + 5)
+subInstructions:hline(subCol1 + 20, subCol2 - 9, subCenter3)
+subInstructions:triangle(subCol2 - 12, subCenter3, 0, 3)
+subInstructions:hline(subCol2 + 9, subCol3 - 8, subCenter3)
+subInstructions:triangle(subCol3 - 11, subCenter3, 0, 3)
+subInstructions:vline(subCol3, subCenter3 + 8, subLine1 - 2)
+subInstructions:triangle(subCol3, subLine1 - 2, 90, 3)
 
 local Performance = Class {}
 Performance:include(Window)
@@ -56,12 +88,85 @@ function Performance:init(sceneView)
   self.cursorCol    = 1
   self.encoderAccum = 0
 
-  -- M1: CV input widget. TextPanel with the input source's name
-  -- (or "CV in" placeholder when unset).
-  self.cvPanel = app.TextPanel("", 1)
-  self.cvPanel:setBackgroundColor(app.GRAY2)
-  self.cvPanel:setOpaque(true)
-  self:addMainGraphic(self.cvPanel)
+  -- M1: crossfader weight control. A Fader bound to the chain's
+  -- scene-cv GainBias bias parameter. Encoder-on-M1 drives the
+  -- focused readout (bias by default; S2/S3 swap between gain
+  -- and bias). S1-on-M1 dives into the scene-cv branch where the
+  -- user inserts CV / LFO / S&H / whatever to modulate weight.
+  -- The morpher reads GainBias.Out at audio rate so manual +
+  -- CV both flow into the crossfade.
+  self.cvFader = app.Fader(plyX(1), kSlotY, ply, kSlotHeight)
+  self.cvFader:setLabel("xfade")
+  if self.chain and self.chain.getSceneCVGainBias then
+    local gb = self.chain:getSceneCVGainBias()
+    self._gainParam = gb:getParameter("Gain")
+    self._biasParam = gb:getParameter("Bias")
+    self._gainParam:enableSerialization()
+    self._biasParam:enableSerialization()
+    self.cvFader:setParameter(self._biasParam)
+    self.cvFader:setMap(Encoder.getMap("default"))
+    self.cvFader:setUnits(app.unitNone)
+    self.cvFader:setPrecision(2)
+  end
+  self:addMainGraphic(self.cvFader)
+
+  -- M1 sub-display: GainBias-style. Built once and toggled
+  -- via show/hide vs the slot context display in _refresh.
+  self.m1SubGroup = app.Graphic(0, 0, 128, 64)
+  self:addSubGraphic(self.m1SubGroup)
+
+  if self._biasParam then
+    local drawing = app.Drawing(0, 0, 128, 64)
+    drawing:add(subInstructions)
+    self.m1SubGroup:addChild(drawing)
+
+    self.m1Scope = app.MiniScope(subCol1 - 20, subLine4, 40, 45)
+    self.m1Scope:setBorder(1)
+    self.m1Scope:setCornerRadius(3, 3, 3, 3)
+    self.m1SubGroup:addChild(self.m1Scope)
+
+    self.m1Gain = app.Readout(0, 0, ply, 10)
+    self.m1Gain:setParameter(self._gainParam)
+    self.m1Gain:setCenter(subCol2, subCenter4)
+    self.m1Gain:setMap(Encoder.getMap("gain"))
+    self.m1Gain:setUnits(app.unitNone)
+    self.m1Gain:setPrecision(2)
+    self.m1SubGroup:addChild(self.m1Gain)
+
+    self.m1Bias = app.Readout(0, 0, ply, 10)
+    self.m1Bias:setParameter(self._biasParam)
+    self.m1Bias:setCenter(subCol3, subCenter4)
+    self.m1Bias:setMap(Encoder.getMap("default"))
+    self.m1Bias:setUnits(app.unitNone)
+    self.m1Bias:setPrecision(2)
+    self.m1SubGroup:addChild(self.m1Bias)
+
+    local desc = app.Label("X-fade", 10)
+    desc:fitToText(3)
+    desc:setSize(ply * 2, desc.mHeight)
+    desc:setBorder(1)
+    desc:setCornerRadius(3, 0, 0, 3)
+    desc:setCenter(0.5 * (subCol2 + subCol3), subCenter1 + 1)
+    self.m1SubGroup:addChild(desc)
+
+    self.m1ModButton = app.SubButton("empty", 1)
+    self.m1SubGroup:addChild(self.m1ModButton)
+    self.m1SubGroup:addChild(app.SubButton("gain", 2))
+    self.m1SubGroup:addChild(app.SubButton("bias", 3))
+
+    self.m1FocusedReadout = self.m1Bias
+    self.m1GainEncoderState = Encoder.Coarse
+
+    -- Subscribe to the scene-cv branch's contentChanged so the
+    -- mod button label + scope outlet stay in sync with what
+    -- the user has wired into the branch.
+    if self.chain.getSceneCVBranch then
+      self._sceneCVBranch = self.chain:getSceneCVBranch()
+      if self._sceneCVBranch then
+        self._sceneCVBranch:subscribe("contentChanged", self)
+      end
+    end
+  end
 
   -- M2..M6: SlotControl widgets. Each renders one scene's name +
   -- A/B chip overlay + delta count. Performance just tells each
@@ -87,17 +192,22 @@ function Performance:init(sceneView)
   self.cursorBox:setBorderColor(app.WHITE)
   self:addMainGraphic(self.cursorBox)
 
-  -- Sub display: scene context for the currently selected ply.
+  -- Slot sub-display: scene context for an M2..M6 cursor. Lives
+  -- in its own container so we can flip between this and the M1
+  -- GainBias-style display by show/hide on the containers.
+  self.slotSubGroup = app.Graphic(0, 0, 128, 64)
+  self:addSubGraphic(self.slotSubGroup)
+
   self.subStatus = app.Label("", kFontSub)
   self.subStatus:setPosition(2, app.GRID4_LINE1)
   self.subStatus:setJustification(app.justifyLeft)
-  self:addSubGraphic(self.subStatus)
+  self.slotSubGroup:addChild(self.subStatus)
 
   self.subHint = app.Label("", kFontMain)
   self.subHint:setPosition(2, app.GRID4_LINE3)
   self.subHint:setJustification(app.justifyLeft)
   self.subHint:setForegroundColor(app.GRAY7)
-  self:addSubGraphic(self.subHint)
+  self.slotSubGroup:addChild(self.subHint)
 
   self:_refresh()
 end
@@ -115,10 +225,9 @@ end
 function Performance:_refresh()
   local sceneCount = self.sceneView:getSceneCount()
 
-  -- M1 CV input widget text. Falls back to "CV in" when no
-  -- source is bound.
-  local cvRef = self.sceneView:getCvInput()
-  self.cvPanel:setText(cvRef or "CV in")
+  -- M1 fader is bound directly to the GainBias bias parameter;
+  -- nothing to refresh here -- the fader re-reads target() each
+  -- frame from its own draw path.
 
   -- M2..M6 slots. SlotControl handles name + A/B chip + delta
   -- count rendering; we just hand it the scene + crossfader role.
@@ -156,29 +265,92 @@ end
 function Performance:_refreshSub()
   local col = self.cursorCol
   if col == 1 then
-    self.subStatus:setText("CV input")
-    local cv = self.sceneView:getCvInput()
-    self.subHint:setText(cv and ("source: " .. cv) or "no source bound")
+    -- M1 = GainBias-style sub display (gain readout + bias
+    -- readout + branch mod button + scope). Show that, hide
+    -- the slot context labels.
+    if self.m1SubGroup then self.m1SubGroup:show() end
+    if self.slotSubGroup then self.slotSubGroup:hide() end
+    return
+  end
+
+  -- M2..M6: scene context labels. Hide M1 sub display.
+  if self.m1SubGroup then self.m1SubGroup:hide() end
+  if self.slotSubGroup then self.slotSubGroup:show() end
+
+  local sceneIdx = col - 1
+  local scene = self.sceneView:getScene(sceneIdx)
+  if scene then
+    self.subStatus:setText(string.format("scene %d: %s", sceneIdx, scene:getName()))
+    local a = self.sceneView:getCrossfaderA()
+    local b = self.sceneView:getCrossfaderB()
+    local chip = ""
+    if a == sceneIdx then chip = chip .. " A" end
+    if b == sceneIdx then chip = chip .. " B" end
+    local deltas = scene:countDeltas()
+    self.subHint:setText(string.format("%dd%s", deltas, chip))
+  elseif col == self:_plusCol() then
+    self.subStatus:setText("new scene")
+    self.subHint:setText("tap M to create")
   else
-    local sceneIdx = col - 1
-    local scene = self.sceneView:getScene(sceneIdx)
-    if scene then
-      self.subStatus:setText(string.format("scene %d: %s", sceneIdx, scene:getName()))
-      local a = self.sceneView:getCrossfaderA()
-      local b = self.sceneView:getCrossfaderB()
-      local chip = ""
-      if a == sceneIdx then chip = chip .. " A" end
-      if b == sceneIdx then chip = chip .. " B" end
-      local deltas = scene:countDeltas()
-      self.subHint:setText(string.format("%dd%s", deltas, chip))
-    elseif col == self:_plusCol() then
-      self.subStatus:setText("new scene")
-      self.subHint:setText("tap M to create")
-    else
-      self.subStatus:setText("")
-      self.subHint:setText("")
+    self.subStatus:setText("")
+    self.subHint:setText("")
+  end
+end
+
+-- Signal callback: branch contents changed (user inserted /
+-- removed a unit in the scene-cv branch). Update the mod-button
+-- label and the scope outlet so the user sees what's wired.
+function Performance:contentChanged(chain)
+  if chain ~= self._sceneCVBranch then return end
+  if self.m1ModButton then
+    self.m1ModButton:setText(chain:mnemonic())
+  end
+  if self.m1Scope then
+    self.m1Scope:watchOutlet(chain:getMonitoringOutput(1))
+  end
+end
+
+-- Focus one of the M1 readouts so the encoder writes to it.
+function Performance:_setM1FocusedReadout(readout)
+  if readout then readout:save() end
+  self.m1FocusedReadout = readout
+end
+
+-- Decimal keyboard for direct value entry on the gain readout.
+function Performance:_m1GainSet()
+  local Decimal = require "Keyboard.Decimal"
+  local kb = Decimal {
+    message = "CV gain into crossfader.",
+    commitMessage = "CV gain updated.",
+    initialValue = self.m1Gain:getValueInUnits()
+  }
+  local task = function(value)
+    if value then
+      self.m1Gain:save()
+      self.m1Gain:setValueInUnits(value)
     end
   end
+  kb:subscribe("done", task)
+  kb:subscribe("commit", task)
+  kb:show()
+end
+
+function Performance:_m1BiasSet()
+  local Decimal = require "Keyboard.Decimal"
+  local kb = Decimal {
+    message = "Crossfader weight bias.",
+    commitMessage = "X-fade bias updated.",
+    initialValue = self.m1Bias:getValueInUnits()
+  }
+  local task = function(value)
+    if value then
+      self.m1Bias:save()
+      self.m1Bias:setValueInUnits(value)
+    end
+  end
+  kb:subscribe("done", task)
+  kb:subscribe("commit", task)
+  kb:show()
 end
 
 -- The rightmost selectable ply: M1 always; M(1+sceneCount) for
@@ -196,6 +368,20 @@ end
 -- ---------------------------------------------------------------------------
 
 function Performance:encoder(change, shifted)
+  -- Cursor on M1: encoder drives the focused readout (gain or
+  -- bias, swapped via S2/S3). Dedicated to readout edit while
+  -- focused here; user navigates away by tapping M2..M6.
+  if self.cursorCol == 1 then
+    if self.m1FocusedReadout then
+      local fine = false
+      if self.m1FocusedReadout == self.m1Gain then
+        fine = (self.m1GainEncoderState == Encoder.Fine)
+      end
+      self.m1FocusedReadout:encoder(change, shifted, fine)
+    end
+    return true
+  end
+  -- Cursor on a slot ply: encoder navigates between M-keys.
   self.encoderAccum = self.encoderAccum + change
   local moved = false
   local maxCol = self:_maxSelectableCol()
@@ -283,12 +469,44 @@ end
 --                      slot; S3 enters Authoring view (stubbed
 --                      pending phase 3).
 function Performance:subReleased(i, shifted)
-  if shifted then return false end
   local col = self.cursorCol
   if col == 1 then
-    if i == 3 then return self:_openCvPicker() end
+    -- M1 = GainBias-style crossfader weight control.
+    -- shifted: S2 / S3 -> decimal keyboard for direct gain / bias
+    -- entry (like the OG GainBias unit control). S1 unused when
+    -- shifted.
+    if shifted then
+      if i == 2 then self:_m1GainSet(); return true
+      elseif i == 3 then self:_m1BiasSet(); return true
+      end
+      return false
+    end
+    -- Unshifted:
+    --   S1 dives into the scene-cv branch.
+    --   S2 focuses the gain readout (encoder writes to gain). If
+    --       already focused on gain, opens decimal keyboard for
+    --       direct entry (matches GainBias UX).
+    --   S3 focuses the bias readout, same toggle.
+    if i == 1 then return self:_diveSceneCV() end
+    if i == 2 then
+      if self.m1FocusedReadout == self.m1Gain then
+        self:_m1GainSet()
+      else
+        self:_setM1FocusedReadout(self.m1Gain)
+      end
+      return true
+    end
+    if i == 3 then
+      if self.m1FocusedReadout == self.m1Bias then
+        self:_m1BiasSet()
+      else
+        self:_setM1FocusedReadout(self.m1Bias)
+      end
+      return true
+    end
     return false
   end
+  if shifted then return false end
   -- Slot plies.
   local sceneIdx = col - 1
   local scene = self.sceneView:getScene(sceneIdx)
@@ -303,17 +521,15 @@ function Performance:subReleased(i, shifted)
   return false
 end
 
-function Performance:_openCvPicker()
-  local SourceChooser = require "Source.Chooser"
-  local chooser = self.chain and SourceChooser(self.chain) or SourceChooser()
-  chooser:subscribe("choose", function(src)
-    -- Source:serialize returns a string for Externals (the CV
-    -- jack name) and a richer table for Internal sources. Either
-    -- form round-trips through SceneView.serialize.
-    self.sceneView:setCvInput(src and src:serialize() or nil)
-    self:_refresh()
-  end)
-  chooser:show()
+-- Show the chain's scene-cv branch window (where the user
+-- inserts CV-source units that feed the GainBias.In). Mirrors
+-- the GainBias-control S1 dive UX in regular unit views.
+function Performance:_diveSceneCV()
+  if not (self.chain and self.chain.getSceneCVBranch) then return true end
+  local branch = self.chain:getSceneCVBranch()
+  if branch and branch.show then
+    branch:show()
+  end
   return true
 end
 

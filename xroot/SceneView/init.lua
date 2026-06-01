@@ -28,9 +28,13 @@ function SceneView:init(chain)
   self:setClassName("SceneView")
   self.chain        = chain
   self.scenes       = {}
-  self.cvInput      = nil               -- serialized source ref string
   self.crossfaderA  = kEndpointBase     -- 0 = base, else scene index
   self.crossfaderB  = kEndpointBase
+  -- Phase 4 removed the SceneView-stored CV source ref: the CV
+  -- input now lives in the chain's scene-cv branch (user inserts
+  -- units there via M1 dive in Performance), serialized with the
+  -- chain's normal audio-graph state. Old saves' cvInput field
+  -- is ignored on load.
 end
 
 function SceneView:getSceneCount()
@@ -91,13 +95,9 @@ end
 function SceneView:getCrossfaderA() return self.crossfaderA end
 function SceneView:getCrossfaderB() return self.crossfaderB end
 
-function SceneView:setCvInput(sourceRef)
-  self.cvInput = sourceRef
-end
-
-function SceneView:getCvInput()
-  return self.cvInput
-end
+-- setCvInput / getCvInput removed in phase 4: CV source now lives
+-- in the chain's scene-cv branch, accessed via Chain.Root:
+-- getSceneCVBranch and the user's M1 dive in Performance view.
 
 -- Lazy-instantiate the Performance view Window the user lands in
 -- when scene mode is on and the panel hold switch fires. Created
@@ -133,7 +133,6 @@ function SceneView:serialize()
     schemaVersion = 1,
     sceneCount    = #self.scenes,
     scenes        = scenes,
-    cvInput       = self.cvInput,
     crossfaderA   = self.crossfaderA,
     crossfaderB   = self.crossfaderB,
   }
@@ -142,9 +141,9 @@ end
 function SceneView:deserialize(t)
   if t == nil then return end
   -- Reset to a clean state so a partial restore doesn't leave
-  -- stale scenes from a prior load.
+  -- stale scenes from a prior load. t.cvInput on older saves is
+  -- intentionally ignored (phase 4 moved CV to the chain branch).
   self.scenes      = {}
-  self.cvInput     = t.cvInput     or nil
   self.crossfaderA = t.crossfaderA or kEndpointBase
   self.crossfaderB = t.crossfaderB or kEndpointBase
   if t.scenes then
