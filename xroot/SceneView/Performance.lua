@@ -164,15 +164,12 @@ function Performance:init(sceneView)
     self.m1SubGroup:addChild(app.SubButton("gain", 2))
     self.m1SubGroup:addChild(app.SubButton("bias", 3))
 
-    self.m1FocusedReadout = self.m1Bias
     self.m1GainEncoderState = Encoder.Coarse
-    -- Encoder cursor (bouncing caret) follows the focused
-    -- readout. setSubCursorController will fire when the
-    -- Performance window is the focused widget for "encoder";
-    -- since Performance never grabs a child widget for focus,
-    -- getFocusedWidget("encoder") returns Performance itself, so
-    -- the Performance fields drive both the main and sub cursors.
-    self:setSubCursorController(self.m1Bias)
+    self.encoderState       = Encoder.Coarse
+    -- Initial focus via the helper so the readout's save() fires
+    -- (needed so cancelReleased's restore() has a sane value to
+    -- snap back to). Also sets the sub cursor controller.
+    self:_setM1FocusedReadout(self.m1Bias)
 
     -- Subscribe to the scene-cv branch's contentChanged so the
     -- mod button label + scope outlet stay in sync with what
@@ -221,24 +218,16 @@ function Performance:init(sceneView)
   self.subStatus:setJustification(app.justifyLeft)
   self.slotSubGroup:addChild(self.subStatus)
 
-  -- Delta list below: small pool of labels, populated per
-  -- refresh from the scene's deltas. Limited to a fixed number
-  -- of lines so the layout stays predictable; surplus deltas
-  -- get an ellipsis row.
-  self.deltaListLabels = {}
-  local kDeltaLineY = {
-    app.GRID4_LINE2,
-    app.GRID4_LINE3,
-    app.GRID4_LINE4,
-  }
-  for i, y in ipairs(kDeltaLineY) do
-    local label = app.Label("", kFontMain)
-    label:setPosition(2, y)
-    label:setJustification(app.justifyLeft)
-    label:setForegroundColor(app.GRAY7)
-    self.slotSubGroup:addChild(label)
-    self.deltaListLabels[i] = label
-  end
+  -- Slot S-button labels so the user can see what S1/S2/S3 do
+  -- on a scene slot before pressing them. setText repopulates
+  -- per refresh (chip text per slot's current A/B role; "edit"
+  -- always on S3).
+  self.slotS1 = app.SubButton("", 1)
+  self.slotS2 = app.SubButton("", 2)
+  self.slotS3 = app.SubButton("", 3)
+  self.slotSubGroup:addChild(self.slotS1)
+  self.slotSubGroup:addChild(self.slotS2)
+  self.slotSubGroup:addChild(self.slotS3)
 
   -- Main encoder cursor starts on the M1 bias fader so the
   -- bouncing caret is visible from the moment the user lands in
@@ -337,49 +326,29 @@ function Performance:_refreshSub()
     end
     self.subStatus:setText(string.format("scene %d: %s%s",
                                           sceneIdx, scene:getName(), chip))
-    self:_populateDeltaList(scene)
-  elseif col == self:_plusCol() then
-    self.subStatus:setText("new scene")
-    self:_clearDeltaList()
-    if self.deltaListLabels[1] then
-      self.deltaListLabels[1]:setText("tap M to create")
+    -- S1: toggle A on this slot. Label flips between "asgn A"
+    -- (will assign) and "*A" (already A; pressing unassigns).
+    if a == sceneIdx then
+      self.slotS1:setText("*A")
+    else
+      self.slotS1:setText("asgn A")
     end
+    if b == sceneIdx then
+      self.slotS2:setText("*B")
+    else
+      self.slotS2:setText("asgn B")
+    end
+    self.slotS3:setText("edit")
+  elseif col == self:_plusCol() then
+    self.subStatus:setText("new scene -- tap M to create")
+    self.slotS1:setText("")
+    self.slotS2:setText("")
+    self.slotS3:setText("")
   else
     self.subStatus:setText("")
-    self:_clearDeltaList()
-  end
-end
-
--- List the controls that have a stored delta in this scene as
--- "<UnitTitle>.<ctrlId>" rows. Truncates with "..." when there
--- are more deltas than label rows.
-function Performance:_populateDeltaList(scene)
-  self:_clearDeltaList()
-  if not (scene and scene.deltas and self.chain) then return end
-
-  local maxRows = #self.deltaListLabels
-  local row = 0
-  for unitKey, perUnit in pairs(scene.deltas) do
-    local unit = self.chain.findByInstanceKey
-                 and self.chain:findByInstanceKey(unitKey)
-    local unitName = (unit and (unit.title or unit:getInstanceName()))
-                     or "?"
-    for ctrlId, _ in pairs(perUnit) do
-      row = row + 1
-      if row > maxRows then
-        -- Mark the last visible row as ellipsis and bail.
-        self.deltaListLabels[maxRows]:setText("...")
-        return
-      end
-      self.deltaListLabels[row]:setText(string.format("%s.%s",
-                                                       unitName, ctrlId))
-    end
-  end
-end
-
-function Performance:_clearDeltaList()
-  for _, label in ipairs(self.deltaListLabels) do
-    label:setText("")
+    self.slotS1:setText("")
+    self.slotS2:setText("")
+    self.slotS3:setText("")
   end
 end
 
@@ -424,6 +393,47 @@ function Performance:_m1GainSet()
   kb:show()
 end
 
+-- Standard unit-control keybinds for the focused M1 readout.
+-- zero -> snap to 0.0. cancel -> restore the value the readout
+-- saved when focus last entered it.
+function Performance:zeroPressed()
+  if self.cursorCol == 1 and self.m1FocusedReadout then
+    self.m1FocusedReadout:zero()
+    return true
+  end
+end
+
+function Performance:cancelReleased(shifted)
+  if shifted then return false end
+  if self.cursorCol == 1 and self.m1FocusedReadout then
+    self.m1FocusedReadout:restore()
+    return true
+  end
+end
+
+-- DIAL_PRESS toggles fine / coarse encoder on the focused readout
+-- (same as standard GainBias / Fader controls). Bias readout
+-- uses self.encoderState; gain readout has its own state.
+function Performance:dialPressed(shifted)
+  if self.cursorCol ~= 1 then return end
+  if self.m1FocusedReadout == self.m1Gain then
+    if self.m1GainEncoderState == Encoder.Coarse then
+      self.m1GainEncoderState = Encoder.Fine
+    else
+      self.m1GainEncoderState = Encoder.Coarse
+    end
+    Encoder.set(self.m1GainEncoderState)
+  else
+    if self.encoderState == Encoder.Coarse then
+      self.encoderState = Encoder.Fine
+    else
+      self.encoderState = Encoder.Coarse
+    end
+    Encoder.set(self.encoderState)
+  end
+  return true
+end
+
 function Performance:_m1BiasSet()
   local Decimal = require "Keyboard.Decimal"
   local kb = Decimal {
@@ -462,9 +472,11 @@ function Performance:encoder(change, shifted)
   -- focused here; user navigates away by tapping M2..M6.
   if self.cursorCol == 1 then
     if self.m1FocusedReadout then
-      local fine = false
+      local fine
       if self.m1FocusedReadout == self.m1Gain then
         fine = (self.m1GainEncoderState == Encoder.Fine)
+      else
+        fine = (self.encoderState == Encoder.Fine)
       end
       self.m1FocusedReadout:encoder(change, shifted, fine)
     end
@@ -595,15 +607,23 @@ function Performance:subReleased(i, shifted)
     end
     return false
   end
-  if shifted then return false end
   -- Slot plies.
   local sceneIdx = col - 1
   local scene = self.sceneView:getScene(sceneIdx)
   if scene == nil then return false end
+
+  -- Shifted: S2 -> rename (was previously the unshifted role).
+  -- No other shifted slot bindings yet.
+  if shifted then
+    if i == 2 then return self:_renameScene(sceneIdx, scene) end
+    return false
+  end
+
+  -- Unshifted: S1 toggle A, S2 toggle B, S3 dive into authoring.
   if i == 1 then
-    return self:_cycleCrossfaderRole(sceneIdx)
+    return self:_toggleEndpoint(sceneIdx, "A")
   elseif i == 2 then
-    return self:_renameScene(sceneIdx, scene)
+    return self:_toggleEndpoint(sceneIdx, "B")
   elseif i == 3 then
     return self:_enterAuthoring(sceneIdx)
   end
@@ -622,27 +642,36 @@ function Performance:_diveSceneCV()
   return true
 end
 
--- Cycle the slot's crossfader role through off -> A -> B -> off.
--- If sceneIdx is already assigned to the OTHER endpoint, the
--- cycle skips over that side (e.g. if it's currently B and B is
--- taken, the next tap unsets it instead of trying to claim A
--- when A is also taken). Slot-takes-precedence: if another slot
--- currently holds A and this slot grabs A, the other slot loses
--- its role (handled by SceneView:setCrossfaderA enforcing
--- one-slot-per-endpoint via the assignment itself).
-function Performance:_cycleCrossfaderRole(sceneIdx)
+-- Toggle a slot's binding to endpoint A or B. Idempotent: if
+-- the slot is already that endpoint, the press unassigns. If
+-- another slot currently holds the endpoint, that slot loses
+-- its role (SceneView:setCrossfader{A,B} enforces one slot per
+-- endpoint via the assignment itself). If the slot was bound
+-- to the OTHER endpoint, the press transfers it to the
+-- requested endpoint.
+function Performance:_toggleEndpoint(sceneIdx, role)
   local a = self.sceneView:getCrossfaderA()
   local b = self.sceneView:getCrossfaderB()
-  if a == sceneIdx then
-    -- Currently A -> become B (displaces any existing B).
-    self.sceneView:setCrossfaderA(0)
-    self.sceneView:setCrossfaderB(sceneIdx)
-  elseif b == sceneIdx then
-    -- Currently B -> unassign.
-    self.sceneView:setCrossfaderB(0)
-  else
-    -- Currently off -> become A (displaces any existing A).
-    self.sceneView:setCrossfaderA(sceneIdx)
+  if role == "A" then
+    if a == sceneIdx then
+      self.sceneView:setCrossfaderA(0)
+    else
+      if b == sceneIdx then
+        -- Transferring: release B first so we don't end up at
+        -- both endpoints, which the setters guard against.
+        self.sceneView:setCrossfaderB(0)
+      end
+      self.sceneView:setCrossfaderA(sceneIdx)
+    end
+  else  -- B
+    if b == sceneIdx then
+      self.sceneView:setCrossfaderB(0)
+    else
+      if a == sceneIdx then
+        self.sceneView:setCrossfaderA(0)
+      end
+      self.sceneView:setCrossfaderB(sceneIdx)
+    end
   end
   self:_rebuildSceneMorph()
   self:_refresh()
