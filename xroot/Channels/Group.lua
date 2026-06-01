@@ -116,6 +116,13 @@ end
 
 function ChannelGroup:setMode(mode)
   if mode == self.mode then
+    -- Special case: pressing HOLD while inside scene authoring
+    -- returns to the Performance view (a "back out one level"
+    -- gesture). Without this the press is a no-op and the user
+    -- has no panel-button way back from authoring.
+    if mode == "hold" and self.chain.activeAuthoringScene then
+      self:leaveSceneAuthoring()
+    end
     return
   end
   if mode == "edit" then

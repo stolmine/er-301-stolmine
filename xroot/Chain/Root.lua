@@ -129,6 +129,9 @@ function Root:enterSceneAuthoring(sceneView, sceneIdx)
   self.activeAuthoringScene = scene
   self.activeAuthoringIdx   = sceneIdx
   self._sceneTargetParams   = {}
+  -- Header indicator so the user knows they're editing scene N,
+  -- not making live audio-path changes. Cleared on exit.
+  self:setSubTitle("editing " .. (scene.name or string.format("S%d", sceneIdx)))
 
   for i = 1, self:length() do
     local unit = self:getUnit(i)
@@ -179,6 +182,7 @@ function Root:exitSceneAuthoring()
   self.activeAuthoringScene = nil
   self.activeAuthoringIdx   = nil
   self._sceneTargetParams   = nil
+  self:clearSubTitle()
 end
 
 function Root:enterScopeView()
