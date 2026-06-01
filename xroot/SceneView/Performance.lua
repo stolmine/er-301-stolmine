@@ -380,12 +380,15 @@ function Performance:_refreshSub()
     -- "set gain"/"set bias" (decimal-keyboard entry).
     if self.m1SubGroup then self.m1SubGroup:show() end
     if self.slotSubGroup then self.slotSubGroup:hide() end
-    if self.m1S2 then
-      self.m1S2:setText(self.shiftModeByCol[1] and "set" or "gain")
-    end
-    if self.m1S3 then
-      self.m1S3:setText(self.shiftModeByCol[1] and "set" or "bias")
-    end
+    -- M1 SubButton labels stay "gain" / "bias" regardless of
+    -- shift mode -- they name the readout the button focuses,
+    -- and that semantic is the same whether the user is in
+    -- shift-mode (where a tap opens the numeric keyboard) or
+    -- not (where a tap focuses the readout for encoder edit,
+    -- and a second tap opens the keyboard). This matches stock
+    -- GainBias unit-control labeling.
+    if self.m1S2 then self.m1S2:setText("gain") end
+    if self.m1S3 then self.m1S3:setText("bias") end
     return
   end
 
@@ -494,12 +497,18 @@ end
 
 function Performance:shiftReleased()
   if self.shiftHeld and not self.shiftUsed then
-    -- Per-ply (habitat decision 7 mirror): toggle only the
-    -- current cursorCol's mode. Other plies retain their
-    -- state for when the user navigates to them.
+    -- Per-ply toggle (habitat decision 7 mirror). M1 is
+    -- exempted: its labels and S-key actions don't change
+    -- between modes, so toggling it would silently change
+    -- behavior (S2/S3 going straight to keyboard instead of
+    -- focus-then-keyboard) with no visual feedback. Only
+    -- slot plies have a real second mode (rename/delete vs
+    -- asgn A/B/edit), so only they participate.
     local col = self.cursorCol
-    self.shiftModeByCol[col] = not self.shiftModeByCol[col]
-    self:_refreshSub()
+    if col ~= 1 then
+      self.shiftModeByCol[col] = not self.shiftModeByCol[col]
+      self:_refreshSub()
+    end
   end
   self.shiftHeld = false
   return true
@@ -717,7 +726,15 @@ function Performance:subReleased(i, shifted)
   -- panel-key state (`shifted` arg) and the persistent tap-toggle
   -- (`shiftMode`). Both routes lead to the same shifted bindings
   -- so the user can use whichever feels natural.
-  local effShifted = shifted or self.shiftModeByCol[self.cursorCol]
+  -- effShifted: OR the panel-key state with the persistent
+  -- per-ply shift mode. M1 (cursorCol 1) is never put into
+  -- shift mode by shiftReleased (see comment there), so its
+  -- effShifted is purely the panel `shifted` arg. Slots can
+  -- be in either via the toggle.
+  local effShifted = shifted
+  if self.cursorCol ~= 1 then
+    effShifted = effShifted or self.shiftModeByCol[self.cursorCol]
+  end
   local col = self.cursorCol
   if col == 1 then
     -- M1 = GainBias-style crossfader weight control.
