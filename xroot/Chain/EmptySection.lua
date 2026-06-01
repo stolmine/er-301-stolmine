@@ -36,7 +36,25 @@ function EmptyControl:init(msg, width)
   }
 end
 
+-- Returns true (and shows a flash) when the chain is in scene
+-- authoring. Mirrors the gate in InsertControl -- insert / paste
+-- both mutate patch structure, which is locked during authoring.
+-- The empty-section path is a separate file from InsertControl
+-- because empty plies have their own control type, so the gate
+-- has to be duplicated here.
+function EmptyControl:_lockedDuringSceneAuthoring()
+  local chain = self:getWindow()
+  if chain and chain.getRootChain then
+    local root = chain:getRootChain()
+    if root and root.rejectSceneAuthoringEdit then
+      return root:rejectSceneAuthoringEdit()
+    end
+  end
+  return false
+end
+
 function EmptyControl:activateChooser()
+  if self:_lockedDuringSceneAuthoring() then return end
   local chooser = UnitChooser {
     goal = "insert",
     chain = self:getWindow()
@@ -60,6 +78,7 @@ function EmptyControl:subReleased(i, shifted)
   end
   if i == 1 then
     if Clipboard.hasData(1) then
+      if self:_lockedDuringSceneAuthoring() then return true end
       local chain = self:getWindow()
       if chain then
         Clipboard.paste(chain, nil, 1)

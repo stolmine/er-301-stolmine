@@ -353,13 +353,16 @@ function Performance:_refresh()
   -- always shows since slot plies have no top-level control to
   -- focus into.
   if self.cursorCol == 1 and self.m1FocusedReadout then
-    -- Editing the M1 bias / gain readout: ▶ at left of readout
-    -- (the readout's own cursorState), no nav ▼ -- main controller
-    -- becomes the noCaret placeholder (show=false) so the caret
-    -- draws aren't visible on the main display.
-    self:setMainCursorController(self.noCaret)
+    -- Editing M1: ▶ on the main display at the fader (the fader
+    -- maintains its own cursorRight mCursorState at left of the
+    -- bias value), and ▶ on the sub display at the focused
+    -- readout. Matches the standard GainBias unit-control
+    -- protocol where focusing the readout shows the bouncing
+    -- caret on both displays simultaneously.
+    self:setMainCursorController(self.cvFader)
     self:setSubCursorController(self.m1FocusedReadout)
   else
+    -- Navigation only: ▼ above the current ply, no sub caret.
     self:setMainCursorController(self.navCaret)
     self:setSubCursorController(nil)
   end
@@ -649,13 +652,22 @@ function Performance:mainReleased(i, shifted)
     self:_refresh()
     return true
   end
-  -- Tap on M1: move cursor + auto-focus the bias readout (so the
-  -- user can immediately turn the encoder to set the crossfader
-  -- weight). Tap on an occupied slot: just move cursor.
-  -- Past-the-end (no scene, not the "+" ply): no-op.
+  -- Tap on M1. Three states cycled by repeated taps:
+  --   1. cursor elsewhere -> move cursor to M1, no focus yet
+  --      (so the user can preview before committing to edit).
+  --   2. cursor on M1 + no focus -> focus the bias readout
+  --      (encoder ready, ▶ caret shows on main and sub).
+  --   3. cursor on M1 + focused -> unfocus (back to nav state).
+  -- This is the standard chain-edit "tap to focus, tap again to
+  -- unfocus" gesture but adapted to Performance's M-key model.
   if i == 1 then
-    self.cursorCol = 1
-    if self.m1Bias then self:_setM1FocusedReadout(self.m1Bias) end
+    if self.cursorCol ~= 1 then
+      self.cursorCol = 1
+    elseif self.m1FocusedReadout then
+      self:_setM1FocusedReadout(nil)
+    elseif self.m1Bias then
+      self:_setM1FocusedReadout(self.m1Bias)
+    end
     self:_refresh()
     return true
   end
