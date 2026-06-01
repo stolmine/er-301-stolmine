@@ -1,333 +1,386 @@
-# Hold-Mode Scenes — Phase 4: Engine Apply (Crossfader)
+# Hold-Mode Scenes — Phase 4: Engine Apply (CV Crossfader)
 
-Status: planning. Branch: `feature/hold-mode-scenes`. Predecessor:
-phase 3c (commit `7b02785`) + Fader brightness/order (`d2b438a`).
-Successor: phase 4 lands the audio side; phase 5 is final polish,
-3d is the pin-icon overlay.
+Status: planning (revised after design Q&A). Branch: `feature/hold-
+mode-scenes`. Predecessor: phase 3c (commit `7b02785`) + Fader
+brightness (`d2b438a`). Successor: phase 4 lands audio; phase 5
+final polish; 3d is the pin-icon overlay.
 
 ## Why this phase exists
 
-Phase 3 stores scene deltas in a flat map keyed by unit instance
-key + control id. Authoring captures them; the Performance view
-displays slot summaries. Nothing yet drives audio with those
-deltas. A scene is currently inert storage.
+Phase 3 stores scene deltas. Phase 4 wires them to audio: a single
+ParamSetMorph per Chain.Root interpolates live audio params between
+sceneA and sceneB endpoints. CV (or manual encoder, or any mod
+source the user wires up) drives the weight.
 
-Phase 4 wires a CV-driven crossfader to interpolate live audio
-parameters between two endpoints (scene A, scene B, or base) at
-audio-rate resolution. After phase 4, plugging a CV (or running an
-internal LFO) into the M1 picker source crossfades between the two
-slots assigned to the A and B endpoints; deltas in those slots
-move the actual audio path.
+## Design decisions (locked)
 
-## Engine primitive
+Confirmed via user Q&A:
 
-The OG hold mode uses `od::ParamSetMorph` (existing C++ class):
-holds a list of `(param, startValue, endValue)` items + a weight
-`mWeight` Parameter. `apply()` computes `w1*start + w2*end` and
-`softSet`s each param. `add(param, endValue)` snapshots
-`startValue = param->target()` at add-time -- one endpoint is
-"wherever the param is now."
+1. **Weight = linear 0..1.** CV value clamped, no curve. Curves
+   land in phase 5 if useful.
+2. **Weight source = GainBias-style control (NOT bare CV inlet).**
+   M1 slot becomes a standard GainBias control: bias = manual
+   weight (encoder), gain = CV attenuator, mod branch = user-
+   extensible. User drops whatever they want in the sub-chain.
+3. **Audio follows the encoder live during authoring.** Editing
+   scene A's controls while the crossfader is full A produces
+   audible changes immediately. Requires morpher items to read
+   endpoint values live from Parameters, not cached floats.
+4. **Base = recaptured every engage.** Snapshot from each audio
+   param's `target()` at engage time. Catches the user's user-mode
+   final state without per-edit hooks.
 
-That snapshot semantic is wrong for an A/B crossfader, where both
-endpoints are explicit (scene A's stored delta vs scene B's). Two
-options for getting (start, end) explicit:
+## Architecture overview
 
-**(a) Extend ParamSetMorph in place.** Add a 3-arg
-`add(param, startValue, endValue)` overload; existing 2-arg call
-unchanged so PinView keeps working.
+Three things land:
 
-**(b) New class `SceneMorph` (or similar).** Modelled on
-ParamSetMorph but with the 3-arg add as the only add, plus a
-built-in CV inlet (see below). Leaves ParamSetMorph alone.
+- **`ParamSetMorph` extension.** A new Item variant takes
+  `(targetParam, startParam, endParam)` — three `Parameter*`s.
+  `apply()` reads `startParam->target()` and `endParam->target()`
+  every frame, computes `w1*start + w2*end`, softSets target. Old
+  2-arg path (start = snapshot at add-time) unchanged for PinView.
+- **Persistent scene Parameters.** Each Scene owns
+  `params[unitKey][ctrlId] = app.Parameter` (sparse). Created
+  lazily on first delta; survives scene mode entry/exit. The same
+  Parameter is what authoring's encoder writes to AND what the
+  morpher reads for its endpoint. No copy step, no rebuild on
+  authoring transition.
+- **GainBias-driven weight.** Chain.Root owns an `app.GainBias`
+  + mod branch ("scene-cv"). Its `Out` feeds the morpher inlet
+  (audio rate). M1 slot in Performance becomes a GainBias
+  ViewControl bound to this object. Bias = manual weight; gain
+  attenuates whatever the user wires into the mod branch.
 
-(a) is the minimum-churn path and is what this plan goes with. The
-2-arg add stays; we just add a 3-arg overload that doesn't snapshot.
+## Persistent scene Parameters
 
-## CV → weight wiring
+Replaces Phase 3's float-only delta map for in-memory state.
+Serialization stays float-based for forward/backward compat:
 
-`ParamSetMorph::process()` is currently a no-op. The PinView morph
-runs via `apply()` called from `MorphFader::draw` (UI thread, frame
-rate) -- adequate for a hand-driven knob, not for CV that may need
-audio-rate response.
+```lua
+-- Scene.lua
+function Scene:init(args)
+  ...
+  self.params = {}   -- params[unitKey][ctrlId] = app.Parameter
+  self.deltas = {}   -- floats; only used for serialize/deserialize
+                     -- and as the source of truth before params exist
+end
 
-For scene crossfading we want audio-rate response so a fast CV
-sweep doesn't audibly granulate. Three approaches:
+function Scene:getOrCreateParam(unitKey, ctrlId, baseValue)
+  local u = self.params[unitKey] or {}
+  self.params[unitKey] = u
+  if u[ctrlId] == nil then
+    local stored = self.deltas[unitKey] and self.deltas[unitKey][ctrlId]
+    u[ctrlId] = app.Parameter(ctrlId .. "_" .. self.name,
+                              stored or baseValue)
+  end
+  return u[ctrlId]
+end
 
-1. **Inlet on the morpher.** Add an Inlet to ParamSetMorph;
-   `process()` reads `inlet[N-1]` (or averaged), softSets `mWeight`,
-   calls `apply()`. CV is connected via the standard chain wiring
-   (Lua-side: `AudioThread::connect(cvOutlet, &morpher->mInlet,
-   morpher)`). Drives `mWeight` per audio frame.
+function Scene:serialize()
+  -- Walk params, copy target() into deltas, then serialize deltas.
+  for unitKey, ctrls in pairs(self.params) do
+    self.deltas[unitKey] = self.deltas[unitKey] or {}
+    for ctrlId, param in pairs(ctrls) do
+      self.deltas[unitKey][ctrlId] = param:target()
+    end
+  end
+  return { ..., deltas = self.deltas }
+end
 
-2. **Separate writer object.** A small dedicated Object that takes
-   an inlet and writes its samples into a target Parameter's mTarget
-   via softSet. CV → writer → morpher.mWeight. More objects, more
-   wiring, but doesn't change ParamSetMorph behavior.
+function Scene:deserialize(t)
+  -- Just load deltas; Parameters created lazily on demand.
+  self.deltas = t.deltas or {}
+  self.params = {}
+end
+```
 
-3. **No CV at all.** Frame-rate only, no inlet, user controls
-   weight via a Lua-side tick reading the picked source's value. UI
-   thread runs at 60fps -- fine for slow LFO modulations, audibly
-   coarse for fast sweeps.
+Phase 3 authoring (Chain.Root.enterSceneAuthoring) now uses
+`scene:getOrCreateParam(unitKey, ctrlId, baseVal)` instead of
+building an ephemeral `app.Parameter`. Encoder writes go to that
+persistent param; on authoring exit there's no value capture step
+— the Parameter holds the right value.
 
-Going with **(1)**: smallest user-visible code change, cleanest CV
-path, and the morpher is already an Object so it slots into the
-existing graph machinery. Falls back gracefully when no CV is
-picked: if `mInlet` has no connection, `process()` keeps
-`mWeight` at the last hardSet value (which we set to 0 = full-A
-when nothing is wired).
+## Base snapshot
 
-Also have `process()` call `apply()` each frame regardless of
-weight change. Cheap; the existing `mUpdateNeeded` short-circuit
-inside apply still skips the param softSets when nothing moved.
+Chain.Root holds `_sceneBaseParams[unitKey][ctrlId] = app.Parameter`,
+lazily created. On engage, walk all delta-able controls and
+`baseParam:hardSet(audioParam:target())` so base = current user-
+mode value at the moment scene mode was entered. Refresh on every
+engage (= every time user re-enters Performance from user-edit).
 
-Note: the existing OG hold-mode path (frame-thread apply from
-`MorphFader::draw`) is untouched. PinView's morph keeps running at
-frame rate; only scene-mode morph runs at audio rate.
+Base Parameters live as long as the chain. Reused across engages.
 
-## Lifecycle: engage / disengage / rebuild
+## Morpher items
 
-A single `SceneMorph` instance per Chain.Root, lazily created.
+Lua wrapper:
 
-**Engage** (one morpher armed, audio-rate):
-- Triggered when entering Performance view (sceneHoldContext active).
-- Walks every delta-able control via `_walkAllUnits` (same walker
-  as 3c authoring).
-- For each delta-able param, computes
-  `(startValue = sceneA's delta for this param, else base)` and
-  `(endValue = sceneB's delta, else base)`.
-- Calls `morpher:add(param, startValue, endValue)` (the new 3-arg
-  overload).
-- Connects the picked CV outlet to `morpher.mInlet`.
-- Adds the morpher to a per-root ObjectList task and starts the
-  task so audio-rate processing fires.
+```lua
+function Root:engageSceneMorph(sceneView)
+  local morph = self:getSceneMorph()  -- lazy create
+  morph:clear()
 
-**Disengage** (back to user-edit):
-- Triggered when leaving scene mode (`setMode("edit")`) or before
-  destroying the chain.
-- Tears down the ObjectList task wiring, clears morpher items,
-  disconnects the CV inlet. The audio path snaps back to whatever
-  each param's `target()` is -- no abrupt jumps because the
-  morpher's last `softSet` left each at its interpolated position.
+  -- Refresh base from current user-mode values.
+  _walkAllUnits(self, function(unit)
+    if not unit.controls then return end
+    local unitKey = unit:getInstanceKey()
+    for ctrlId, control in pairs(unit.controls) do
+      if control.getSceneBaseValue then
+        local baseParam = self:_getOrCreateBaseParam(unitKey, ctrlId)
+        baseParam:hardSet(control:getSceneBaseValue())
+      end
+    end
+  end)
 
-**Rebuild** (without disengaging):
-- After exiting scene authoring (the just-edited scene's deltas
-  may have changed): rebuild item list with the same A/B
-  assignments, preserving the morpher's `mWeight`.
-- After A/B crossfader role change (Performance view S1 cycle):
-  rebuild item list with new A/B sources, preserve weight.
-- After scene add / delete that affects A or B: rebuild.
+  -- Build items.
+  local aIdx = sceneView:getCrossfaderA()
+  local bIdx = sceneView:getCrossfaderB()
+  local sceneA = aIdx > 0 and sceneView:getScene(aIdx) or nil
+  local sceneB = bIdx > 0 and sceneView:getScene(bIdx) or nil
 
-Each rebuild = `morpher:clear()` then re-walk + re-add. Cheap;
-typical patches have tens of delta-able controls. `mWeight` is
-preserved so the audio doesn't pop on assignment changes.
+  _walkAllUnits(self, function(unit)
+    if not unit.controls then return end
+    local unitKey = unit:getInstanceKey()
+    for ctrlId, control in pairs(unit.controls) do
+      if control.getSceneAudioParam then  -- new control method, see below
+        local audioParam = control:getSceneAudioParam()
+        local baseParam  = self._sceneBaseParams[unitKey][ctrlId]
+        local baseVal    = control:getSceneBaseValue()
+        local aParam = sceneA and sceneA:hasDelta(unitKey, ctrlId)
+                       and sceneA:getOrCreateParam(unitKey, ctrlId, baseVal)
+                       or baseParam
+        local bParam = sceneB and sceneB:hasDelta(unitKey, ctrlId)
+                       and sceneB:getOrCreateParam(unitKey, ctrlId, baseVal)
+                       or baseParam
+        morph:add(audioParam, aParam, bParam)
+      end
+    end
+  end)
 
-## Base snapshot semantics
+  app.AudioThread.addTask(self.sceneTask, 0)
+end
+```
 
-When a control has no delta in scene A (or B), that endpoint = "base
-value". Base = the param's `target()` at the time we engage. This
-is the user's pre-scene-mode setting (since user-edit mode locks
-when authoring runs, and the Performance view doesn't allow
-encoder writes to base).
+`control:getSceneAudioParam()` is a new method per control type
+that returns the actual audio-rate Parameter being driven (e.g.,
+for a GainBias control it's `biasParam`; for a Fader it's the
+fader's value param). Different from `getSceneBaseValue()` which
+returns a float; this returns the Parameter pointer the morpher
+should softSet.
 
-**Captured once at engage**, stored alongside the morpher. Used
-for any param the user hasn't assigned a delta to in the active
-scene. NOT re-captured on rebuild (rebuilds happen when A/B or
-deltas change, not when base changes -- which it shouldn't during
-scene mode anyway since the structural-edit lock is active).
+Need to add this method to the same 6 ViewControl classes that
+got `enterSceneMode` in phase 3.
 
-On disengage, base is forgotten. Next engage re-captures from
-whatever the user did in user-edit between scene sessions.
+## CV input via GainBias
 
-## Where the morpher lives
+```lua
+function Root:_buildSceneCV()
+  if self.sceneCVGainBias then return end
+  self.sceneCVGainBias = self:addObject("scene-cv", app.GainBias())
+  self:addMonoBranch("scene-cv", self.sceneCVGainBias, "In",
+                     self.sceneCVGainBias, "Out")
+  -- Connect the GainBias Out to the morpher's CV inlet (added in 4.2).
+  app.AudioThread.connect(self.sceneCVGainBias:getOutput("Out"),
+                          self.sceneMorpher:getInput("CV"))
+end
+```
 
-`Chain.Root` field, lazily created. Mirrors the existing
-`getSceneView()` lazy pattern. Methods:
-  - `Root:getSceneMorph()` -- lazy create + return.
-  - `Root:engageSceneMorph(sceneView)` -- build items + connect.
-  - `Root:disengageSceneMorph()` -- tear down.
-  - `Root:rebuildSceneMorph()` -- clear + re-add items, preserve
-    weight + task connection.
+Performance view M1 slot:
+- Replaces the Source.Chooser picker.
+- Becomes a Unit.ViewControl.GainBias instance bound to the chain's
+  scene-cv GainBias object.
+- Encoder edits bias (= manual weight).
+- S1 dives into the scene-cv branch (where user adds External CV
+  / LFO / S&H / whatever).
+- Sub display shows the gain readout + branch view (standard
+  GainBias subgraphic).
+- M1's bias label = "weight" or "x-fade"; mod button shows the
+  branch contents like any GainBias.
 
-`ChannelGroup.setMode("hold")` triggers engage after the
-`enterPerformanceView` call. `ChannelGroup.setMode("edit")`
-triggers disengage before the editContext activation.
+This means the SceneView no longer stores a serialized CV ref
+string. The CV source is part of the chain's audio graph (in the
+scene-cv branch) and serializes with the chain like any other mod
+chain. Drop `SceneView.cvInput` / `setCvInput` / `getCvInput` in
+favor of the GainBias branch.
 
-The Performance view's S1 (cycle A/B) handler calls
-`chain:rebuildSceneMorph()` after updating the scene index
-assignments.
+## Audio-rate apply
 
-## Decibel-domain morph
-
-ParamSetMorph already honors `Parameter::mEnableDecibelMorph`:
-items with the flag morph in dB-space. Preserved automatically
-since we're reusing the same Item struct (just the new add
-overload).
-
-## Sub-tasks
-
-### 4.1 ParamSetMorph 3-arg add overload
-
-`add(Parameter *p, float start, float end)` -- store both
-explicitly, skip the `target()` snapshot. Item ctor variant that
-takes both. No effect on existing 2-arg path.
-
-### 4.2 CV inlet on ParamSetMorph
-
-Add `Inlet mInlet{"CV"}` to ParamSetMorph. `process()`:
-  - Read last sample of `mInlet.buffer()`.
-  - Clamp to [0, 1].
-  - `mWeight.hardSet(sample)`.
-  - Call `apply()`.
+`ParamSetMorph::process()` is currently a no-op. Modify it:
+- Read last sample of `mInlet.buffer()`.
+- Clamp to [0, 1].
+- `mWeight.hardSet(sample)`.
+- Call `apply()`.
 
 `apply()`'s existing `mUpdateNeeded` short-circuit handles the
-"weight didn't change" case so the per-param softSet loop is
-skipped when CV is static.
+"weight didn't change AND no items modified" case so static-CV
+periods don't softSet 50 params per frame.
 
-Verify PinView still works: it never connects mInlet, so the
-hardSet-from-inlet path no-ops at zero (or whatever the inlet
-default is) -- but the inlet is also nil and shouldn't be
-processed. **Open: confirm Inlet behavior with no connection.**
+PinView still works because its morpher's mInlet is never
+connected (Inlet returns ZeroOutput = zeros = weight 0 = full
+start value = pre-engage state = correct for the unused-morpher
+case).
 
-### 4.3 Chain.Root.getSceneMorph + lifecycle
+## Lifecycle
 
-Lua-side wrapper that holds:
-  - `app.ParamSetMorph` instance (new C++ overload now available)
-  - `app.ObjectList` task for audio-rate processing
-  - Saved base values map: `{[unitKey][ctrlId] = baseValue}`
-  - Engaged flag
+**Engage:**
+- Triggered by `setMode("hold")` with `sceneMode == "on"`, after
+  `getSceneView():enterPerformanceView()`.
+- Refresh base Parameters from audio param.target() (live user-
+  mode values).
+- Build morpher items per A/B assignments.
+- `addTask` so audio-rate apply runs.
+- Lazily build the scene-cv GainBias + branch on first engage.
 
-`engageSceneMorph(sceneView)`:
-  - Capture base values (walker + control:getSceneBaseValue).
-  - Get A/B scene indices from sceneView.
-  - For each delta-able param, compute aValue + bValue, call
-    `morpher:add(controlParam, aValue, bValue)`.
-  - Lock task, clear, add morpher, unlock, start.
-  - Wire CV input outlet (from sceneView:getCvInput) to
-    morpher.mInlet via AudioThread::connect.
+**Disengage:**
+- Triggered by `setMode("edit")`.
+- `removeTask` to stop audio-rate apply.
+- Clear morpher items.
+- Base Parameters stay (cheap; reused next engage).
 
-`disengageSceneMorph()`:
-  - Disconnect CV outlet from morpher.mInlet.
-  - Stop + clear task.
-  - Clear morpher.
-  - Drop saved base values.
+**Rebuild (no disengage):**
+- A/B cycle on Performance S1: morpher.clear() + re-add items
+  with new A/B sources. Weight preserved.
+- Scene add/delete that displaces A or B: rebuild.
+- Scene authoring exit: **no rebuild needed.** Morpher items
+  reference scene Parameters directly; any value changes are
+  already visible to apply() through the live target() reads.
 
-`rebuildSceneMorph()`:
-  - Lock task.
-  - Clear morpher items.
-  - Re-walk + re-add with current A/B assignments + saved base.
-  - Unlock. Weight preserved.
+**Authoring entry / exit:**
+- Entry: Chain.Root.enterSceneAuthoring still runs (3b walker).
+  It now uses `scene:getOrCreateParam(...)` instead of building an
+  ephemeral Parameter. Encoder writes hit the persistent param.
+  Morpher (engaged) already references that param — audio follows
+  live as the user turns the encoder.
+- Exit: param values stay in place. Scene.serialize() captures
+  them into the float deltas map on next save. No morpher rebuild.
 
-### 4.4 ChannelGroup wiring
+## What changes in Phase 3 code
 
-`setMode("hold")` with sceneMode on, after
-`getSceneView():enterPerformanceView()`:
-  - `self.chain:engageSceneMorph(self.chain:getSceneView())`.
+The persistent-Parameter approach touches Phase 3 in two small
+ways:
 
-`setMode("edit")`:
-  - Before activating editContext, if scene mode was active:
-    `self.chain:disengageSceneMorph()`.
+1. **Scene.lua** gets `params`, `getOrCreateParam`, `hasDelta`.
+   serialize/deserialize bridge between `deltas` (float, on-disk)
+   and `params` (Parameters, in-memory).
+2. **Chain.Root.enterSceneAuthoring** uses
+   `scene:getOrCreateParam(unitKey, ctrlId, baseVal)` instead of
+   `app.Parameter(ctrlId .. "_scene", deltaVal)`. The Parameter
+   returned is the persistent one — no value capture on exit.
+3. **Chain.Root.exitSceneAuthoring** no longer needs to capture
+   target values into the scene's delta map. It just walks armed
+   controls and calls `control:exitSceneMode()` to restore the
+   widget. Optional: prune scene params whose target() matches
+   base (avoids accumulating no-op deltas across many authoring
+   sessions). Cheap; do it.
 
-The existing setMode("edit") auto-exit-from-scene-authoring path
-also needs disengage (already calls exitSceneAuthoring on the
-chain -- add disengage after).
+Both changes are local. The walker, subtitle, lock, egress
+gestures, brightness-render swap — all unchanged.
 
-### 4.5 Performance view rebuild triggers
+## Sub-tasks (revised)
 
-S1 cycle A/B on a scene slot: after updating `crossfaderA` /
-`crossfaderB`, call `chain:rebuildSceneMorph()`.
+### 4.1 ParamSetMorph extension: 3-Parameter add + live apply
 
-Scene add: rebuild if the new scene index displaces A or B (it
-shouldn't, since add appends).
+Add a new Item variant: `Item(Parameter *target, Parameter *start, Parameter *end)`
+holding all three pointers. Stored alongside the existing 2-arg
+items in `mItems` (a tagged union or sibling vector).
 
-Scene delete: `removeScene` already shifts A/B; rebuild after.
+`add(Parameter *target, Parameter *start, Parameter *end)` —
+queues the new variant.
 
-Scene authoring exit (return from authoring view): rebuild because
-the authored scene's deltas may have changed and the morpher's
-endpoint values need updating.
+`apply()`: for each item, if Parameter-variant, read
+`startParam->target()` and `endParam->target()` live; compute
+`w1*start + w2*end`; softSet on targetParam. If 2-arg-variant,
+use existing float startValue / endValue path.
 
-### 4.6 CV picker connection
+Decibel-morph flag honored if the target Parameter has
+`mEnableDecibelMorph` set (existing logic, just transferred to
+the new path).
 
-The Performance view M1 picker sets `sceneView:setCvInput(sourceRef)`
-on selection. Need a way to resolve sourceRef → outlet for
-AudioThread::connect.
+Existing PinView code stays on the 2-arg path.
 
-Existing pattern: `Source.ExternalChooser` returns a source
-descriptor that includes the outlet. Need to either:
-  - Have the picker remember the outlet alongside the ref string.
-  - Resolve ref → outlet at engage-time via `Source.find(ref)` or
-    similar.
+### 4.2 ParamSetMorph CV inlet + audio-rate process
 
-Whichever PinView / external-source-aware controls already use --
-audit and reuse.
+Add `Inlet mInlet{"CV"}`. process(): read `mInlet.buffer()[last]`,
+clamp [0,1], hardSet mWeight, call apply(). Inlet unconnected ->
+`ZeroOutput.buffer()` -> sample=0 -> weight=0 -> full A.
 
-CV source change while engaged: disconnect old, connect new,
-without disturbing the task. Performance view should call a small
-`chain:setSceneCvInput(outlet)` helper.
+PinView morpher unaffected: inlet stays unconnected (zeros);
+PinView's apply call from `MorphFader::draw` still drives its own
+weight via the morphFader encoder.
 
-### 4.7 Edge cases
+### 4.3 Persistent scene Parameters
 
-- **No CV picked**: morpher.mInlet has no connection. `process()`
-  reads inlet samples -- need a sane default. Either skip
-  hardSet-from-inlet when inlet is unconnected, or hardSet to 0
-  (full A). Plan: skip; user manually sets weight via... TBD. Or
-  expose a soft default in Performance UI.
-- **No scenes assigned**: crossfaderA = crossfaderB =
-  kEndpointBase (= 0). All deltas resolve to base on both ends ->
-  no movement on weight change. Audio unchanged.
-- **One endpoint scene, other base**: works naturally -- base
-  endpoint just uses captured base value for every param.
-- **Scene has no delta for a given param**: that param's endpoint
-  value = base. Morph between base and base = no movement (one
-  endpoint), or movement only when the OTHER endpoint differs.
-- **Param with audio-rate modulation already feeding it**: morph
-  softSets target; whatever audio-rate modulation runs after is
-  unaffected. Same as how OG hold mode behaves.
-- **mEnableDecibelMorph**: existing Item handles it (toDecibels /
-  fromDecibels at add-time and in apply).
+Modify `Scene.lua`: add `params` map, `getOrCreateParam`,
+`hasDelta`. Bridge to existing `deltas` map at serialize /
+deserialize. Authoring uses the Parameters; on-disk format stays
+float-only for compat.
 
-## Open questions
+### 4.4 Per-control getSceneAudioParam
 
-1. Inlet behavior with no connection -- safe to `process()`
-   without checking? Audit `Inlet::buffer()` for null-source
-   behavior.
-2. CV source identifier: what does the picker actually store, and
-   how do we resolve back to an outlet at engage time? Probably
-   `Source.find(ref)` -- verify in 4.6.
-3. Weight scaling / mapping: should CV map linearly 0..1 to A..B,
-   or should there be a curve (s-curve, exponential)? Plan: linear
-   for 4.0, add an option for 5 polish.
-4. Audio-rate vs frame-rate cost: with ~50 delta-able params and
-   `apply()` per audio frame, do we eat audible CPU? Profile
-   during 4.7 bench.
-5. Task ownership: per-Root or per-ChannelGroup? Per-Root because
-   the morpher is on the chain, but the task is what schedules it
-   to run at audio rate. Verify the per-Root task model works with
-   the existing Chain processing pipeline.
-6. Restart-after-disengage: does the morpher's mPreviousWeight
-   need resetting so apply()'s short-circuit fires correctly on
-   re-engage? Probably yes -- add `reset()` call to clear.
+Add `control:getSceneAudioParam()` returning the audio-rate
+Parameter pointer to drive. 6 ViewControl classes (Fader,
+BranchMeter, Pitch, GainBias, Gate, InputGate). For most, it's
+`self.fader:getValueParameter()` (the live audio param, which is
+also what `getSceneBaseValue` reads target() on). For Gate /
+InputGate, it's `self.threshold:getParameter()`.
+
+### 4.5 Chain.Root scene-morph + scene-cv
+
+`Root:getSceneMorph` lazy create the morpher + task. `Root:_buildSceneCV`
+lazy create the GainBias + branch + connect Out -> morpher CV
+inlet. `Root:engageSceneMorph` / `disengageSceneMorph` /
+`rebuildSceneMorph`. Base Parameter map.
+
+### 4.6 Performance view M1 = GainBias control
+
+Replace the Source.Chooser picker. M1 becomes a Unit.ViewControl.GainBias
+bound to the chain's scene-cv GainBias object. Adopts the standard
+GainBias UX: encoder = bias, S2/S3 = focus gain/bias, S1 = mod
+branch dive. Drop SceneView.cvInput / setCvInput / getCvInput +
+their serialize fields. Migration: ignore old cvInput on load
+(user re-wires via dive).
+
+### 4.7 ChannelGroup engage/disengage hooks
+
+`setMode("hold")` with sceneMode on: engage after enterPerformance.
+`setMode("edit")`: disengage before activating editContext. Auto-
+exit-from-authoring safety: also disengage.
+
+### 4.8 Performance view rebuild triggers
+
+S1 cycle A/B -> rebuild. Scene add/delete -> rebuild.
+
+### 4.9 Phase 3 cleanup
+
+Switch enterSceneAuthoring to use `scene:getOrCreateParam` instead
+of ephemeral params. exitSceneAuthoring: drop the float capture
+step; optional prune of base-matching scene params.
+
+### 4.10 Bench + profile
+
+Plug a CV (or use the M1 encoder for manual), assign A/B, hear
+audio interpolate. Profile CPU with ~50 delta-able params.
 
 ## Out of scope for 4
 
-- Pin icon overlay on delta'd controls in regular user-mode (3d).
-- Multi-CV per-param crossfade (M2/M3/M4 each with own CV instead
-  of one shared) -- stays single-CV per chain.
-- Curve / response shaping on the weight (linear only for 4.0).
-- Persisting the picked CV source ref across power-cycle -- the
-  ref string is already serialized via SceneView, but
-  resolve-on-load needs a verify pass.
+- Pin icon overlay (3d).
+- Curve / s-curve weight mapping (phase 5 if useful).
+- Multi-CV per-param (single weight only).
+- Loading old-format cvInput from existing presets (drops on
+  load; user re-picks via M1 dive).
 
 ## Implementation order
 
-1. 4.1 ParamSetMorph 3-arg add (C++).
-2. 4.2 CV inlet on ParamSetMorph (C++) -- emu boot smoke test
-   that PinView still works.
-3. 4.3 Chain.Root scene-morph lifecycle methods.
-4. 4.4 ChannelGroup engage/disengage hooks.
-5. 4.5 Performance view rebuild triggers.
-6. 4.6 CV picker connection wiring.
-7. 4.7 Bench verify: assign A/B, plug CV, hear audio interpolate.
-   Profile if CPU looks high.
+1. 4.1 ParamSetMorph 3-Parameter Item + apply (C++).
+2. 4.2 CV inlet + process audio-rate apply (C++). Boot smoke
+   test PinView still works.
+3. 4.3 Scene persistent Parameters (Lua).
+4. 4.4 Per-control getSceneAudioParam (Lua).
+5. 4.5 Chain.Root scene-morph + scene-cv lifecycle (Lua).
+6. 4.6 Performance M1 GainBias rewrite (Lua).
+7. 4.7 ChannelGroup hooks (Lua).
+8. 4.8 Performance rebuild triggers (Lua).
+9. 4.9 Phase 3 cleanup (Lua).
+10. 4.10 Bench + profile.
 
-Each step ships as its own commit. After 4.7 the feature does what
-it says on the tin: scenes drive audio via CV crossfading.
+Each step its own commit. After 4.10 the feature drives audio:
+plug a CV, hear scenes blend.
