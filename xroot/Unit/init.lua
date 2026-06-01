@@ -150,6 +150,19 @@ function Unit:findByInstanceKey(key)
   end
 end
 
+-- Visit every child chain hanging off this unit. Default: the
+-- mod branches in self.branches. Container subclasses override
+-- to add their own stashes (CustomEffect/CustomSource have an
+-- interior self.patch; MultiBand has self.bands[1..N]). Used by
+-- Chain.Root's scene-authoring walker so a unit added by anyone
+-- only needs to extend this method to participate in scene mode
+-- without touching the walker.
+function Unit:walkChildChains(callback)
+  for _, branch in pairs(self.branches) do
+    callback(branch)
+  end
+end
+
 function Unit:getOutputSource(i)
   i = i or 1
   if self.outputs[i] then

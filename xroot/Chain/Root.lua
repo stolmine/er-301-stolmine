@@ -131,11 +131,12 @@ function Root:leaveHoldMode()
 end
 
 -- Recursively visit every unit reachable from a chain: the chain's
--- own units, every unit inside each unit's mod branches
--- (unit.branches[*] -> Chain.Branch), and every unit inside any
--- Custom-Unit interior (unit.patch -> Chain.Patch). Both Branch
--- and Patch include ChainBase, so the recursive call uses the
--- same length/getUnit API.
+-- own units, plus every unit inside any child chain each unit
+-- exposes via Unit:walkChildChains. The default walkChildChains
+-- visits self.branches (mod branches); CustomEffect/CustomSource
+-- also visit self.patch (the container interior); MultiBand also
+-- visits self.bands[1..N]. Adding a new container type only needs
+-- to override walkChildChains; the walker stays generic.
 --
 -- Used by the scene-authoring enter/exit walks. The delta map's
 -- unit-instance keys are globally unique inside the root chain, so
@@ -145,35 +146,27 @@ local function _walkAllUnits(chain, callback)
     local unit = chain:getUnit(i)
     if unit then
       callback(unit)
-      if unit.branches then
-        for _, branch in pairs(unit.branches) do
-          _walkAllUnits(branch, callback)
-        end
-      end
-      if unit.patch then
-        _walkAllUnits(unit.patch, callback)
+      if unit.walkChildChains then
+        unit:walkChildChains(function(childChain)
+          _walkAllUnits(childChain, callback)
+        end)
       end
     end
   end
 end
 
 -- Parallel walker that visits the root chain and every reachable
--- sub-chain (branches + Custom-Unit patches). Used for the scene
+-- sub-chain (via Unit:walkChildChains). Used for the scene
 -- subtitle propagation so the "editing Sn" indicator shows on
 -- every chain header the user can dive into, not just the root.
 local function _walkAllChains(chain, callback)
   callback(chain)
   for i = 1, chain:length() do
     local unit = chain:getUnit(i)
-    if unit then
-      if unit.branches then
-        for _, branch in pairs(unit.branches) do
-          _walkAllChains(branch, callback)
-        end
-      end
-      if unit.patch then
-        _walkAllChains(unit.patch, callback)
-      end
+    if unit and unit.walkChildChains then
+      unit:walkChildChains(function(childChain)
+        _walkAllChains(childChain, callback)
+      end)
     end
   end
 end
