@@ -234,6 +234,7 @@ function Performance:mainReleased(i, shifted)
     -- Tap on the "+" placeholder: create a new scene + move
     -- cursor to it.
     self.sceneView:addScene()
+    self:_rebuildSceneMorph()  -- new scene appended past A/B, no-op for current items but kept for symmetry with delete
     self.cursorCol = i
     self:_refresh()
     return true
@@ -256,6 +257,7 @@ function Performance:_confirmDelete(sceneIdx, scene)
   dlg:subscribe("done", function(ans)
     if ans then
       self.sceneView:removeScene(sceneIdx)
+      self:_rebuildSceneMorph()
       -- Snap cursor back into bounds if we just deleted the
       -- currently-selected slot (or any slot past the now-shrunk
       -- range).
@@ -337,8 +339,21 @@ function Performance:_cycleCrossfaderRole(sceneIdx)
     -- Currently off -> become A (displaces any existing A).
     self.sceneView:setCrossfaderA(sceneIdx)
   end
+  self:_rebuildSceneMorph()
   self:_refresh()
   return true
+end
+
+-- Tell the chain's engine-side morpher to rebuild items per the
+-- current crossfader assignments. Called from any UI gesture that
+-- mutates which scene sits at A or B, or that creates / deletes
+-- scenes (since the new/missing scene may affect endpoint
+-- resolution for current A/B). Guarded so chains without a scene
+-- morpher (engine not yet engaged this session) no-op.
+function Performance:_rebuildSceneMorph()
+  if self.chain and self.chain.rebuildSceneMorph then
+    self.chain:rebuildSceneMorph()
+  end
 end
 
 function Performance:_renameScene(sceneIdx, scene)
