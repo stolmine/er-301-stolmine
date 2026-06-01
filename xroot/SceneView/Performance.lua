@@ -161,15 +161,18 @@ function Performance:init(sceneView)
 
     self.m1ModButton = app.SubButton("empty", 1)
     self.m1SubGroup:addChild(self.m1ModButton)
-    self.m1SubGroup:addChild(app.SubButton("gain", 2))
-    self.m1SubGroup:addChild(app.SubButton("bias", 3))
+    self.m1S2 = app.SubButton("gain", 2)
+    self.m1S3 = app.SubButton("bias", 3)
+    self.m1SubGroup:addChild(self.m1S2)
+    self.m1SubGroup:addChild(self.m1S3)
 
     self.m1GainEncoderState = Encoder.Coarse
     self.encoderState       = Encoder.Coarse
-    -- Initial focus via the helper so the readout's save() fires
-    -- (needed so cancelReleased's restore() has a sane value to
-    -- snap back to). Also sets the sub cursor controller.
-    self:_setM1FocusedReadout(self.m1Bias)
+    -- Start unfocused. The user explicitly focuses a readout
+    -- by pressing S2 (gain) or S3 (bias); UP unfocuses again.
+    -- Until then, the encoder navigates between M1..M6 and the
+    -- sub caret is hidden.
+    self.m1FocusedReadout   = nil
 
     -- Subscribe to the scene-cv branch's contentChanged so the
     -- mod button label + scope outlet stay in sync with what
@@ -220,14 +223,16 @@ function Performance:init(sceneView)
 
   -- Slot S-button labels so the user can see what S1/S2/S3 do
   -- on a scene slot before pressing them. setText repopulates
-  -- per refresh (chip text per slot's current A/B role; "edit"
-  -- always on S3).
+  -- per refresh: chip text per slot's current A/B role plus
+  -- "edit" on S3; under shift the labels swap to "" / "rename" /
+  -- "delete" (the shifted bindings).
   self.slotS1 = app.SubButton("", 1)
   self.slotS2 = app.SubButton("", 2)
   self.slotS3 = app.SubButton("", 3)
   self.slotSubGroup:addChild(self.slotS1)
   self.slotSubGroup:addChild(self.slotS2)
   self.slotSubGroup:addChild(self.slotS3)
+  self.shiftHeld = false
 
   -- Main encoder cursor starts on the M1 bias fader so the
   -- bouncing caret is visible from the moment the user lands in
@@ -286,9 +291,12 @@ function Performance:_refresh()
   -- Move the bouncing main caret to track the selected ply.
   -- M1 owns the bias fader's left-of-bias caret; slot columns
   -- use their SlotControl panel so the caret hugs the slot.
+  -- The sub caret follows m1FocusedReadout (nil when nothing
+  -- is focused: the sub display still renders the GainBias-
+  -- style layout but no caret hangs off either readout).
   if self.cursorCol == 1 then
     self:setMainCursorController(self.cvFader)
-    self:setSubCursorController(self.m1FocusedReadout or self.m1Bias)
+    self:setSubCursorController(self.m1FocusedReadout)
   else
     local slot = self.slots and self.slots[self.cursorCol]
     self:setMainCursorController(slot and slot.panel or nil)
@@ -304,9 +312,16 @@ function Performance:_refreshSub()
   if col == 1 then
     -- M1 = GainBias-style sub display (gain readout + bias
     -- readout + branch mod button + scope). Show that, hide
-    -- the slot context labels.
+    -- the slot context labels. Shift swaps S2/S3 labels to
+    -- "set gain"/"set bias" (decimal-keyboard entry).
     if self.m1SubGroup then self.m1SubGroup:show() end
     if self.slotSubGroup then self.slotSubGroup:hide() end
+    if self.m1S2 then
+      self.m1S2:setText(self.shiftHeld and "set" or "gain")
+    end
+    if self.m1S3 then
+      self.m1S3:setText(self.shiftHeld and "set" or "bias")
+    end
     return
   end
 
@@ -326,19 +341,28 @@ function Performance:_refreshSub()
     end
     self.subStatus:setText(string.format("scene %d: %s%s",
                                           sceneIdx, scene:getName(), chip))
-    -- S1: toggle A on this slot. Label flips between "asgn A"
-    -- (will assign) and "*A" (already A; pressing unassigns).
-    if a == sceneIdx then
-      self.slotS1:setText("*A")
+    if self.shiftHeld then
+      -- Shifted bindings: S1 has none, S2 = rename, S3 = delete.
+      self.slotS1:setText("")
+      self.slotS2:setText("rename")
+      self.slotS3:setText("delete")
     else
-      self.slotS1:setText("asgn A")
+      -- Unshifted: S1 toggle A, S2 toggle B, S3 edit.
+      -- "*" prefix means the slot already holds that endpoint
+      -- and a press unassigns; otherwise the label reads as the
+      -- pending action.
+      if a == sceneIdx then
+        self.slotS1:setText("*A")
+      else
+        self.slotS1:setText("asgn A")
+      end
+      if b == sceneIdx then
+        self.slotS2:setText("*B")
+      else
+        self.slotS2:setText("asgn B")
+      end
+      self.slotS3:setText("edit")
     end
-    if b == sceneIdx then
-      self.slotS2:setText("*B")
-    else
-      self.slotS2:setText("asgn B")
-    end
-    self.slotS3:setText("edit")
   elseif col == self:_plusCol() then
     self.subStatus:setText("new scene -- tap M to create")
     self.slotS1:setText("")
@@ -393,9 +417,30 @@ function Performance:_m1GainSet()
   kb:show()
 end
 
+-- Shift held / released. Repaints the S-button labels under the
+-- cursor so the user can see what shifted bindings exist (rename
+-- / delete on a slot; decimal-keyboard entry on M1) before
+-- committing. Mirrors the convention from spreadsheet's
+-- BandControl: shift grabs are tracked at the widget level and
+-- the visible sub-display content reflects the held state.
+function Performance:shiftPressed()
+  self.shiftHeld = true
+  self:_refreshSub()
+  return true
+end
+
+function Performance:shiftReleased()
+  self.shiftHeld = false
+  self:_refreshSub()
+  return true
+end
+
 -- Standard unit-control keybinds for the focused M1 readout.
 -- zero -> snap to 0.0. cancel -> restore the value the readout
--- saved when focus last entered it.
+-- saved when focus last entered it. UP releases focus (the
+-- deselect protocol that built-in faders follow: once focused
+-- via S2/S3 the user can step back out without selecting a
+-- different readout).
 function Performance:zeroPressed()
   if self.cursorCol == 1 and self.m1FocusedReadout then
     self.m1FocusedReadout:zero()
@@ -407,6 +452,14 @@ function Performance:cancelReleased(shifted)
   if shifted then return false end
   if self.cursorCol == 1 and self.m1FocusedReadout then
     self.m1FocusedReadout:restore()
+    return true
+  end
+end
+
+function Performance:upReleased(shifted)
+  if shifted then return false end
+  if self.cursorCol == 1 and self.m1FocusedReadout then
+    self:_setM1FocusedReadout(nil)
     return true
   end
 end
@@ -467,19 +520,18 @@ end
 -- ---------------------------------------------------------------------------
 
 function Performance:encoder(change, shifted)
-  -- Cursor on M1: encoder drives the focused readout (gain or
-  -- bias, swapped via S2/S3). Dedicated to readout edit while
-  -- focused here; user navigates away by tapping M2..M6.
-  if self.cursorCol == 1 then
-    if self.m1FocusedReadout then
-      local fine
-      if self.m1FocusedReadout == self.m1Gain then
-        fine = (self.m1GainEncoderState == Encoder.Fine)
-      else
-        fine = (self.encoderState == Encoder.Fine)
-      end
-      self.m1FocusedReadout:encoder(change, shifted, fine)
+  -- Cursor on M1 + a readout focused: encoder drives that
+  -- readout. M1 with no focus falls through to the navigation
+  -- path so the encoder still scrolls the cursor between
+  -- M1..M6 -- focus is opt-in (S2/S3 focus, UP unfocuses).
+  if self.cursorCol == 1 and self.m1FocusedReadout then
+    local fine
+    if self.m1FocusedReadout == self.m1Gain then
+      fine = (self.m1GainEncoderState == Encoder.Fine)
+    else
+      fine = (self.encoderState == Encoder.Fine)
     end
+    self.m1FocusedReadout:encoder(change, shifted, fine)
     return true
   end
   -- Cursor on a slot ply: encoder navigates between M-keys.
@@ -612,10 +664,11 @@ function Performance:subReleased(i, shifted)
   local scene = self.sceneView:getScene(sceneIdx)
   if scene == nil then return false end
 
-  -- Shifted: S2 -> rename (was previously the unshifted role).
-  -- No other shifted slot bindings yet.
+  -- Shifted: S2 -> rename, S3 -> delete (parallels the
+  -- sub-display SubButton labels under shift).
   if shifted then
     if i == 2 then return self:_renameScene(sceneIdx, scene) end
+    if i == 3 then return self:_confirmDelete(sceneIdx, scene) end
     return false
   end
 
