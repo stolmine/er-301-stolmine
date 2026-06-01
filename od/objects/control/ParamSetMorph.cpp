@@ -1,4 +1,5 @@
 #include <od/objects/control/ParamSetMorph.h>
+#include <od/config.h>
 #include <od/extras/Conversions.h>
 #include <algorithm>
 
@@ -8,6 +9,7 @@ namespace od
     ParamSetMorph::ParamSetMorph()
     {
         addParameter(mWeight);
+        addInput(mCV);
     }
 
     ParamSetMorph::~ParamSetMorph()
@@ -16,6 +18,22 @@ namespace od
 
     void ParamSetMorph::process()
     {
+        // Audio-rate weight drive. When mCV is unconnected,
+        // Inlet::buffer() returns ZeroOutput so we hardSet weight
+        // to 0 = full-A endpoint on every frame -- PinView never
+        // connects mCV and so its weight stays user-driven via
+        // MorphFader's encoder writes to mWeight (which we'd
+        // immediately overwrite). Guard with isConnected so
+        // PinView's encoder path keeps working.
+        if (mCV.isConnected())
+        {
+            float *buf = mCV.buffer();
+            float sample = buf[FRAMELENGTH - 1];
+            if (sample < 0.0f) sample = 0.0f;
+            else if (sample > 1.0f) sample = 1.0f;
+            mWeight.hardSet(sample);
+        }
+        apply();
     }
 
     void ParamSetMorph::apply()

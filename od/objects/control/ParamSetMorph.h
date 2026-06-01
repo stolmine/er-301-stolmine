@@ -1,6 +1,7 @@
 #pragma once
 
 #include <od/objects/Object.h>
+#include <od/objects/Inlet.h>
 #include <vector>
 
 namespace od
@@ -16,6 +17,14 @@ namespace od
         virtual void process();
         void apply();
         Parameter mWeight{"Weight", 0.0f};
+        // CV input for audio-rate weight drive (scene crossfader).
+        // process() reads the last sample, clamps [0,1], hardSets
+        // mWeight, calls apply(). Unconnected -> Inlet::buffer()
+        // returns ZeroOutput so weight stays at 0 = full A endpoint;
+        // PinView's morpher (also reaches process via its task but
+        // historically didn't need it) gets a no-op since it never
+        // connects this inlet.
+        Inlet mCV{"CV"};
 #endif
 
         void add(Parameter *param, float endValue);
