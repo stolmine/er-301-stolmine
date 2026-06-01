@@ -77,28 +77,25 @@ function ChannelGroup:_getSceneHoldContext()
   return self.sceneHoldContext
 end
 
--- Dive from the Performance view into the per-scene Authoring
--- view. Lazy-builds the context, caches it per-scene so re-dives
--- to the same scene reuse the existing window.
+-- Dive from the Performance view into per-scene authoring. The
+-- authoring view IS the chain's existing editContext (no separate
+-- mirror window). chain:enterSceneAuthoring arms every delta-able
+-- control by swapping its widget's control parameter to a
+-- per-scene target param (visual: value + target marker like OG
+-- hold-mode pinning). The user navigates / edits in the normal
+-- edit view; encoder writes go to the per-scene targets.
 function ChannelGroup:enterSceneAuthoring(sceneIdx)
-  if self.sceneAuthoringContexts == nil then
-    self.sceneAuthoringContexts = {}
-  end
-  local ctx = self.sceneAuthoringContexts[sceneIdx]
-  if ctx == nil then
-    local view = self.chain:getSceneView():getAuthoringView(sceneIdx)
-    if view == nil then return end  -- invalid scene index
-    ctx = Context(string.format("%s scene %d authoring",
-                                  self.chain.title, sceneIdx), view)
-    self.sceneAuthoringContexts[sceneIdx] = ctx
-  end
-  self:setActiveContext(ctx)
+  local sceneView = self.chain:getSceneView()
+  if sceneView:getScene(sceneIdx) == nil then return end
+  self.chain:enterSceneAuthoring(sceneView, sceneIdx)
+  self:setActiveContext(self.editContext)
 end
 
--- Return from any Authoring view back to the Performance view.
--- Called from Authoring's UP / shift+HOME / CANCEL handlers via
--- Channels.leaveSceneAuthoring.
+-- Return from authoring back to the Performance view. Captures
+-- each armed control's target value into the scene's delta map
+-- (only when differs from base) and restores the widgets.
 function ChannelGroup:leaveSceneAuthoring()
+  self.chain:exitSceneAuthoring()
   self:setActiveContext(self:_getSceneHoldContext())
 end
 
@@ -128,6 +125,12 @@ function ChannelGroup:setMode(mode)
       self.chain:leaveHoldMode()
       if self.chain.sceneView then
         self.chain.sceneView:leavePerformanceView()
+      end
+      -- Safety: any mode change out of scene authoring captures
+      -- pending deltas and restores widgets, so the user doesn't
+      -- silently leave the chain controls armed.
+      if self.chain.activeAuthoringScene then
+        self.chain:exitSceneAuthoring()
       end
     end
     self:setActiveContext(self.editContext)

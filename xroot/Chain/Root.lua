@@ -109,6 +109,84 @@ end
 function Root:leaveHoldMode()
 end
 
+-- Arm every delta-able control in the chain for scene authoring.
+-- Walks all units; for each control that exposes enterSceneMode,
+-- builds a per-scene target parameter (initialized to the scene's
+-- existing delta if one exists, else to the control's current
+-- live value) and tells the control to swap its widget's control
+-- parameter to that target. Audio doesn't change; the live value
+-- parameter still holds the base value. The user's encoder edits
+-- inside scene authoring write to the per-scene target.
+--
+-- Per-control enter/exitSceneMode methods land in 3b.3+; until
+-- then this walk finds nothing to arm and is effectively a state-
+-- tracking no-op. Lifecycle wiring is in place so 3b.2 (dive
+-- routing) can hook in.
+function Root:enterSceneAuthoring(sceneView, sceneIdx)
+  if self.activeAuthoringScene then return end  -- already armed
+  local scene = sceneView:getScene(sceneIdx)
+  if scene == nil then return end
+  self.activeAuthoringScene = scene
+  self.activeAuthoringIdx   = sceneIdx
+  self._sceneTargetParams   = {}
+
+  for i = 1, self:length() do
+    local unit = self:getUnit(i)
+    if unit and unit.controls then
+      local unitKey = unit:getInstanceKey()
+      self._sceneTargetParams[unitKey] = {}
+      for ctrlId, control in pairs(unit.controls) do
+        if control.enterSceneMode then
+          local currentVal = 0
+          if control.fader and control.fader.getValueParameter then
+            currentVal = control.fader:getValueParameter():target()
+          end
+          local deltaVal = scene:getDelta(unitKey, ctrlId) or currentVal
+          local targetParam = app.Parameter(ctrlId .. "_scene", deltaVal)
+          self._sceneTargetParams[unitKey][ctrlId] = targetParam
+          control:enterSceneMode(targetParam)
+        end
+      end
+    end
+  end
+end
+
+-- Restore every armed control to its pre-scene state and capture
+-- each per-scene target value back into the scene's delta map.
+-- Only values that differ from the live base become deltas;
+-- equal-to-base targets are cleared so the scene's delta count
+-- stays meaningful (no-op deltas don't clutter the map).
+function Root:exitSceneAuthoring()
+  if self.activeAuthoringScene == nil then return end
+  local scene = self.activeAuthoringScene
+
+  for i = 1, self:length() do
+    local unit = self:getUnit(i)
+    if unit and unit.controls then
+      local unitKey = unit:getInstanceKey()
+      for ctrlId, control in pairs(unit.controls) do
+        if control.exitSceneMode and control.getSceneTargetValue then
+          local targetVal = control:getSceneTargetValue()
+          local baseVal = 0
+          if control.fader and control.fader.getValueParameter then
+            baseVal = control.fader:getValueParameter():target()
+          end
+          if math.abs(targetVal - baseVal) > 1e-6 then
+            scene:setDelta(unitKey, ctrlId, targetVal)
+          else
+            scene:setDelta(unitKey, ctrlId, nil)
+          end
+          control:exitSceneMode()
+        end
+      end
+    end
+  end
+
+  self.activeAuthoringScene = nil
+  self.activeAuthoringIdx   = nil
+  self._sceneTargetParams   = nil
+end
+
 function Root:enterScopeView()
   local xpath = self:getXPathToSelection()
   self.scopeView:refresh()
