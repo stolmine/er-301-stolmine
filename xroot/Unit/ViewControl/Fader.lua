@@ -189,4 +189,37 @@ function Fader:onFocused()
   self.fader:save()
 end
 
+-- Scene authoring: swap the widget's target+control parameter to
+-- the per-scene target so the encoder writes the scene's value
+-- while the live value parameter (audio-rate) is unchanged. Visual
+-- result mirrors OG hold-mode pinning: ghost marker shows target,
+-- bar fills to live value. The base param is restored on exit.
+--
+-- ctrlId for instance-key delta storage is the unit-side key (the
+-- ID under which the unit registered this control). Chain.Root
+-- already holds it for the dispatch loop, so we don't store it here.
+function Fader:enterSceneMode(sceneTargetParam)
+  if self._sceneOriginalParam then return end  -- already armed
+  local liveParam = self.fader:getValueParameter()
+  self._sceneOriginalParam = liveParam
+  self._sceneTargetParam   = sceneTargetParam
+  -- value stays = live audio param; target+control = scene target
+  self.fader:setValueParameter(liveParam)
+  self.fader:setTargetParameter(sceneTargetParam)
+  self.fader:setControlParameter(sceneTargetParam)
+end
+
+function Fader:exitSceneMode()
+  if self._sceneOriginalParam == nil then return end
+  -- setParameter restores value+target+control to the original
+  self.fader:setParameter(self._sceneOriginalParam)
+  self._sceneOriginalParam = nil
+  self._sceneTargetParam   = nil
+end
+
+function Fader:getSceneTargetValue()
+  if self._sceneTargetParam == nil then return 0 end
+  return self._sceneTargetParam:target()
+end
+
 return Fader
