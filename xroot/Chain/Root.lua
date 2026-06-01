@@ -596,10 +596,42 @@ function Root:disengageSceneMorph()
 end
 
 -- Rebuild items without disengaging. Called when the user cycles
--- A/B roles or adds/removes a scene. Weight (mWeight) preserved.
+-- A/B roles or adds/removes a scene.
+--
+-- Walks every delta-able control to make sure baseParam and the
+-- modulated-display widget swap are correctly armed BEFORE the
+-- morpher items reference them. Controls that engaged at the
+-- start of scene mode are already correct (no-op); controls
+-- added since (e.g. a freshly-inserted unit) get a base
+-- snapshot from their live audio target and the modulated swap
+-- now. Without this defensive walk, a unit added mid-session
+-- would have baseParam at the default-zero value and the
+-- morpher would softSet its audio to 0 every frame.
 function Root:rebuildSceneMorph()
   if not self._sceneEngaged then return end
   self._sceneTask:lock()
+  _walkAllUnits(self, function(unit)
+    if not unit.controls then return end
+    local unitKey = unit:getInstanceKey()
+    for ctrlId, control in pairs(unit.controls) do
+      if control.getSceneAudioParam and control.enterModulatedDisplay then
+        local audioParam = control:getSceneAudioParam()
+        if audioParam then
+          local baseParam = self:_getOrCreateBaseParam(unitKey, ctrlId)
+          if not control._modAudioParam then
+            -- Not yet modulated. Snapshot base from live audio
+            -- target (the user's authoritative value), then arm
+            -- modulated display.
+            baseParam:hardSet(audioParam:target())
+            control:enterModulatedDisplay(audioParam, baseParam)
+          end
+          -- Already-modulated controls: baseParam was already
+          -- snapshotted at engage and tracks the user's encoder
+          -- edits, so it's already correct. No re-snapshot.
+        end
+      end
+    end
+  end)
   self._sceneMorph:clear()
   self:_buildSceneMorphItems()
   self._sceneTask:unlock()
