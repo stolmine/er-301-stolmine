@@ -189,32 +189,62 @@ function Fader:onFocused()
   self.fader:save()
 end
 
--- Scene authoring: swap the widget's target+control parameter to
--- the per-scene target so the encoder writes the scene's value
--- while the live value parameter (audio-rate) is unchanged. Visual
--- result mirrors OG hold-mode pinning: ghost marker shows target,
--- bar fills to live value. The base param is restored on exit.
+-- Three-state scene display protocol:
 --
--- ctrlId for instance-key delta storage is the unit-side key (the
--- ID under which the unit registered this control). Chain.Root
--- already holds it for the dispatch loop, so we don't store it here.
+-- 1. Normal user-edit (sceneMode off, or before engage):
+--    setParameter(audio). value=target=control=audio.
+--
+-- 2. Modulated display (sceneMode on, not in authoring):
+--    value=baseParam   -- hollow box shows user's set value
+--    target=audioParam -- grey line shows the morpher's live output
+--    control=baseParam -- encoder writes to base, never to audio
+--    The morpher continuously softSets audioParam to base + scene
+--    offset; the line moves with bias, the box stays where the
+--    user set it.
+--
+-- 3. Scene editing (authoring view, assumes modulated is active):
+--    value=baseParam   -- still shows user's base
+--    target=sceneTarget -- line tracks the scene's stored value
+--    control=sceneTarget -- encoder writes to the scene param
+--
+-- Transitions go through state 2: normal -> modulated -> editing
+-- -> modulated -> normal. State 2 is the resting state while
+-- scene mode is on; state 3 is a brief overlay during authoring.
+
+function Fader:enterModulatedDisplay(audioParam, baseParam)
+  if self._modAudioParam then return end
+  self._modAudioParam = audioParam
+  self._modBaseParam  = baseParam
+  self.fader:setValueParameter(baseParam)
+  self.fader:setTargetParameter(audioParam)
+  self.fader:setControlParameter(baseParam)
+end
+
+function Fader:exitModulatedDisplay()
+  if not self._modAudioParam then return end
+  -- Restore single-param normal state. setParameter rebinds
+  -- value+target+control to audio so the widget reads + writes
+  -- the live audio path directly.
+  self.fader:setParameter(self._modAudioParam)
+  self._modAudioParam = nil
+  self._modBaseParam  = nil
+end
+
 function Fader:enterSceneMode(sceneTargetParam)
-  if self._sceneOriginalParam then return end  -- already armed
-  local liveParam = self.fader:getValueParameter()
-  self._sceneOriginalParam = liveParam
-  self._sceneTargetParam   = sceneTargetParam
-  -- value stays = live audio param; target+control = scene target
-  self.fader:setValueParameter(liveParam)
+  if self._sceneTargetParam then return end
+  if not self._modAudioParam then return end  -- not modulated; skip
+  self._sceneTargetParam = sceneTargetParam
   self.fader:setTargetParameter(sceneTargetParam)
   self.fader:setControlParameter(sceneTargetParam)
 end
 
 function Fader:exitSceneMode()
-  if self._sceneOriginalParam == nil then return end
-  -- setParameter restores value+target+control to the original
-  self.fader:setParameter(self._sceneOriginalParam)
-  self._sceneOriginalParam = nil
-  self._sceneTargetParam   = nil
+  if not self._sceneTargetParam then return end
+  -- Back to modulated state: target -> audio (line follows morph
+  -- output again), control -> base (encoder writes user's value).
+  self.fader:setTargetParameter(self._modAudioParam)
+  self.fader:setControlParameter(self._modBaseParam)
+  self._sceneTargetParam = nil
 end
 
 function Fader:getSceneTargetValue()
@@ -222,25 +252,13 @@ function Fader:getSceneTargetValue()
   return self._sceneTargetParam:target()
 end
 
--- Live audio param's current target. Read before enterSceneMode
--- (to seed the scene target) and after (to decide whether the
--- captured target differs from base). _sceneOriginalParam is set
--- only after enter, so we read from the widget when unarmed.
 function Fader:getSceneBaseValue()
-  if self._sceneOriginalParam then
-    return self._sceneOriginalParam:target()
-  end
+  if self._modBaseParam then return self._modBaseParam:target() end
   return self.fader:getValueParameter():target()
 end
 
--- The Parameter the scene morpher should softSet at audio rate.
--- For Fader-style controls, that's the live audio-path Parameter
--- bound to the widget's value port. Same Parameter that holds the
--- "base" value (= getSceneBaseValue()'s source).
 function Fader:getSceneAudioParam()
-  if self._sceneOriginalParam then
-    return self._sceneOriginalParam
-  end
+  if self._modAudioParam then return self._modAudioParam end
   return self.fader:getValueParameter()
 end
 

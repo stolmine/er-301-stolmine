@@ -459,26 +459,43 @@ function Pitch:encoder(change, shifted)
   return true
 end
 
--- Scene authoring. Pitch has TWO bindings to the fader param: the
--- main fader graphic (target marker + bar) and the readout in the
--- sub display (where encoder edits actually land). Both swap.
+-- Three-state scene display. Pitch has TWO bindings to the fader
+-- param: the main fader graphic (cursor + bar) and the readout
+-- in the sub display (where encoder edits land). Both swap on
+-- each transition.
+function Pitch:enterModulatedDisplay(audioParam, baseParam)
+  if self._modAudioParam then return end
+  self._modAudioParam = audioParam
+  self._modBaseParam  = baseParam
+  self.fader:setValueParameter(baseParam)
+  self.fader:setTargetParameter(audioParam)
+  self.fader:setControlParameter(baseParam)
+  self.readout:setParameter(baseParam)
+end
+
+function Pitch:exitModulatedDisplay()
+  if not self._modAudioParam then return end
+  self.fader:setParameter(self._modAudioParam)
+  self.readout:setParameter(self._modAudioParam)
+  self._modAudioParam = nil
+  self._modBaseParam  = nil
+end
+
 function Pitch:enterSceneMode(sceneTargetParam)
-  if self._sceneOriginalParam then return end
-  local liveParam = self.fader:getValueParameter()
-  self._sceneOriginalParam = liveParam
-  self._sceneTargetParam   = sceneTargetParam
-  self.fader:setValueParameter(liveParam)
+  if self._sceneTargetParam then return end
+  if not self._modAudioParam then return end
+  self._sceneTargetParam = sceneTargetParam
   self.fader:setTargetParameter(sceneTargetParam)
   self.fader:setControlParameter(sceneTargetParam)
   self.readout:setParameter(sceneTargetParam)
 end
 
 function Pitch:exitSceneMode()
-  if self._sceneOriginalParam == nil then return end
-  self.fader:setParameter(self._sceneOriginalParam)
-  self.readout:setParameter(self._sceneOriginalParam)
-  self._sceneOriginalParam = nil
-  self._sceneTargetParam   = nil
+  if not self._sceneTargetParam then return end
+  self.fader:setTargetParameter(self._modAudioParam)
+  self.fader:setControlParameter(self._modBaseParam)
+  self.readout:setParameter(self._modBaseParam)
+  self._sceneTargetParam = nil
 end
 
 function Pitch:getSceneTargetValue()
@@ -487,16 +504,12 @@ function Pitch:getSceneTargetValue()
 end
 
 function Pitch:getSceneBaseValue()
-  if self._sceneOriginalParam then
-    return self._sceneOriginalParam:target()
-  end
+  if self._modBaseParam then return self._modBaseParam:target() end
   return self.fader:getValueParameter():target()
 end
 
 function Pitch:getSceneAudioParam()
-  if self._sceneOriginalParam then
-    return self._sceneOriginalParam
-  end
+  if self._modAudioParam then return self._modAudioParam end
   return self.fader:getValueParameter()
 end
 

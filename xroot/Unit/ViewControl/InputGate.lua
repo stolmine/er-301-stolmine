@@ -232,20 +232,32 @@ function InputGate:encoder(change, shifted)
   return true
 end
 
--- Scene authoring (same shape as Gate; ComparatorView main, swap
--- the threshold readout so encoder writes feed the scene target).
+-- Three-state scene display (same shape as Gate).
+function InputGate:enterModulatedDisplay(audioParam, baseParam)
+  if self._modAudioParam then return end
+  self._modAudioParam = audioParam
+  self._modBaseParam  = baseParam
+  self.threshold:setParameter(baseParam)
+end
+
+function InputGate:exitModulatedDisplay()
+  if not self._modAudioParam then return end
+  self.threshold:setParameter(self._modAudioParam)
+  self._modAudioParam = nil
+  self._modBaseParam  = nil
+end
+
 function InputGate:enterSceneMode(sceneTargetParam)
-  if self._sceneOriginalParam then return end
-  self._sceneOriginalParam = self.threshold:getParameter()
-  self._sceneTargetParam   = sceneTargetParam
+  if self._sceneTargetParam then return end
+  if not self._modAudioParam then return end
+  self._sceneTargetParam = sceneTargetParam
   self.threshold:setParameter(sceneTargetParam)
 end
 
 function InputGate:exitSceneMode()
-  if self._sceneOriginalParam == nil then return end
-  self.threshold:setParameter(self._sceneOriginalParam)
-  self._sceneOriginalParam = nil
-  self._sceneTargetParam   = nil
+  if not self._sceneTargetParam then return end
+  self.threshold:setParameter(self._modBaseParam)
+  self._sceneTargetParam = nil
 end
 
 function InputGate:getSceneTargetValue()
@@ -254,16 +266,12 @@ function InputGate:getSceneTargetValue()
 end
 
 function InputGate:getSceneBaseValue()
-  if self._sceneOriginalParam then
-    return self._sceneOriginalParam:target()
-  end
+  if self._modBaseParam then return self._modBaseParam:target() end
   return self.threshold:getParameter():target()
 end
 
 function InputGate:getSceneAudioParam()
-  if self._sceneOriginalParam then
-    return self._sceneOriginalParam
-  end
+  if self._modAudioParam then return self._modAudioParam end
   return self.threshold:getParameter()
 end
 

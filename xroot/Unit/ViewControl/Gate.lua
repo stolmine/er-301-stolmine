@@ -425,23 +425,35 @@ function Gate:encoder(change, shifted)
   return true
 end
 
--- Scene authoring. The main visual is the ComparatorView (no
--- Fader-style target marker), so the only swap is on the threshold
--- readout: encoder edits land on the scene target. The visual cue
--- the user is in scene mode comes from the sub-display "Scene N"
--- overlay (3b.5).
+-- Three-state scene display. Gate's main visual is a
+-- ComparatorView (no Fader-style box/line caret indicators), so
+-- the only meaningful swap is on the threshold sub readout
+-- which is what the encoder edits.
+function Gate:enterModulatedDisplay(audioParam, baseParam)
+  if self._modAudioParam then return end
+  self._modAudioParam = audioParam
+  self._modBaseParam  = baseParam
+  self.threshold:setParameter(baseParam)
+end
+
+function Gate:exitModulatedDisplay()
+  if not self._modAudioParam then return end
+  self.threshold:setParameter(self._modAudioParam)
+  self._modAudioParam = nil
+  self._modBaseParam  = nil
+end
+
 function Gate:enterSceneMode(sceneTargetParam)
-  if self._sceneOriginalParam then return end
-  self._sceneOriginalParam = self.threshold:getParameter()
-  self._sceneTargetParam   = sceneTargetParam
+  if self._sceneTargetParam then return end
+  if not self._modAudioParam then return end
+  self._sceneTargetParam = sceneTargetParam
   self.threshold:setParameter(sceneTargetParam)
 end
 
 function Gate:exitSceneMode()
-  if self._sceneOriginalParam == nil then return end
-  self.threshold:setParameter(self._sceneOriginalParam)
-  self._sceneOriginalParam = nil
-  self._sceneTargetParam   = nil
+  if not self._sceneTargetParam then return end
+  self.threshold:setParameter(self._modBaseParam)
+  self._sceneTargetParam = nil
 end
 
 function Gate:getSceneTargetValue()
@@ -450,16 +462,12 @@ function Gate:getSceneTargetValue()
 end
 
 function Gate:getSceneBaseValue()
-  if self._sceneOriginalParam then
-    return self._sceneOriginalParam:target()
-  end
+  if self._modBaseParam then return self._modBaseParam:target() end
   return self.threshold:getParameter():target()
 end
 
 function Gate:getSceneAudioParam()
-  if self._sceneOriginalParam then
-    return self._sceneOriginalParam
-  end
+  if self._modAudioParam then return self._modAudioParam end
   return self.threshold:getParameter()
 end
 

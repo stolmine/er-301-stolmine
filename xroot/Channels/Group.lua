@@ -139,12 +139,16 @@ function ChannelGroup:setMode(mode)
       if self.chain.activeAuthoringScene then
         self.chain:exitSceneAuthoring()
       end
-      -- Disengage the scene crossfader morpher when leaving scene
-      -- mode. Audio params snap back to whatever the morpher last
-      -- softSet (no abrupt jump). User-mode resumes.
-      if self.chain.disengageSceneMorph then
-        self.chain:disengageSceneMorph()
-      end
+      -- The scene morpher is NOT disengaged when transitioning
+      -- to edit mode. Once scene mode is engaged for the session,
+      -- the morpher continues to drive audio in user-edit too --
+      -- the user-edit widget swap (modulated display) routes
+      -- their encoder edits to baseParam, the morpher reads
+      -- base + scene to compute audio, so user-edit reflects
+      -- the crossfader position without losing the user's base
+      -- biases. Mode toggle is pure navigation.
+      -- Disengage happens on chain destroy (or via an explicit
+      -- sceneMode-off setting flip; not wired yet).
     end
     self:setActiveContext(self.editContext)
   elseif mode == "scope" then
@@ -240,6 +244,12 @@ function ChannelGroup:destroy()
   self.chain:unsubscribe("contentChanged", self)
   self.chain:mute()
   self.chain:stop()
+  -- Disengage the scene morpher (if engaged) so each delta-able
+  -- control's modulated-display state is torn down and audio
+  -- params are restored before the chain releases its resources.
+  if self.chain.disengageSceneMorph then
+    self.chain:disengageSceneMorph()
+  end
   self.chain:releaseResources()
   self.editContext:destroy()
   self.scopeContext:destroy()

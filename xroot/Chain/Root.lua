@@ -459,9 +459,11 @@ function Root:engageSceneMorph()
 
   self:_getOrBuildSceneMorph()
 
-  -- Refresh base snapshots. Capture each control's current
-  -- target() now -- this is the "user just left user-edit"
-  -- baseline that "no delta" endpoints fall back to.
+  -- Refresh base snapshots from audio params. This is the user's
+  -- pre-scene-mode value captured into baseParam; once engaged,
+  -- the morpher writes audio = base + scene_offset, the user's
+  -- encoder writes go to baseParam (via the modulated-display
+  -- widget swap below), and audio drifts no longer affect base.
   _walkAllUnits(self, function(unit)
     if not unit.controls then return end
     local unitKey = unit:getInstanceKey()
@@ -469,6 +471,26 @@ function Root:engageSceneMorph()
       if control.getSceneBaseValue then
         local baseParam = self:_getOrCreateBaseParam(unitKey, ctrlId)
         baseParam:hardSet(control:getSceneBaseValue())
+      end
+    end
+  end)
+
+  -- Swap every delta-able ViewControl into modulated display:
+  -- box (hollow rectangle) shows the user-set base; line (grey)
+  -- shows the audio param's morphed output. Encoder writes go
+  -- to baseParam, never to the audio param. Mirrors the
+  -- per-control state-machine spec in
+  -- docs/planning/scene-modulation-in-user-edit.md.
+  _walkAllUnits(self, function(unit)
+    if not unit.controls then return end
+    local unitKey = unit:getInstanceKey()
+    for ctrlId, control in pairs(unit.controls) do
+      if control.enterModulatedDisplay and control.getSceneAudioParam then
+        local audioParam = control:getSceneAudioParam()
+        local baseParam = self:_getOrCreateBaseParam(unitKey, ctrlId)
+        if audioParam and baseParam then
+          control:enterModulatedDisplay(audioParam, baseParam)
+        end
       end
     end
   end)
@@ -520,29 +542,14 @@ function Root:disengageSceneMorph()
     self._sceneMorph:clear()
   end
 
-  -- Hard-restore every audio param to its user-edit value before
-  -- handing control back to user-edit mode.
-  --
-  -- Background: the morpher writes to live audio Parameters via
-  -- softSet on every apply(). When the user disengages, the
-  -- morpher stops running, but the audio Parameters' targets are
-  -- whatever the morpher last computed (e.g. midpoint blend at
-  -- bias=0 with a scene at A). Without an explicit restore the
-  -- user returns to user-edit and sees parameter values shifted
-  -- by however much the morpher had been blending. Re-engaging
-  -- later then snapshots THESE shifted values as the new "base"
-  -- (since baseParam is refreshed from audioParam:target() at
-  -- engage), so each engage/disengage cycle drifts audio
-  -- further from the user's actual setting.
-  --
-  -- The base Parameter map (_sceneBaseParams) holds the original
-  -- user-edit target() captured at the most recent engage. We
-  -- hardSet every audio Parameter back to that snapshot here,
-  -- erasing the morpher's contribution to the audio path.
-  --
-  -- Order: this runs AFTER removeTask + morpher:clear, so the
-  -- morpher is gone before we restore and can't overwrite us on
-  -- the next audio frame.
+  -- Hard-restore every audio param to its user-edit base. With
+  -- the modulated-display swap during engage, baseParam holds
+  -- the user's authoritative value -- the encoder has been
+  -- writing here, not to the audio param. The morpher's softSet
+  -- has been driving the audio param (= base + offset); we now
+  -- need to snap the audio param back to base before we swap
+  -- the widget back to "audio param drives everything" via
+  -- exitModulatedDisplay.
   if self._sceneBaseParams then
     _walkAllUnits(self, function(unit)
       if not unit.controls then return end
@@ -562,6 +569,19 @@ function Root:disengageSceneMorph()
       end
     end)
   end
+
+  -- Exit modulated display on every delta-able control: widgets
+  -- snap back to single-param (audio) binding. After this point
+  -- the user-edit view is indistinguishable from a chain that
+  -- never had scene mode active.
+  _walkAllUnits(self, function(unit)
+    if not unit.controls then return end
+    for _, control in pairs(unit.controls) do
+      if control.exitModulatedDisplay then
+        control:exitModulatedDisplay()
+      end
+    end
+  end)
 
   if self.sceneView then
     for i = 1, self.sceneView:getSceneCount() do

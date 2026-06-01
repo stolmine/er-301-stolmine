@@ -261,24 +261,39 @@ function BranchMeter:subReleased(i, shifted)
   return true
 end
 
--- Scene authoring (mirrors Unit.ViewControl.Fader). Value stays
--- on the live audio param; target + control swap to the scene
--- target so encoder writes feed the scene's delta.
+-- Three-state scene display protocol; see Unit.ViewControl.Fader
+-- for the full convention. Mirror'd here because BranchMeter's
+-- audio Parameter binding is the same shape (single fader widget
+-- with no separate sub-display readout to swap).
+function BranchMeter:enterModulatedDisplay(audioParam, baseParam)
+  if self._modAudioParam then return end
+  self._modAudioParam = audioParam
+  self._modBaseParam  = baseParam
+  self.fader:setValueParameter(baseParam)
+  self.fader:setTargetParameter(audioParam)
+  self.fader:setControlParameter(baseParam)
+end
+
+function BranchMeter:exitModulatedDisplay()
+  if not self._modAudioParam then return end
+  self.fader:setParameter(self._modAudioParam)
+  self._modAudioParam = nil
+  self._modBaseParam  = nil
+end
+
 function BranchMeter:enterSceneMode(sceneTargetParam)
-  if self._sceneOriginalParam then return end
-  local liveParam = self.fader:getValueParameter()
-  self._sceneOriginalParam = liveParam
-  self._sceneTargetParam   = sceneTargetParam
-  self.fader:setValueParameter(liveParam)
+  if self._sceneTargetParam then return end
+  if not self._modAudioParam then return end
+  self._sceneTargetParam = sceneTargetParam
   self.fader:setTargetParameter(sceneTargetParam)
   self.fader:setControlParameter(sceneTargetParam)
 end
 
 function BranchMeter:exitSceneMode()
-  if self._sceneOriginalParam == nil then return end
-  self.fader:setParameter(self._sceneOriginalParam)
-  self._sceneOriginalParam = nil
-  self._sceneTargetParam   = nil
+  if not self._sceneTargetParam then return end
+  self.fader:setTargetParameter(self._modAudioParam)
+  self.fader:setControlParameter(self._modBaseParam)
+  self._sceneTargetParam = nil
 end
 
 function BranchMeter:getSceneTargetValue()
@@ -287,16 +302,12 @@ function BranchMeter:getSceneTargetValue()
 end
 
 function BranchMeter:getSceneBaseValue()
-  if self._sceneOriginalParam then
-    return self._sceneOriginalParam:target()
-  end
+  if self._modBaseParam then return self._modBaseParam:target() end
   return self.fader:getValueParameter():target()
 end
 
 function BranchMeter:getSceneAudioParam()
-  if self._sceneOriginalParam then
-    return self._sceneOriginalParam
-  end
+  if self._modAudioParam then return self._modAudioParam end
   return self.fader:getValueParameter()
 end
 
