@@ -36,6 +36,38 @@ function ChainBase:init(args)
   self.units = {}
   self.muteGroup = MuteGroup()
   self.outputs = {}
+  self:_buildSceneAuthoringIndicator()
+end
+
+-- Dog-ear style indicator at the top-right corner of the main
+-- display: a small filled right-triangle whose 90° vertex sits at
+-- the corner of the screen, hypotenuse facing in toward the patch.
+-- Shown while scene authoring is active so the user always has a
+-- glanceable cue that encoder edits feed the scene's stored values
+-- and not the live audio path. Every chain (Root, Patch, Branch)
+-- gets one so the cue follows the user through any depth of sub-
+-- chain dive during authoring; Chain.Root's enterSceneAuthoring
+-- walks every reachable chain and flips them all visible.
+function ChainBase:_buildSceneAuthoringIndicator()
+  local N = 4  -- 5 px per side (matches the bouncing-caret size)
+  local drawing = app.Drawing(0, 0, 256, 64)
+  local instr = app.DrawingInstructions()
+  for i = 0, N do
+    instr:hline(256 - N - 1 + i, 256 - 1, 64 - 1 - i)
+  end
+  drawing:add(instr)
+  drawing:hide()
+  self.mainGraphic:addChildOnce(drawing)
+  self._sceneAuthoringIndicator = drawing
+end
+
+function ChainBase:_setSceneAuthoringIndicator(visible)
+  if not self._sceneAuthoringIndicator then return end
+  if visible then
+    self._sceneAuthoringIndicator:show()
+  else
+    self._sceneAuthoringIndicator:hide()
+  end
 end
 
 function ChainBase:getRootChain()

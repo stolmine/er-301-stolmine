@@ -21,35 +21,6 @@ function Root:init(args)
   -- mode never enabled pay zero boot cost from it. The state
   -- container itself is cheap, but lazy avoids any chance of an
   -- in-flight SceneView change side-effecting the chain init path.
-  self:_buildSceneAuthoringIndicator()
-end
-
--- Dog-ear style indicator at the top-right corner of the main
--- display: a small filled right-triangle whose 90° vertex sits at
--- the corner of the screen, hypotenuse facing in toward the patch.
--- Shown while scene authoring is active so the user always has a
--- glanceable cue that encoder edits feed the scene's stored values
--- and not the live audio path.
-function Root:_buildSceneAuthoringIndicator()
-  local N = 4  -- 5 px per side (matches the bouncing-caret size)
-  local drawing = app.Drawing(0, 0, 256, 64)
-  local instr = app.DrawingInstructions()
-  for i = 0, N do
-    instr:hline(256 - N - 1 + i, 256 - 1, 64 - 1 - i)
-  end
-  drawing:add(instr)
-  drawing:hide()
-  self.mainGraphic:addChildOnce(drawing)
-  self._sceneAuthoringIndicator = drawing
-end
-
-function Root:_setSceneAuthoringIndicator(visible)
-  if not self._sceneAuthoringIndicator then return end
-  if visible then
-    self._sceneAuthoringIndicator:show()
-  else
-    self._sceneAuthoringIndicator:hide()
-  end
 end
 
 function Root:getSceneView()
@@ -236,7 +207,14 @@ function Root:enterSceneAuthoring(sceneView, sceneIdx)
 
   -- Corner dog-ear on the main display (page-fold metaphor:
   -- you're on the underside of the page, editing scene state).
-  self:_setSceneAuthoringIndicator(true)
+  -- Flipped on every reachable chain so the cue survives a
+  -- sub-chain dive at any depth -- the indicator graphic lives
+  -- on each chain's mainGraphic, the walk just toggles them.
+  _walkAllChains(self, function(c)
+    if c._setSceneAuthoringIndicator then
+      c:_setSceneAuthoringIndicator(true)
+    end
+  end)
 
   _walkAllUnits(self, function(unit)
     if not unit.controls then return end
@@ -320,7 +298,11 @@ function Root:exitSceneAuthoring()
     self:rebuildSceneMorph()
   end
 
-  self:_setSceneAuthoringIndicator(false)
+  _walkAllChains(self, function(c)
+    if c._setSceneAuthoringIndicator then
+      c:_setSceneAuthoringIndicator(false)
+    end
+  end)
 end
 
 ------------------------------------------------------
