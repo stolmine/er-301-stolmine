@@ -192,7 +192,6 @@ function Root:enterSceneAuthoring(sceneView, sceneIdx)
   if scene == nil then return end
   self.activeAuthoringScene = scene
   self.activeAuthoringIdx   = sceneIdx
-  self._sceneTargetParams   = {}
   -- Header indicator so the user knows they're editing scene N,
   -- not making live audio-path changes. Propagated to every
   -- sub-chain so the cue survives a branch-dive. Previous
@@ -209,13 +208,14 @@ function Root:enterSceneAuthoring(sceneView, sceneIdx)
   _walkAllUnits(self, function(unit)
     if not unit.controls then return end
     local unitKey = unit:getInstanceKey()
-    self._sceneTargetParams[unitKey] = {}
     for ctrlId, control in pairs(unit.controls) do
       if control.enterSceneMode then
-        local baseVal  = control:getSceneBaseValue()
-        local deltaVal = scene:getDelta(unitKey, ctrlId) or baseVal
-        local targetParam = app.Parameter(ctrlId .. "_scene", deltaVal)
-        self._sceneTargetParams[unitKey][ctrlId] = targetParam
+        local baseVal = control:getSceneBaseValue()
+        -- Persistent per-scene Parameter (4.3). Same instance
+        -- referenced by morpher items (4.5), so encoder writes
+        -- here track audio live during authoring without
+        -- requiring a morpher rebuild on every keystroke.
+        local targetParam = scene:getOrCreateParam(unitKey, ctrlId, baseVal)
         control:enterSceneMode(targetParam)
       end
     end
@@ -242,6 +242,18 @@ function Root:exitSceneAuthoring()
           scene:setDelta(unitKey, ctrlId, targetVal)
         else
           scene:setDelta(unitKey, ctrlId, nil)
+          -- Drop the scene's persistent Parameter too. Without
+          -- this the morpher's next rebuild would still see the
+          -- (no-op) delta via scene.params and bind to it instead
+          -- of falling back to the base Parameter. C++ refcount
+          -- keeps the Parameter alive until the morpher releases
+          -- its handle on next clear/rebuild.
+          if scene.params[unitKey] then
+            scene.params[unitKey][ctrlId] = nil
+            if next(scene.params[unitKey]) == nil then
+              scene.params[unitKey] = nil
+            end
+          end
         end
         control:exitSceneMode()
       end
@@ -250,7 +262,6 @@ function Root:exitSceneAuthoring()
 
   self.activeAuthoringScene = nil
   self.activeAuthoringIdx   = nil
-  self._sceneTargetParams   = nil
   -- Restore each chain's pre-authoring subtitle (nil = clear).
   -- Chains added or removed during authoring are blocked by the
   -- structural-edit lock, so the saved list always matches.
@@ -263,6 +274,17 @@ function Root:exitSceneAuthoring()
       end
     end
     self._scenePrevSubtitles = nil
+  end
+
+  -- Newly-added deltas (first edits in this authoring session)
+  -- and newly-pruned no-op deltas both change which endpoint
+  -- Parameter the morpher should bind for the just-authored
+  -- scene. Rebuild items so the Performance view sees the
+  -- update on return. Idempotent / cheap; skipped if morpher
+  -- isn't engaged (shouldn't be reachable: scene authoring is
+  -- only entered from Performance which engages the morpher).
+  if self._sceneEngaged then
+    self:rebuildSceneMorph()
   end
 end
 
