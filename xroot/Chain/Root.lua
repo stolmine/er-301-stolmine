@@ -1,5 +1,6 @@
 local Class = require "Base.Class"
 local Chain = require "Chain"
+local ChainBase = require "Chain.Base"
 local ScopeView = require "Chain.ScopeView"
 local PinView = require "PinView"
 local SequencerView = require "Sequencer.GridView"
@@ -31,6 +32,27 @@ end
 
 function Root:getRootChain()
   return self
+end
+
+-- True while the chain is armed for scene authoring. Patch-state
+-- gestures (insert / paste / delete / bypass / move / rename /
+-- preset-replace) check this and refuse with a flash message;
+-- only parameter edits via encoder/readout are allowed in that
+-- mode. The scene delta map only tracks param values, so allowing
+-- structural edits would silently produce changes that survive
+-- exiting the scene (defeating the "scene as an editable preset
+-- of values" model).
+function Root:isLockedForSceneAuthoring()
+  return self.activeAuthoringScene ~= nil
+end
+
+-- Helper for the gated callsites. Shows a flash message and
+-- returns true when locked; callsites do `if ... then return end`.
+function Root:rejectSceneAuthoringEdit()
+  if self.activeAuthoringScene == nil then return false end
+  local Overlay = require "Overlay"
+  Overlay.flashMainMessage("Locked while editing scene.")
+  return true
 end
 
 function Root:addPinSet(name)
@@ -203,6 +225,13 @@ end
 
 function Root:upReleased(shifted)
   if _leaveAuthoringIfArmed(self) then return true end
+end
+
+-- SHIFT opens the MarkMenu (cut / copy / paste of marked units);
+-- all structural. Block during authoring.
+function Root:shiftReleased()
+  if self:rejectSceneAuthoringEdit() then return true end
+  return ChainBase.shiftReleased(self)
 end
 
 function Root:cancelReleased(shifted)

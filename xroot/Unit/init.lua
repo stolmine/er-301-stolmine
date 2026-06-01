@@ -611,6 +611,15 @@ function Unit:addDefaultMenuItems(order, controls)
 end
 
 function Unit:showMenu(justLoad)
+  -- Block the unit edit menu (delete / bypass / move / rename /
+  -- preset-replace / etc) while the chain is in scene authoring.
+  -- Encoder edits still work; only structural edits are locked.
+  if not justLoad then
+    local root = self.chain and self.chain.getRootChain and self.chain:getRootChain()
+    if root and root.rejectSceneAuthoringEdit and root:rejectSceneAuthoringEdit() then
+      return
+    end
+  end
   local controls, order, sub = self:onShowMenu(self.objects, self.branches)
   self.menuLoadedAtLeastOnce = true
 
