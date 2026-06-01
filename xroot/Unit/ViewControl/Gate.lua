@@ -456,4 +456,11 @@ function Gate:getSceneBaseValue()
   return self.threshold:getParameter():target()
 end
 
+function Gate:getSceneAudioParam()
+  if self._sceneOriginalParam then
+    return self._sceneOriginalParam
+  end
+  return self.threshold:getParameter()
+end
+
 return Gate

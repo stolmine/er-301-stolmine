@@ -493,4 +493,11 @@ function Pitch:getSceneBaseValue()
   return self.fader:getValueParameter():target()
 end
 
+function Pitch:getSceneAudioParam()
+  if self._sceneOriginalParam then
+    return self._sceneOriginalParam
+  end
+  return self.fader:getValueParameter()
+end
+
 return Pitch

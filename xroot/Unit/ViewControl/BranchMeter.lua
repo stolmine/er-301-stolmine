@@ -293,6 +293,13 @@ function BranchMeter:getSceneBaseValue()
   return self.fader:getValueParameter():target()
 end
 
+function BranchMeter:getSceneAudioParam()
+  if self._sceneOriginalParam then
+    return self._sceneOriginalParam
+  end
+  return self.fader:getValueParameter()
+end
+
 function BranchMeter:encoder(change, shifted)
   self.fader:encoder(change, shifted, self.encoderState == Encoder.Fine)
   return true

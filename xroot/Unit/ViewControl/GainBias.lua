@@ -829,4 +829,11 @@ function GainBias:getSceneBaseValue()
   return self.fader:getValueParameter():target()
 end
 
+function GainBias:getSceneAudioParam()
+  if self._sceneOriginalParam then
+    return self._sceneOriginalParam
+  end
+  return self.fader:getValueParameter()
+end
+
 return GainBias

@@ -233,4 +233,15 @@ function Fader:getSceneBaseValue()
   return self.fader:getValueParameter():target()
 end
 
+-- The Parameter the scene morpher should softSet at audio rate.
+-- For Fader-style controls, that's the live audio-path Parameter
+-- bound to the widget's value port. Same Parameter that holds the
+-- "base" value (= getSceneBaseValue()'s source).
+function Fader:getSceneAudioParam()
+  if self._sceneOriginalParam then
+    return self._sceneOriginalParam
+  end
+  return self.fader:getValueParameter()
+end
+
 return Fader
