@@ -561,17 +561,23 @@ local function _leaveAuthoringIfArmed(self)
 end
 
 -- Egress mappings (revised after hardware bench 2026-06-01):
---   shift+UP   -> leave authoring (the canonical "jump back to
---                 Performance" gesture, parallels shift+UP
---                 escape semantics elsewhere)
---   CANCEL     -> leave authoring (still works since CANCEL
---                 isn't usable for anything else inside scene
---                 authoring -- structural edits are locked)
--- ZERO is intentionally NOT mapped here anymore: it conflicts
--- with the in-control "zero this readout" gesture, which is
--- absolutely needed during authoring.
+--   plain UP at Root  -> leave authoring (no sub-chain above to
+--                        pop into, so UP would otherwise no-op;
+--                        repurposing for "back out to Performance"
+--                        matches user-edit semantics where UP at
+--                        root leaves the edit view)
+--   shift+UP from any -> leave authoring (escape hatch from any
+--                        sub-chain depth; Patch/Branch don't see
+--                        this because their unshifted UP pops
+--                        them up first)
+--   CANCEL            -> leave authoring (CANCEL isn't usable for
+--                        anything else inside scene authoring,
+--                        structural edits are locked)
+-- ZERO is intentionally NOT mapped here: it conflicts with the
+-- in-control "zero this readout" gesture absolutely needed during
+-- authoring.
 function Root:upReleased(shifted)
-  if shifted and _leaveAuthoringIfArmed(self) then return true end
+  if _leaveAuthoringIfArmed(self) then return true end
 end
 
 function Root:cancelReleased(shifted)

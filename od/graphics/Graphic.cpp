@@ -337,6 +337,11 @@ namespace od
         mCursorState.y = y;
     }
 
+    void Graphic::setCursorShow(bool show)
+    {
+        mCursorState.show = show;
+    }
+
     void Graphic::setPosition(int left, int bottom)
     {
         mLeft = left;

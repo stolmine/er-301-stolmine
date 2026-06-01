@@ -48,6 +48,12 @@ namespace od
     // orientation: 0=cursorDown, 1=cursorUp, 2=cursorLeft, 3=cursorRight.
     void setCursorOrientation(int orientation);
     void setCursorPosition(int x, int y);
+    // show=false suppresses the caret drawing entirely on this
+    // controller. Used as a "no caret" placeholder controller so
+    // a Lua-side widget can swap between visible/invisible carets
+    // without bouncing through Window:hideCursor (which would
+    // also hide the sub caret we want to keep).
+    void setCursorShow(bool show);
 
     virtual void setPosition(int left, int bottom);
     virtual void setSize(int width, int height, bool updateSaved = true);

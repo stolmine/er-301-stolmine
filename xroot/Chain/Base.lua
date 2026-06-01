@@ -596,14 +596,18 @@ end
 
 function ChainBase:shiftReleased()
   -- MarkMenu lets the user cut / copy / paste marked units: all
-  -- structural edits. Block during scene authoring from any chain
-  -- depth, not just the root (3c.3 pushdown). Reaches Root via
-  -- getRootChain, which Patch / Branch / Root all override.
-  local root = self:getRootChain()
-  if root and root.rejectSceneAuthoringEdit and root:rejectSceneAuthoringEdit() then
-    return true
-  end
+  -- structural edits. Only block (and only flash the rejection
+  -- message) when the user is actually about to open the menu,
+  -- i.e. when there are marks. Without this guard, a casual
+  -- shift tap (used for sub-display mode toggles, decimal-set
+  -- shortcuts, etc) inside scene authoring would spam the lock
+  -- popup even though no edit was attempted.
   if self:getMarkCount() > 0 then
+    local root = self:getRootChain()
+    if root and root.rejectSceneAuthoringEdit
+        and root:rejectSceneAuthoringEdit() then
+      return true
+    end
     local menu = MarkMenu(self)
     menu:show()
   end

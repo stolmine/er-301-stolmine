@@ -89,16 +89,24 @@ function Performance:init(sceneView)
   self.cursorCol    = 1
   self.encoderAccum = 0
 
-  -- Navigation caret (downward, sits above the current ply).
+  -- Navigation caret (downward ▼, sits above the current ply).
   -- Standalone Graphic whose only purpose is to host a cursor
-  -- state that the GraphicContext reads when this is the main
-  -- cursor controller. Slots use this exclusively; M1 swaps to
-  -- the cvFader's built-in cursorRight when its bias readout is
-  -- focused (so navigation ▼ and editing ▶ are mutually exclusive
-  -- like in the standard chain edit view).
+  -- state the GraphicContext reads. Slots use this exclusively;
+  -- M1 swaps to noCaret when its bias readout is focused (sub
+  -- caret takes over with ▶ at the readout), so navigation ▼
+  -- and editing ▶ are mutually exclusive like in the standard
+  -- chain edit view.
   self.navCaret = app.Graphic(0, 0, 1, 1)
   self.navCaret:setCursorOrientation(0)  -- 0 = cursorDown
   self.navCaret:setCursorPosition(plyX(1) + ply // 2, 64)
+
+  -- "No caret" placeholder controller. setCursorShow(false)
+  -- suppresses the caret drawing in GraphicContext so swapping
+  -- the main controller to this hides ▼ without affecting the
+  -- sub controller (which keeps showing ▶ at the focused
+  -- readout).
+  self.noCaret = app.Graphic(0, 0, 1, 1)
+  self.noCaret:setCursorShow(false)
 
   -- M1: crossfader weight control. A Fader bound to the chain's
   -- scene-cv GainBias bias parameter. Encoder-on-M1 drives the
@@ -222,9 +230,16 @@ function Performance:init(sceneView)
   -- Cursor outline: 1-px border tracking the currently selected
   -- ply. Rendered over the slot panels so the user sees which
   -- column M-key would target.
+  -- Selection-outline rectangle: 1px white border around the ply
+  -- of the currently-focused control. Only relevant for M1 (the
+  -- only ply with a focusable control); slot plies never show
+  -- this since they have nothing to "edit." Hidden by default
+  -- and shown / repositioned in _refresh whenever M1 has a
+  -- focused readout.
   self.cursorBox = app.Graphic(0, kSlotY, ply, kSlotHeight)
   self.cursorBox:setBorder(kCursorOutline)
   self.cursorBox:setBorderColor(app.WHITE)
+  self.cursorBox:hide()
   self:addMainGraphic(self.cursorBox)
 
   -- Slot sub-display: scene context for an M2..M6 cursor. Lives
@@ -250,14 +265,20 @@ function Performance:init(sceneView)
   self.slotSubGroup:addChild(self.slotS1)
   self.slotSubGroup:addChild(self.slotS2)
   self.slotSubGroup:addChild(self.slotS3)
-  -- Shift state. `shiftHeld` is the panel-key state (used only
-  -- to distinguish tap from encoder-touched-during-hold). `shiftMode`
-  -- is the persistent sub-display label flag, toggled by a clean
-  -- tap of SHIFT (no encoder activity during the hold) per
-  -- habitat Pattern A.
+  -- Shift state, per-ply (habitat decision 7: shift mode persists
+  -- across cursor leave/return within a session, but each
+  -- control has its own mode). For Performance, "control" = ply,
+  -- so we store one boolean per cursorCol. Moving the cursor
+  -- shows the destination ply's stored mode; toggling shift only
+  -- affects the current ply.
+  --
+  -- `shiftHeld` is the panel-key state (used only to distinguish
+  -- tap from encoder-touched-during-hold). `shiftUsed` flags an
+  -- encoder turn during the hold so the toggle is suppressed
+  -- (habitat decision 1B).
   self.shiftHeld = false
   self.shiftUsed = false
-  self.shiftMode = false
+  self.shiftModeByCol = {false, false, false, false, false, false}
 
   -- Main encoder cursor starts on the M1 bias fader so the
   -- bouncing caret is visible from the moment the user lands in
@@ -310,8 +331,16 @@ function Performance:_refresh()
     self.plusLabel:hide()
   end
 
-  -- Cursor box: 1-px outline at the selected column.
-  self.cursorBox:setPosition(plyX(self.cursorCol), kSlotY)
+  -- Selection box: only when an M1 sub-readout is focused.
+  -- Slot navigation is conveyed by the ▼ caret alone -- the
+  -- white border would falsely suggest the slot itself is in
+  -- an editable state.
+  if self.cursorCol == 1 and self.m1FocusedReadout then
+    self.cursorBox:setPosition(plyX(1), kSlotY)
+    self.cursorBox:show()
+  else
+    self.cursorBox:hide()
+  end
 
   -- Navigation caret position: above the current ply, centered.
   self.navCaret:setCursorPosition(plyX(self.cursorCol) + ply // 2, 64)
@@ -325,8 +354,10 @@ function Performance:_refresh()
   -- focus into.
   if self.cursorCol == 1 and self.m1FocusedReadout then
     -- Editing the M1 bias / gain readout: ▶ at left of readout
-    -- (the readout's own cursorState), no nav ▼.
-    self:setMainCursorController(nil)
+    -- (the readout's own cursorState), no nav ▼ -- main controller
+    -- becomes the noCaret placeholder (show=false) so the caret
+    -- draws aren't visible on the main display.
+    self:setMainCursorController(self.noCaret)
     self:setSubCursorController(self.m1FocusedReadout)
   else
     self:setMainCursorController(self.navCaret)
@@ -347,10 +378,10 @@ function Performance:_refreshSub()
     if self.m1SubGroup then self.m1SubGroup:show() end
     if self.slotSubGroup then self.slotSubGroup:hide() end
     if self.m1S2 then
-      self.m1S2:setText(self.shiftMode and "set" or "gain")
+      self.m1S2:setText(self.shiftModeByCol[1] and "set" or "gain")
     end
     if self.m1S3 then
-      self.m1S3:setText(self.shiftMode and "set" or "bias")
+      self.m1S3:setText(self.shiftModeByCol[1] and "set" or "bias")
     end
     return
   end
@@ -371,7 +402,7 @@ function Performance:_refreshSub()
     end
     self.subStatus:setText(string.format("scene %d: %s%s",
                                           sceneIdx, scene:getName(), chip))
-    if self.shiftMode then
+    if self.shiftModeByCol[col] then
       -- Shifted bindings: S1 has none, S2 = rename, S3 = delete.
       self.slotS1:setText("")
       self.slotS2:setText("rename")
@@ -460,7 +491,11 @@ end
 
 function Performance:shiftReleased()
   if self.shiftHeld and not self.shiftUsed then
-    self.shiftMode = not self.shiftMode
+    -- Per-ply (habitat decision 7 mirror): toggle only the
+    -- current cursorCol's mode. Other plies retain their
+    -- state for when the user navigates to them.
+    local col = self.cursorCol
+    self.shiftModeByCol[col] = not self.shiftModeByCol[col]
     self:_refreshSub()
   end
   self.shiftHeld = false
@@ -670,7 +705,7 @@ function Performance:subReleased(i, shifted)
   -- panel-key state (`shifted` arg) and the persistent tap-toggle
   -- (`shiftMode`). Both routes lead to the same shifted bindings
   -- so the user can use whichever feels natural.
-  local effShifted = shifted or self.shiftMode
+  local effShifted = shifted or self.shiftModeByCol[self.cursorCol]
   local col = self.cursorCol
   if col == 1 then
     -- M1 = GainBias-style crossfader weight control.

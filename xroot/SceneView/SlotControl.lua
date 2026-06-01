@@ -28,15 +28,12 @@ function SlotControl:init(args)
   self.column  = column
   local plyLeft = (column - 1) * ply
 
-  -- Body: rounded transparent panel with a 1px GRAY3 border.
-  -- Mirrors the QuickSaver slot UX (xroot/Persist/QuickSaver.lua)
-  -- so scene slots and quicksave slots have the same visual idiom.
-  -- The Performance view's cursorBox handles selection emphasis
-  -- separately.
+  -- Body: rounded transparent panel, no border. Slot plies have
+  -- no top-level controls to select for editing, so they never
+  -- get the editing-border treatment standard chain plies get;
+  -- navigation is conveyed purely by the ▼ caret above the ply.
   self.panel = app.TextPanel("", column)
   self.panel:setCornerRadius(3, 3, 3, 3)
-  self.panel:setBorder(1)
-  self.panel:setBorderColor(app.GRAY3)
   window:addMainGraphic(self.panel)
 
   -- A/B chip overlay: small label at top-right of the ply.
