@@ -131,19 +131,46 @@ end
 function Root:leaveHoldMode()
 end
 
--- Arm every delta-able control in the chain for scene authoring.
--- Walks all units; for each control that exposes enterSceneMode,
--- builds a per-scene target parameter (initialized to the scene's
--- existing delta if one exists, else to the control's current
--- live value) and tells the control to swap its widget's control
--- parameter to that target. Audio doesn't change; the live value
--- parameter still holds the base value. The user's encoder edits
--- inside scene authoring write to the per-scene target.
+-- Recursively visit every unit reachable from a chain: the chain's
+-- own units, every unit inside each unit's mod branches
+-- (unit.branches[*] -> Chain.Branch), and every unit inside any
+-- Custom-Unit interior (unit.patch -> Chain.Patch). Both Branch
+-- and Patch include ChainBase, so the recursive call uses the
+-- same length/getUnit API.
 --
--- Per-control enter/exitSceneMode methods land in 3b.3+; until
--- then this walk finds nothing to arm and is effectively a state-
--- tracking no-op. Lifecycle wiring is in place so 3b.2 (dive
--- routing) can hook in.
+-- Used by the scene-authoring enter/exit walks. The delta map's
+-- unit-instance keys are globally unique inside the root chain, so
+-- nested units land in the same flat storage table with no clash.
+local function _walkAllUnits(chain, callback)
+  for i = 1, chain:length() do
+    local unit = chain:getUnit(i)
+    if unit then
+      callback(unit)
+      if unit.branches then
+        for _, branch in pairs(unit.branches) do
+          _walkAllUnits(branch, callback)
+        end
+      end
+      if unit.patch then
+        _walkAllUnits(unit.patch, callback)
+      end
+    end
+  end
+end
+
+-- Arm every delta-able control reachable from the root chain for
+-- scene authoring. The walk descends through mod branches AND
+-- Custom-Unit interiors so a tweak inside, say, a Reverb's wet
+-- gain (which lives in a CustomEffect's self.patch) is captured
+-- in the scene like any top-level fader.
+--
+-- For each control that exposes enterSceneMode, builds a per-scene
+-- target parameter (initialized to the scene's existing delta if
+-- one exists, else to the control's current live value) and tells
+-- the control to swap its widget's control parameter to that
+-- target. Audio doesn't change; the live value parameter still
+-- holds the base value. The user's encoder edits inside scene
+-- authoring write to the per-scene target.
 function Root:enterSceneAuthoring(sceneView, sceneIdx)
   if self.activeAuthoringScene then return end  -- already armed
   local scene = sceneView:getScene(sceneIdx)
@@ -155,22 +182,20 @@ function Root:enterSceneAuthoring(sceneView, sceneIdx)
   -- not making live audio-path changes. Cleared on exit.
   self:setSubTitle("editing " .. (scene.name or string.format("S%d", sceneIdx)))
 
-  for i = 1, self:length() do
-    local unit = self:getUnit(i)
-    if unit and unit.controls then
-      local unitKey = unit:getInstanceKey()
-      self._sceneTargetParams[unitKey] = {}
-      for ctrlId, control in pairs(unit.controls) do
-        if control.enterSceneMode then
-          local baseVal  = control:getSceneBaseValue()
-          local deltaVal = scene:getDelta(unitKey, ctrlId) or baseVal
-          local targetParam = app.Parameter(ctrlId .. "_scene", deltaVal)
-          self._sceneTargetParams[unitKey][ctrlId] = targetParam
-          control:enterSceneMode(targetParam)
-        end
+  _walkAllUnits(self, function(unit)
+    if not unit.controls then return end
+    local unitKey = unit:getInstanceKey()
+    self._sceneTargetParams[unitKey] = {}
+    for ctrlId, control in pairs(unit.controls) do
+      if control.enterSceneMode then
+        local baseVal  = control:getSceneBaseValue()
+        local deltaVal = scene:getDelta(unitKey, ctrlId) or baseVal
+        local targetParam = app.Parameter(ctrlId .. "_scene", deltaVal)
+        self._sceneTargetParams[unitKey][ctrlId] = targetParam
+        control:enterSceneMode(targetParam)
       end
     end
-  end
+  end)
 end
 
 -- Restore every armed control to its pre-scene state and capture
@@ -182,24 +207,22 @@ function Root:exitSceneAuthoring()
   if self.activeAuthoringScene == nil then return end
   local scene = self.activeAuthoringScene
 
-  for i = 1, self:length() do
-    local unit = self:getUnit(i)
-    if unit and unit.controls then
-      local unitKey = unit:getInstanceKey()
-      for ctrlId, control in pairs(unit.controls) do
-        if control.exitSceneMode and control.getSceneTargetValue then
-          local targetVal = control:getSceneTargetValue()
-          local baseVal   = control:getSceneBaseValue()
-          if math.abs(targetVal - baseVal) > 1e-6 then
-            scene:setDelta(unitKey, ctrlId, targetVal)
-          else
-            scene:setDelta(unitKey, ctrlId, nil)
-          end
-          control:exitSceneMode()
+  _walkAllUnits(self, function(unit)
+    if not unit.controls then return end
+    local unitKey = unit:getInstanceKey()
+    for ctrlId, control in pairs(unit.controls) do
+      if control.exitSceneMode and control.getSceneTargetValue then
+        local targetVal = control:getSceneTargetValue()
+        local baseVal   = control:getSceneBaseValue()
+        if math.abs(targetVal - baseVal) > 1e-6 then
+          scene:setDelta(unitKey, ctrlId, targetVal)
+        else
+          scene:setDelta(unitKey, ctrlId, nil)
         end
+        control:exitSceneMode()
       end
     end
-  end
+  end)
 
   self.activeAuthoringScene = nil
   self.activeAuthoringIdx   = nil
