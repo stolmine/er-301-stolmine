@@ -570,17 +570,11 @@ end
 --                        sub-chain depth; Patch/Branch don't see
 --                        this because their unshifted UP pops
 --                        them up first)
---   CANCEL            -> leave authoring (CANCEL isn't usable for
---                        anything else inside scene authoring,
---                        structural edits are locked)
--- ZERO is intentionally NOT mapped here: it conflicts with the
--- in-control "zero this readout" gesture absolutely needed during
--- authoring.
+-- CANCEL is intentionally NOT mapped here: it is owned by the
+-- focused control's readout::restore (the "revert this value to
+-- where it was when I entered focus" gesture) and is absolutely
+-- needed during authoring. Same logic for ZERO.
 function Root:upReleased(shifted)
-  if _leaveAuthoringIfArmed(self) then return true end
-end
-
-function Root:cancelReleased(shifted)
   if _leaveAuthoringIfArmed(self) then return true end
 end
 
