@@ -166,6 +166,13 @@ function Performance:init(sceneView)
 
     self.m1FocusedReadout = self.m1Bias
     self.m1GainEncoderState = Encoder.Coarse
+    -- Encoder cursor (bouncing caret) follows the focused
+    -- readout. setSubCursorController will fire when the
+    -- Performance window is the focused widget for "encoder";
+    -- since Performance never grabs a child widget for focus,
+    -- getFocusedWidget("encoder") returns Performance itself, so
+    -- the Performance fields drive both the main and sub cursors.
+    self:setSubCursorController(self.m1Bias)
 
     -- Subscribe to the scene-cv branch's contentChanged so the
     -- mod button label + scope outlet stay in sync with what
@@ -208,16 +215,35 @@ function Performance:init(sceneView)
   self.slotSubGroup = app.Graphic(0, 0, 128, 64)
   self:addSubGraphic(self.slotSubGroup)
 
+  -- Top-left: scene name / index.
   self.subStatus = app.Label("", kFontSub)
   self.subStatus:setPosition(2, app.GRID4_LINE1)
   self.subStatus:setJustification(app.justifyLeft)
   self.slotSubGroup:addChild(self.subStatus)
 
-  self.subHint = app.Label("", kFontMain)
-  self.subHint:setPosition(2, app.GRID4_LINE3)
-  self.subHint:setJustification(app.justifyLeft)
-  self.subHint:setForegroundColor(app.GRAY7)
-  self.slotSubGroup:addChild(self.subHint)
+  -- Delta list below: small pool of labels, populated per
+  -- refresh from the scene's deltas. Limited to a fixed number
+  -- of lines so the layout stays predictable; surplus deltas
+  -- get an ellipsis row.
+  self.deltaListLabels = {}
+  local kDeltaLineY = {
+    app.GRID4_LINE2,
+    app.GRID4_LINE3,
+    app.GRID4_LINE4,
+  }
+  for i, y in ipairs(kDeltaLineY) do
+    local label = app.Label("", kFontMain)
+    label:setPosition(2, y)
+    label:setJustification(app.justifyLeft)
+    label:setForegroundColor(app.GRAY7)
+    self.slotSubGroup:addChild(label)
+    self.deltaListLabels[i] = label
+  end
+
+  -- Main encoder cursor starts on the M1 bias fader so the
+  -- bouncing caret is visible from the moment the user lands in
+  -- Performance.
+  self:setMainCursorController(self.cvFader)
 
   self:_refresh()
 end
@@ -268,6 +294,18 @@ function Performance:_refresh()
   -- Cursor box: 1-px outline at the selected column.
   self.cursorBox:setPosition(plyX(self.cursorCol), kSlotY)
 
+  -- Move the bouncing main caret to track the selected ply.
+  -- M1 owns the bias fader's left-of-bias caret; slot columns
+  -- use their SlotControl panel so the caret hugs the slot.
+  if self.cursorCol == 1 then
+    self:setMainCursorController(self.cvFader)
+    self:setSubCursorController(self.m1FocusedReadout or self.m1Bias)
+  else
+    local slot = self.slots and self.slots[self.cursorCol]
+    self:setMainCursorController(slot and slot.panel or nil)
+    self:setSubCursorController(nil)
+  end
+
   -- Sub display: context for the currently selected ply.
   self:_refreshSub()
 end
@@ -290,20 +328,58 @@ function Performance:_refreshSub()
   local sceneIdx = col - 1
   local scene = self.sceneView:getScene(sceneIdx)
   if scene then
-    self.subStatus:setText(string.format("scene %d: %s", sceneIdx, scene:getName()))
+    -- Top-left: index + name + (A/B) chip when bound.
     local a = self.sceneView:getCrossfaderA()
     local b = self.sceneView:getCrossfaderB()
     local chip = ""
-    if a == sceneIdx then chip = chip .. " A" end
-    if b == sceneIdx then chip = chip .. " B" end
-    local deltas = scene:countDeltas()
-    self.subHint:setText(string.format("%dd%s", deltas, chip))
+    if a == sceneIdx then chip = " (A)"
+    elseif b == sceneIdx then chip = " (B)"
+    end
+    self.subStatus:setText(string.format("scene %d: %s%s",
+                                          sceneIdx, scene:getName(), chip))
+    self:_populateDeltaList(scene)
   elseif col == self:_plusCol() then
     self.subStatus:setText("new scene")
-    self.subHint:setText("tap M to create")
+    self:_clearDeltaList()
+    if self.deltaListLabels[1] then
+      self.deltaListLabels[1]:setText("tap M to create")
+    end
   else
     self.subStatus:setText("")
-    self.subHint:setText("")
+    self:_clearDeltaList()
+  end
+end
+
+-- List the controls that have a stored delta in this scene as
+-- "<UnitTitle>.<ctrlId>" rows. Truncates with "..." when there
+-- are more deltas than label rows.
+function Performance:_populateDeltaList(scene)
+  self:_clearDeltaList()
+  if not (scene and scene.deltas and self.chain) then return end
+
+  local maxRows = #self.deltaListLabels
+  local row = 0
+  for unitKey, perUnit in pairs(scene.deltas) do
+    local unit = self.chain.findByInstanceKey
+                 and self.chain:findByInstanceKey(unitKey)
+    local unitName = (unit and (unit.title or unit:getInstanceName()))
+                     or "?"
+    for ctrlId, _ in pairs(perUnit) do
+      row = row + 1
+      if row > maxRows then
+        -- Mark the last visible row as ellipsis and bail.
+        self.deltaListLabels[maxRows]:setText("...")
+        return
+      end
+      self.deltaListLabels[row]:setText(string.format("%s.%s",
+                                                       unitName, ctrlId))
+    end
+  end
+end
+
+function Performance:_clearDeltaList()
+  for _, label in ipairs(self.deltaListLabels) do
+    label:setText("")
   end
 end
 
@@ -320,10 +396,13 @@ function Performance:contentChanged(chain)
   end
 end
 
--- Focus one of the M1 readouts so the encoder writes to it.
+-- Focus one of the M1 readouts so the encoder writes to it. Also
+-- repoints the sub cursor controller so the bouncing caret moves
+-- to the focused readout (standard GainBias UX).
 function Performance:_setM1FocusedReadout(readout)
   if readout then readout:save() end
   self.m1FocusedReadout = readout
+  self:setSubCursorController(readout)
 end
 
 -- Decimal keyboard for direct value entry on the gain readout.
