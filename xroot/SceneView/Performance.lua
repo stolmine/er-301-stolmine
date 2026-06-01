@@ -456,13 +456,18 @@ function Performance:contentChanged(chain)
   end
 end
 
--- Focus one of the M1 readouts so the encoder writes to it. Also
--- repoints the sub cursor controller so the bouncing caret moves
--- to the focused readout (standard GainBias UX).
+-- Focus one of the M1 readouts so the encoder writes to it.
+-- Routes through _refresh so the main caret (▼ nav <-> ▶ at the
+-- fader bias), the sub caret (none <-> ▶ at the readout), and
+-- the selection border around the M1 ply all flip in lockstep
+-- with the focus state. The previous implementation updated
+-- only the sub controller; the main caret stayed as ▼ above the
+-- ply even after focus, conflating selection and navigation.
+-- See docs/planning/cursor-selection-conventions.md.
 function Performance:_setM1FocusedReadout(readout)
   if readout then readout:save() end
   self.m1FocusedReadout = readout
-  self:setSubCursorController(readout)
+  self:_refresh()
 end
 
 -- Decimal keyboard for direct value entry on the gain readout.
