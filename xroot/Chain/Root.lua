@@ -185,6 +185,34 @@ function Root:exitSceneAuthoring()
   self:clearSubTitle()
 end
 
+-- Egress gestures from inside scene authoring. When the chain is
+-- armed for scene editing, UP / shift+HOME / CANCEL all return to
+-- the Performance overview (same destination as the HOLD panel
+-- button bounce in ChannelGroup.setMode). When not in authoring,
+-- the handlers return nothing so the default chain navigation runs.
+--
+-- Routes through the Channels module so the per-channel-group
+-- context switch happens (chain:exitSceneAuthoring alone wouldn't
+-- activate sceneHoldContext).
+local function _leaveAuthoringIfArmed(self)
+  if self.activeAuthoringScene == nil then return false end
+  local Channels = require "Channels"
+  Channels.leaveSceneAuthoring()
+  return true
+end
+
+function Root:upReleased(shifted)
+  if _leaveAuthoringIfArmed(self) then return true end
+end
+
+function Root:cancelReleased(shifted)
+  if _leaveAuthoringIfArmed(self) then return true end
+end
+
+function Root:zeroReleased()
+  if _leaveAuthoringIfArmed(self) then return true end
+end
+
 function Root:enterScopeView()
   local xpath = self:getXPathToSelection()
   self.scopeView:refresh()
