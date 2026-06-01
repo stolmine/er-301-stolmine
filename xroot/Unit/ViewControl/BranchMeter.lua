@@ -261,6 +261,38 @@ function BranchMeter:subReleased(i, shifted)
   return true
 end
 
+-- Scene authoring (mirrors Unit.ViewControl.Fader). Value stays
+-- on the live audio param; target + control swap to the scene
+-- target so encoder writes feed the scene's delta.
+function BranchMeter:enterSceneMode(sceneTargetParam)
+  if self._sceneOriginalParam then return end
+  local liveParam = self.fader:getValueParameter()
+  self._sceneOriginalParam = liveParam
+  self._sceneTargetParam   = sceneTargetParam
+  self.fader:setValueParameter(liveParam)
+  self.fader:setTargetParameter(sceneTargetParam)
+  self.fader:setControlParameter(sceneTargetParam)
+end
+
+function BranchMeter:exitSceneMode()
+  if self._sceneOriginalParam == nil then return end
+  self.fader:setParameter(self._sceneOriginalParam)
+  self._sceneOriginalParam = nil
+  self._sceneTargetParam   = nil
+end
+
+function BranchMeter:getSceneTargetValue()
+  if self._sceneTargetParam == nil then return 0 end
+  return self._sceneTargetParam:target()
+end
+
+function BranchMeter:getSceneBaseValue()
+  if self._sceneOriginalParam then
+    return self._sceneOriginalParam:target()
+  end
+  return self.fader:getValueParameter():target()
+end
+
 function BranchMeter:encoder(change, shifted)
   self.fader:encoder(change, shifted, self.encoderState == Encoder.Fine)
   return true

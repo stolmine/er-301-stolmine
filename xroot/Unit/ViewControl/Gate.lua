@@ -425,4 +425,35 @@ function Gate:encoder(change, shifted)
   return true
 end
 
+-- Scene authoring. The main visual is the ComparatorView (no
+-- Fader-style target marker), so the only swap is on the threshold
+-- readout: encoder edits land on the scene target. The visual cue
+-- the user is in scene mode comes from the sub-display "Scene N"
+-- overlay (3b.5).
+function Gate:enterSceneMode(sceneTargetParam)
+  if self._sceneOriginalParam then return end
+  self._sceneOriginalParam = self.threshold:getParameter()
+  self._sceneTargetParam   = sceneTargetParam
+  self.threshold:setParameter(sceneTargetParam)
+end
+
+function Gate:exitSceneMode()
+  if self._sceneOriginalParam == nil then return end
+  self.threshold:setParameter(self._sceneOriginalParam)
+  self._sceneOriginalParam = nil
+  self._sceneTargetParam   = nil
+end
+
+function Gate:getSceneTargetValue()
+  if self._sceneTargetParam == nil then return 0 end
+  return self._sceneTargetParam:target()
+end
+
+function Gate:getSceneBaseValue()
+  if self._sceneOriginalParam then
+    return self._sceneOriginalParam:target()
+  end
+  return self.threshold:getParameter():target()
+end
+
 return Gate

@@ -222,4 +222,15 @@ function Fader:getSceneTargetValue()
   return self._sceneTargetParam:target()
 end
 
+-- Live audio param's current target. Read before enterSceneMode
+-- (to seed the scene target) and after (to decide whether the
+-- captured target differs from base). _sceneOriginalParam is set
+-- only after enter, so we read from the widget when unarmed.
+function Fader:getSceneBaseValue()
+  if self._sceneOriginalParam then
+    return self._sceneOriginalParam:target()
+  end
+  return self.fader:getValueParameter():target()
+end
+
 return Fader

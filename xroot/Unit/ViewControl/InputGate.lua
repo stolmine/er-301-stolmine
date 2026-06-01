@@ -232,4 +232,32 @@ function InputGate:encoder(change, shifted)
   return true
 end
 
+-- Scene authoring (same shape as Gate; ComparatorView main, swap
+-- the threshold readout so encoder writes feed the scene target).
+function InputGate:enterSceneMode(sceneTargetParam)
+  if self._sceneOriginalParam then return end
+  self._sceneOriginalParam = self.threshold:getParameter()
+  self._sceneTargetParam   = sceneTargetParam
+  self.threshold:setParameter(sceneTargetParam)
+end
+
+function InputGate:exitSceneMode()
+  if self._sceneOriginalParam == nil then return end
+  self.threshold:setParameter(self._sceneOriginalParam)
+  self._sceneOriginalParam = nil
+  self._sceneTargetParam   = nil
+end
+
+function InputGate:getSceneTargetValue()
+  if self._sceneTargetParam == nil then return 0 end
+  return self._sceneTargetParam:target()
+end
+
+function InputGate:getSceneBaseValue()
+  if self._sceneOriginalParam then
+    return self._sceneOriginalParam:target()
+  end
+  return self.threshold:getParameter():target()
+end
+
 return InputGate

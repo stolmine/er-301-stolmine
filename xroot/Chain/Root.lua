@@ -137,11 +137,8 @@ function Root:enterSceneAuthoring(sceneView, sceneIdx)
       self._sceneTargetParams[unitKey] = {}
       for ctrlId, control in pairs(unit.controls) do
         if control.enterSceneMode then
-          local currentVal = 0
-          if control.fader and control.fader.getValueParameter then
-            currentVal = control.fader:getValueParameter():target()
-          end
-          local deltaVal = scene:getDelta(unitKey, ctrlId) or currentVal
+          local baseVal  = control:getSceneBaseValue()
+          local deltaVal = scene:getDelta(unitKey, ctrlId) or baseVal
           local targetParam = app.Parameter(ctrlId .. "_scene", deltaVal)
           self._sceneTargetParams[unitKey][ctrlId] = targetParam
           control:enterSceneMode(targetParam)
@@ -167,10 +164,7 @@ function Root:exitSceneAuthoring()
       for ctrlId, control in pairs(unit.controls) do
         if control.exitSceneMode and control.getSceneTargetValue then
           local targetVal = control:getSceneTargetValue()
-          local baseVal = 0
-          if control.fader and control.fader.getValueParameter then
-            baseVal = control.fader:getValueParameter():target()
-          end
+          local baseVal   = control:getSceneBaseValue()
           if math.abs(targetVal - baseVal) > 1e-6 then
             scene:setDelta(unitKey, ctrlId, targetVal)
           else

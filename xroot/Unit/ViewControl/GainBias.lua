@@ -792,4 +792,41 @@ function GainBias:encoder(change, shifted)
   return true
 end
 
+-- Scene authoring. The bias readout (encoder target when focused
+-- on bias) swaps to the scene target, as does the main fader's
+-- target+control. The gain readout intentionally stays bound to
+-- gainParam: getPinControl only exposes bias, so gain isn't a
+-- scene delta. Edits to gain in scene mode are live edits, same
+-- as outside scene mode.
+function GainBias:enterSceneMode(sceneTargetParam)
+  if self._sceneOriginalParam then return end
+  local liveParam = self.fader:getValueParameter()  -- = biasParam
+  self._sceneOriginalParam = liveParam
+  self._sceneTargetParam   = sceneTargetParam
+  self.fader:setValueParameter(liveParam)
+  self.fader:setTargetParameter(sceneTargetParam)
+  self.fader:setControlParameter(sceneTargetParam)
+  self.bias:setParameter(sceneTargetParam)
+end
+
+function GainBias:exitSceneMode()
+  if self._sceneOriginalParam == nil then return end
+  self.fader:setParameter(self._sceneOriginalParam)
+  self.bias:setParameter(self._sceneOriginalParam)
+  self._sceneOriginalParam = nil
+  self._sceneTargetParam   = nil
+end
+
+function GainBias:getSceneTargetValue()
+  if self._sceneTargetParam == nil then return 0 end
+  return self._sceneTargetParam:target()
+end
+
+function GainBias:getSceneBaseValue()
+  if self._sceneOriginalParam then
+    return self._sceneOriginalParam:target()
+  end
+  return self.fader:getValueParameter():target()
+end
+
 return GainBias
