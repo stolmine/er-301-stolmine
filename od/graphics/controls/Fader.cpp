@@ -147,51 +147,72 @@ namespace od
     fb.hline(GRAY7, x - 2, x + 2, y0);
     fb.hline(GRAY7, x - 2, x + 2, y1);
 
-    // draw value position as the hollow box. This is the conventional
-    // bias indicator; it represents the live audio-path value and is
-    // styled the same across all modes (user-edit, hold, scene). In
-    // user-edit mode target == value so the target hline below draws
-    // through the box at the same y, preserving the established look.
-    // In scene authoring, value stays here (audio unchanged) and the
-    // target hline moves to the scene's stored value.
+    // Detect whether scene authoring (or any context that sets
+    // target distinct from value) is active. setParameter() at unit
+    // init binds all three to the same Parameter*, so target ==
+    // value in plain user-edit. enterSceneMode() (and the legacy
+    // PinView pin setup) bind a separate target -- pointer compare
+    // is enough.
+    bool sceneActive = (mpValueParameter != 0 && mpTargetParameter != 0 &&
+                        mpTargetParameter != mpValueParameter);
+
+    int valueY = -1, targetY = -1;
     if (mpValueParameter)
     {
       float value = mReadout.convertToUnits(mpValueParameter->value());
-      y = y0 + (int)(H * scale(value));
-      y = MIN(MAX(y, y0), y1);
-      fb.clear(x - 3, y - 1, x + 3, y + 1);
-      if (mHighlightTarget)
-      {
-        fb.box(GRAY7, x - 3, y - 1, x + 3, y + 1);
-      }
-      else
-      {
-        fb.box(mForeground, x - 3, y - 1, x + 3, y + 1);
-      }
+      valueY = y0 + (int)(H * scale(value));
+      valueY = MIN(MAX(valueY, y0), y1);
     }
-
-    // draw target position as a thin horizontal line. The "extra"
-    // marker that hold/scene authoring adds; in user-edit mode it
-    // overlays the value box (target==value pointer) and reads as
-    // the conventional line through the bias box. In scene mode it
-    // separates from the box to show where the encoder is writing.
-    // Drawn after the box so the line is visible over the cleared
-    // box interior in user-edit mode.
     if (mpTargetParameter)
     {
       float target = mReadout.convertToUnits(mpTargetParameter->target());
-      y = y0 + (int)(H * scale(target));
-      y = MIN(MAX(y, y0), y1);
-      if (mHighlightTarget)
+      targetY = y0 + (int)(H * scale(target));
+      targetY = MIN(MAX(targetY, y0), y1);
+    }
+
+    // Brightness: the element representing where the encoder is
+    // writing reads brighter. In user-edit that's the value
+    // (= base = where audio sits); in scene the target (= scene's
+    // stored value).
+    uint32_t valueColor  = sceneActive ? GRAY7 : mForeground;
+    uint32_t targetColor = sceneActive ? mForeground : GRAY7;
+
+    // Draw order: dim element first, bright on top. In user-edit
+    // the line (dim) is laid down first and the box (bright) sits
+    // on top -- matches the OG hold/edit look. In scene the box
+    // (dim, static at base) is laid down first and the line (bright,
+    // moving with encoder) sits on top to highlight what's being
+    // edited.
+    if (sceneActive)
+    {
+      if (valueY >= 0)
       {
-        fb.hline(mForeground, x - 4, x + 4, y);
+        fb.clear(x - 3, valueY - 1, x + 3, valueY + 1);
+        fb.box(valueColor, x - 3, valueY - 1, x + 3, valueY + 1);
       }
-      else
+      if (targetY >= 0)
       {
-        fb.hline(GRAY7, x - 4, x + 4, y);
+        fb.hline(targetColor, x - 4, x + 4, targetY);
       }
+    }
+    else
+    {
+      if (targetY >= 0)
+      {
+        fb.hline(targetColor, x - 4, x + 4, targetY);
+      }
+      if (valueY >= 0)
+      {
+        fb.clear(x - 3, valueY - 1, x + 3, valueY + 1);
+        fb.box(valueColor, x - 3, valueY - 1, x + 3, valueY + 1);
+      }
+    }
+
+    // Cursor follows the target (= encoder destination).
+    if (targetY >= 0)
+    {
       mCursorState.x = mWorldLeft;
-      mCursorState.y = y;
+      mCursorState.y = targetY;
     }
 
     // draw zero position
