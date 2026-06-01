@@ -216,6 +216,22 @@ function Root:enterSceneAuthoring(sceneView, sceneIdx)
     end
   end)
 
+  -- Arm any control not already in modulated display BEFORE
+  -- swapping to scene-editing. enterSceneMode early-returns on
+  -- _modAudioParam==nil so a unit added since the last
+  -- engage/rebuild would otherwise have its widget stay bound
+  -- to the live audio param: encoder writes during authoring
+  -- would hard-edit audio (airlock break) and the widget's
+  -- highlight would never transition, leaving it at the C++
+  -- default mHighlightTarget=true which visually matches the
+  -- scene-editing look. Funneling through _armAllControlsModulated
+  -- guarantees every reachable delta-able control is in the
+  -- expected pre-condition (modulated, baseParam holding the
+  -- live audio value) before enterSceneMode swaps to editing.
+  if self._sceneEngaged then
+    self:_armAllControlsModulated()
+  end
+
   _walkAllUnits(self, function(unit)
     if not unit.controls then return end
     local unitKey = unit:getInstanceKey()
@@ -247,22 +263,33 @@ function Root:exitSceneAuthoring()
     local unitKey = unit:getInstanceKey()
     for ctrlId, control in pairs(unit.controls) do
       if control.exitSceneMode and control.getSceneTargetValue then
-        local targetVal = control:getSceneTargetValue()
-        local baseVal   = control:getSceneBaseValue()
-        if math.abs(targetVal - baseVal) > 1e-6 then
-          scene:setDelta(unitKey, ctrlId, targetVal)
-        else
-          scene:setDelta(unitKey, ctrlId, nil)
-          -- Drop the scene's persistent Parameter too. Without
-          -- this the morpher's next rebuild would still see the
-          -- (no-op) delta via scene.params and bind to it instead
-          -- of falling back to the base Parameter. C++ refcount
-          -- keeps the Parameter alive until the morpher releases
-          -- its handle on next clear/rebuild.
-          if scene.params[unitKey] then
-            scene.params[unitKey][ctrlId] = nil
-            if next(scene.params[unitKey]) == nil then
-              scene.params[unitKey] = nil
+        -- Only controls that actually entered scene-editing
+        -- (_sceneTargetParam non-nil) contribute a delta. With
+        -- the _armAllControlsModulated pre-condition in
+        -- enterSceneAuthoring this should be every delta-able
+        -- control; the guard exists for safety so any future
+        -- skipped path (a control without enterModulatedDisplay,
+        -- a structural-lock corner case) can't pollute the scene
+        -- with a spurious 0-delta from getSceneTargetValue's
+        -- "return 0 when not editing" fallback.
+        if control._sceneTargetParam then
+          local targetVal = control:getSceneTargetValue()
+          local baseVal   = control:getSceneBaseValue()
+          if math.abs(targetVal - baseVal) > 1e-6 then
+            scene:setDelta(unitKey, ctrlId, targetVal)
+          else
+            scene:setDelta(unitKey, ctrlId, nil)
+            -- Drop the scene's persistent Parameter too. Without
+            -- this the morpher's next rebuild would still see the
+            -- (no-op) delta via scene.params and bind to it instead
+            -- of falling back to the base Parameter. C++ refcount
+            -- keeps the Parameter alive until the morpher releases
+            -- its handle on next clear/rebuild.
+            if scene.params[unitKey] then
+              scene.params[unitKey][ctrlId] = nil
+              if next(scene.params[unitKey]) == nil then
+                scene.params[unitKey] = nil
+              end
             end
           end
         end
@@ -406,6 +433,55 @@ function Root:_getOrCreateBaseParam(unitKey, ctrlId)
   return p
 end
 
+-- Arm a single control's modulated-display state. Idempotent.
+-- Already-modulated controls: no-op (don't re-snapshot base, the
+-- user has been editing it since the original engage).
+-- New controls: snapshot base from the live audio target, then
+-- swap the widget into modulated display so subsequent encoder
+-- writes go to base.
+--
+-- Centralized because three entry points have to guarantee
+-- "every delta-able control is armed before the next scene
+-- operation touches it":
+--   - engageSceneMorph: initial bulk arm.
+--   - rebuildSceneMorph: defensive re-arm on scene assignment
+--     changes (catches units added since engage).
+--   - enterSceneAuthoring: defensive re-arm before swapping
+--     widgets into scene-editing. Without this, a unit added
+--     between the most recent rebuild and authoring entry would
+--     hit enterSceneMode's "if not _modAudioParam then return"
+--     guard and stay in normal-display state. Authoring's
+--     encoder writes would then hit the live audio param
+--     directly -- "airlock break" -- and exiting authoring
+--     could leave the widget at the wrong highlight (C++
+--     default mHighlightTarget=true reads as "scene-editing
+--     look" because it was never transitioned).
+function Root:_armControlModulated(unitKey, ctrlId, control)
+  if not (control.enterModulatedDisplay and control.getSceneAudioParam) then
+    return
+  end
+  if control._modAudioParam then return end
+  local audioParam = control:getSceneAudioParam()
+  if not audioParam then return end
+  local baseParam = self:_getOrCreateBaseParam(unitKey, ctrlId)
+  baseParam:hardSet(audioParam:target())
+  control:enterModulatedDisplay(audioParam, baseParam)
+end
+
+-- Walk every delta-able control reachable from the root chain
+-- and arm any that aren't already in modulated display. Used by
+-- every scene-operation entry point so newly-added units never
+-- slip through.
+function Root:_armAllControlsModulated()
+  _walkAllUnits(self, function(unit)
+    if not unit.controls then return end
+    local unitKey = unit:getInstanceKey()
+    for ctrlId, control in pairs(unit.controls) do
+      self:_armControlModulated(unitKey, ctrlId, control)
+    end
+  end)
+end
+
 -- Walk every delta-able control and add a 4-Parameter VEE morpher
 -- item per (audio target, base, sceneA endpoint, sceneB endpoint).
 -- The VEE blend keeps the live audio param at the user's pre-scene
@@ -481,19 +557,7 @@ function Root:engageSceneMorph()
   -- to baseParam, never to the audio param. Mirrors the
   -- per-control state-machine spec in
   -- docs/planning/scene-modulation-in-user-edit.md.
-  _walkAllUnits(self, function(unit)
-    if not unit.controls then return end
-    local unitKey = unit:getInstanceKey()
-    for ctrlId, control in pairs(unit.controls) do
-      if control.enterModulatedDisplay and control.getSceneAudioParam then
-        local audioParam = control:getSceneAudioParam()
-        local baseParam = self:_getOrCreateBaseParam(unitKey, ctrlId)
-        if audioParam and baseParam then
-          control:enterModulatedDisplay(audioParam, baseParam)
-        end
-      end
-    end
-  end)
+  self:_armAllControlsModulated()
 
   self._sceneTask:lock()
   self._sceneTask:clear()
@@ -610,28 +674,10 @@ end
 function Root:rebuildSceneMorph()
   if not self._sceneEngaged then return end
   self._sceneTask:lock()
-  _walkAllUnits(self, function(unit)
-    if not unit.controls then return end
-    local unitKey = unit:getInstanceKey()
-    for ctrlId, control in pairs(unit.controls) do
-      if control.getSceneAudioParam and control.enterModulatedDisplay then
-        local audioParam = control:getSceneAudioParam()
-        if audioParam then
-          local baseParam = self:_getOrCreateBaseParam(unitKey, ctrlId)
-          if not control._modAudioParam then
-            -- Not yet modulated. Snapshot base from live audio
-            -- target (the user's authoritative value), then arm
-            -- modulated display.
-            baseParam:hardSet(audioParam:target())
-            control:enterModulatedDisplay(audioParam, baseParam)
-          end
-          -- Already-modulated controls: baseParam was already
-          -- snapshotted at engage and tracks the user's encoder
-          -- edits, so it's already correct. No re-snapshot.
-        end
-      end
-    end
-  end)
+  -- Catch any units added since engage / last rebuild.
+  -- Already-modulated controls are no-op here; baseParam tracks
+  -- the user's encoder edits and stays correct.
+  self:_armAllControlsModulated()
   self._sceneMorph:clear()
   self:_buildSceneMorphItems()
   self._sceneTask:unlock()
