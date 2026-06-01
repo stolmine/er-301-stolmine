@@ -312,6 +312,22 @@ local function toggleSequencerSubView()
   end
 end
 
+-- Scene mode authoring dive routers. Only the current channel
+-- participates; matches the per-channel scene state model.
+local function enterSceneAuthoring(sceneIdx)
+  local g = c2g[current]
+  if g and g.enterSceneAuthoring then
+    g:enterSceneAuthoring(sceneIdx)
+  end
+end
+
+local function leaveSceneAuthoring()
+  local g = c2g[current]
+  if g and g.leaveSceneAuthoring then
+    g:leaveSceneAuthoring()
+  end
+end
+
 local function show()
   c2g[current]:show()
 
@@ -452,6 +468,8 @@ return {
   clear = clear,
   setViewMode = setViewMode,
   toggleSequencerSubView = toggleSequencerSubView,
+  enterSceneAuthoring    = enterSceneAuthoring,
+  leaveSceneAuthoring    = leaveSceneAuthoring,
   show = show,
   select = select,
   selected = selected,

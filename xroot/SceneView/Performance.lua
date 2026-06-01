@@ -354,13 +354,13 @@ function Performance:_renameScene(sceneIdx, scene)
   return true
 end
 
--- Authoring view dive. Phase 2 stub: just flash a message so the
--- user sees the gesture registered. Phase 3 swaps this for the
--- real Authoring view.
+-- Authoring view dive. Routes through Channels so the current
+-- ChannelGroup builds + activates the per-scene authoring
+-- context. The Authoring view's UP / shift+HOME / CANCEL handlers
+-- come back here via Channels.leaveSceneAuthoring.
 function Performance:_enterAuthoring(sceneIdx)
-  local Overlay = require "Overlay"
-  Overlay.flashMainMessage(
-    string.format("scene %d authoring: not yet (phase 3)", sceneIdx))
+  local Channels = require "Channels"
+  Channels.enterSceneAuthoring(sceneIdx)
   return true
 end
 

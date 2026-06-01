@@ -110,6 +110,19 @@ function SceneView:getPerformanceView()
   return self.performanceView
 end
 
+-- Authoring view per scene index, cached. Re-dives to the same
+-- scene reuse the existing window instance (encoder cursor +
+-- focus state persist). Returns nil when sceneIdx is invalid.
+function SceneView:getAuthoringView(sceneIdx)
+  if self.scenes[sceneIdx] == nil then return nil end
+  if self.authoringViews == nil then self.authoringViews = {} end
+  if self.authoringViews[sceneIdx] == nil then
+    local Authoring = require "SceneView.Authoring"
+    self.authoringViews[sceneIdx] = Authoring(self, sceneIdx)
+  end
+  return self.authoringViews[sceneIdx]
+end
+
 -- Phase-1 lifecycle stubs. Wired up in later phases; defined now
 -- so Chain.Root + Channels.Group can call them unconditionally.
 function SceneView:enterPerformanceView() end

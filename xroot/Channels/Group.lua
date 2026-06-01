@@ -77,6 +77,31 @@ function ChannelGroup:_getSceneHoldContext()
   return self.sceneHoldContext
 end
 
+-- Dive from the Performance view into the per-scene Authoring
+-- view. Lazy-builds the context, caches it per-scene so re-dives
+-- to the same scene reuse the existing window.
+function ChannelGroup:enterSceneAuthoring(sceneIdx)
+  if self.sceneAuthoringContexts == nil then
+    self.sceneAuthoringContexts = {}
+  end
+  local ctx = self.sceneAuthoringContexts[sceneIdx]
+  if ctx == nil then
+    local view = self.chain:getSceneView():getAuthoringView(sceneIdx)
+    if view == nil then return end  -- invalid scene index
+    ctx = Context(string.format("%s scene %d authoring",
+                                  self.chain.title, sceneIdx), view)
+    self.sceneAuthoringContexts[sceneIdx] = ctx
+  end
+  self:setActiveContext(ctx)
+end
+
+-- Return from any Authoring view back to the Performance view.
+-- Called from Authoring's UP / shift+HOME / CANCEL handlers via
+-- Channels.leaveSceneAuthoring.
+function ChannelGroup:leaveSceneAuthoring()
+  self:setActiveContext(self:_getSceneHoldContext())
+end
+
 function ChannelGroup:show()
   if not self.activeContext.visible then
     local Application = require "Application"
