@@ -804,12 +804,14 @@ function GainBias:enterModulatedDisplay(audioParam, baseParam)
   self.fader:setTargetParameter(audioParam)
   self.fader:setControlParameter(baseParam)
   self.bias:setParameter(baseParam)
+  self.fader:highlightValue()
 end
 
 function GainBias:exitModulatedDisplay()
   if not self._modAudioParam then return end
   self.fader:setParameter(self._modAudioParam)
   self.bias:setParameter(self._modAudioParam)
+  self.fader:highlightTarget()
   self._modAudioParam = nil
   self._modBaseParam  = nil
 end
@@ -821,6 +823,7 @@ function GainBias:enterSceneMode(sceneTargetParam)
   self.fader:setTargetParameter(sceneTargetParam)
   self.fader:setControlParameter(sceneTargetParam)
   self.bias:setParameter(sceneTargetParam)
+  self.fader:highlightTarget()
 end
 
 function GainBias:exitSceneMode()
@@ -828,6 +831,7 @@ function GainBias:exitSceneMode()
   self.fader:setTargetParameter(self._modAudioParam)
   self.fader:setControlParameter(self._modBaseParam)
   self.bias:setParameter(self._modBaseParam)
+  self.fader:highlightValue()
   self._sceneTargetParam = nil
 end
 

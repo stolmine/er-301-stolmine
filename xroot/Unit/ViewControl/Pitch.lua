@@ -471,12 +471,14 @@ function Pitch:enterModulatedDisplay(audioParam, baseParam)
   self.fader:setTargetParameter(audioParam)
   self.fader:setControlParameter(baseParam)
   self.readout:setParameter(baseParam)
+  self.fader:highlightValue()
 end
 
 function Pitch:exitModulatedDisplay()
   if not self._modAudioParam then return end
   self.fader:setParameter(self._modAudioParam)
   self.readout:setParameter(self._modAudioParam)
+  self.fader:highlightTarget()
   self._modAudioParam = nil
   self._modBaseParam  = nil
 end
@@ -488,6 +490,7 @@ function Pitch:enterSceneMode(sceneTargetParam)
   self.fader:setTargetParameter(sceneTargetParam)
   self.fader:setControlParameter(sceneTargetParam)
   self.readout:setParameter(sceneTargetParam)
+  self.fader:highlightTarget()
 end
 
 function Pitch:exitSceneMode()
@@ -495,6 +498,7 @@ function Pitch:exitSceneMode()
   self.fader:setTargetParameter(self._modAudioParam)
   self.fader:setControlParameter(self._modBaseParam)
   self.readout:setParameter(self._modBaseParam)
+  self.fader:highlightValue()
   self._sceneTargetParam = nil
 end
 

@@ -659,9 +659,16 @@ function Performance:mainReleased(i, shifted)
   local plusCol = self:_plusCol()
   if i == plusCol then
     -- Tap on the "+" placeholder: create a new scene + move
-    -- cursor to it.
+    -- cursor to it. Reset shift state on the just-occupied
+    -- slot so the new scene starts on its default unshifted
+    -- sub display (asgn A / asgn B / edit) rather than
+    -- inheriting whatever toggle state the slot column had
+    -- when it was previously empty.
     self.sceneView:addScene()
-    self:_rebuildSceneMorph()  -- new scene appended past A/B, no-op for current items but kept for symmetry with delete
+    self:_rebuildSceneMorph()
+    if self.shiftModeByCol[i] ~= nil then
+      self.shiftModeByCol[i] = false
+    end
     self.cursorCol = i
     self:_refresh()
     return true
@@ -702,6 +709,12 @@ function Performance:_confirmDelete(sceneIdx, scene)
     if ans then
       self.sceneView:removeScene(sceneIdx)
       self:_rebuildSceneMorph()
+      -- Delete shifts subsequent slot indices down, so a freshly
+      -- positioned slot at the deleted index inherits the deleted
+      -- slot's column. Reset all slot shift modes to the default
+      -- unshifted so the inherited column doesn't show stale
+      -- rename/delete labels on the new occupant.
+      for col = 2, 6 do self.shiftModeByCol[col] = false end
       -- Snap cursor back into bounds if we just deleted the
       -- currently-selected slot (or any slot past the now-shrunk
       -- range).

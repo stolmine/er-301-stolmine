@@ -218,6 +218,12 @@ function Fader:enterModulatedDisplay(audioParam, baseParam)
   self.fader:setValueParameter(baseParam)
   self.fader:setTargetParameter(audioParam)
   self.fader:setControlParameter(baseParam)
+  -- Modulated user-edit: box (base / user-set value) is the
+  -- prominent indicator; line (audio / morphed output) is the
+  -- faint marker showing the offset. highlightValue() drives
+  -- mHighlightTarget=false in C++ render so box draws bright
+  -- and line draws dim.
+  self.fader:highlightValue()
 end
 
 function Fader:exitModulatedDisplay()
@@ -226,6 +232,9 @@ function Fader:exitModulatedDisplay()
   -- value+target+control to audio so the widget reads + writes
   -- the live audio path directly.
   self.fader:setParameter(self._modAudioParam)
+  -- Restore default highlight (line bright, the firmware-wide
+  -- convention before any scene-mode swap touched it).
+  self.fader:highlightTarget()
   self._modAudioParam = nil
   self._modBaseParam  = nil
 end
@@ -236,6 +245,10 @@ function Fader:enterSceneMode(sceneTargetParam)
   self._sceneTargetParam = sceneTargetParam
   self.fader:setTargetParameter(sceneTargetParam)
   self.fader:setControlParameter(sceneTargetParam)
+  -- Authoring: line (scene-target, where the encoder is writing)
+  -- is the prominent indicator; box (base) dim. highlightTarget
+  -- gives mHighlightTarget=true.
+  self.fader:highlightTarget()
 end
 
 function Fader:exitSceneMode()
@@ -244,6 +257,7 @@ function Fader:exitSceneMode()
   -- output again), control -> base (encoder writes user's value).
   self.fader:setTargetParameter(self._modAudioParam)
   self.fader:setControlParameter(self._modBaseParam)
+  self.fader:highlightValue()
   self._sceneTargetParam = nil
 end
 

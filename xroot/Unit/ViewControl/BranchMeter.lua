@@ -272,11 +272,13 @@ function BranchMeter:enterModulatedDisplay(audioParam, baseParam)
   self.fader:setValueParameter(baseParam)
   self.fader:setTargetParameter(audioParam)
   self.fader:setControlParameter(baseParam)
+  self.fader:highlightValue()
 end
 
 function BranchMeter:exitModulatedDisplay()
   if not self._modAudioParam then return end
   self.fader:setParameter(self._modAudioParam)
+  self.fader:highlightTarget()
   self._modAudioParam = nil
   self._modBaseParam  = nil
 end
@@ -287,12 +289,14 @@ function BranchMeter:enterSceneMode(sceneTargetParam)
   self._sceneTargetParam = sceneTargetParam
   self.fader:setTargetParameter(sceneTargetParam)
   self.fader:setControlParameter(sceneTargetParam)
+  self.fader:highlightTarget()
 end
 
 function BranchMeter:exitSceneMode()
   if not self._sceneTargetParam then return end
   self.fader:setTargetParameter(self._modAudioParam)
   self.fader:setControlParameter(self._modBaseParam)
+  self.fader:highlightValue()
   self._sceneTargetParam = nil
 end
 
