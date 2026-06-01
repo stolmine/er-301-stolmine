@@ -139,6 +139,12 @@ function ChannelGroup:setMode(mode)
       if self.chain.activeAuthoringScene then
         self.chain:exitSceneAuthoring()
       end
+      -- Disengage the scene crossfader morpher when leaving scene
+      -- mode. Audio params snap back to whatever the morpher last
+      -- softSet (no abrupt jump). User-mode resumes.
+      if self.chain.disengageSceneMorph then
+        self.chain:disengageSceneMorph()
+      end
     end
     self:setActiveContext(self.editContext)
   elseif mode == "scope" then
@@ -156,6 +162,12 @@ function ChannelGroup:setMode(mode)
     local Settings = require "Settings"
     if Settings.get("sceneMode") == "on" then
       self.chain:getSceneView():enterPerformanceView()
+      -- Engage the crossfader morpher: walker arms per-control
+      -- base snapshots and morpher items per current A/B
+      -- assignments, schedules audio-rate processing.
+      if self.chain.engageSceneMorph then
+        self.chain:engageSceneMorph()
+      end
       self:setActiveContext(self:_getSceneHoldContext())
     else
       self.chain:enterHoldMode()
