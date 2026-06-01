@@ -159,7 +159,20 @@ namespace od
     int valueY = -1, targetY = -1;
     if (mpValueParameter)
     {
-      float value = mReadout.convertToUnits(mpValueParameter->value());
+      // In scene-active state (modulated user-edit + scene
+      // authoring) the value parameter is the user's base
+      // Parameter, a free-floating app.Parameter not owned by
+      // any audio Object -- nobody calls update() on it, so
+      // mValue stays frozen at the last hardSet and only
+      // mTarget advances on softSet writes. Reading target()
+      // here makes the box track the user's set point
+      // immediately. In legacy (target == value) mode keep
+      // reading value() so smoothing on CV-modulated faders
+      // still produces the usual "audio is here, target is
+      // there" look.
+      float v = sceneActive ? mpValueParameter->target()
+                            : mpValueParameter->value();
+      float value = mReadout.convertToUnits(v);
       valueY = y0 + (int)(H * scale(value));
       valueY = MIN(MAX(valueY, y0), y1);
     }
