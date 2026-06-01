@@ -170,21 +170,43 @@ namespace od
       targetY = MIN(MAX(targetY, y0), y1);
     }
 
-    // Brightness: the element representing where the encoder is
-    // writing reads brighter. In user-edit that's the value
-    // (= base = where audio sits); in scene the target (= scene's
-    // stored value).
-    uint32_t valueColor  = sceneActive ? GRAY7 : mForeground;
-    uint32_t targetColor = sceneActive ? mForeground : GRAY7;
+    // Brightness, draw order, and cursor follow mHighlightTarget
+    // when sceneActive (value != target). The element that's
+    // bright + drawn on top + has the cursor on it is the element
+    // the encoder is editing:
+    //
+    //   mHighlightTarget=true   -> line bright on top, cursor on line.
+    //     Used by scene authoring (encoder writes to scene target)
+    //     and by the legacy single-parameter case (no value/target
+    //     split; both indices identical).
+    //   mHighlightTarget=false  -> box bright on top, cursor on box.
+    //     Used by modulated user-edit (encoder writes to base, which
+    //     is the value parameter; the target line tracks the
+    //     morpher's live audio output and is a passive indicator).
+    //
+    // sceneActive=false collapses to the legacy convention: target
+    // line is the single bright indicator and the cursor lives on
+    // it; this preserves every pre-scenes UI.
+    bool highlightValue = sceneActive && !mHighlightTarget;
+    uint32_t valueColor  = highlightValue ? mForeground : GRAY7;
+    uint32_t targetColor = highlightValue ? GRAY7 : mForeground;
 
-    // Draw order: dim element first, bright on top. In user-edit
-    // the line (dim) is laid down first and the box (bright) sits
-    // on top -- matches the OG hold/edit look. In scene the box
-    // (dim, static at base) is laid down first and the line (bright,
-    // moving with encoder) sits on top to highlight what's being
-    // edited.
-    if (sceneActive)
+    if (highlightValue)
     {
+      // Box bright on top. Draw line first (dim), box on top.
+      if (targetY >= 0)
+      {
+        fb.hline(targetColor, x - 4, x + 4, targetY);
+      }
+      if (valueY >= 0)
+      {
+        fb.clear(x - 3, valueY - 1, x + 3, valueY + 1);
+        fb.box(valueColor, x - 3, valueY - 1, x + 3, valueY + 1);
+      }
+    }
+    else if (sceneActive)
+    {
+      // Line bright on top (scene authoring). Box first, line on top.
       if (valueY >= 0)
       {
         fb.clear(x - 3, valueY - 1, x + 3, valueY + 1);
@@ -197,6 +219,7 @@ namespace od
     }
     else
     {
+      // Legacy single-parameter look (target == value).
       if (targetY >= 0)
       {
         fb.hline(targetColor, x - 4, x + 4, targetY);
@@ -208,8 +231,15 @@ namespace od
       }
     }
 
-    // Cursor follows the target (= encoder destination).
-    if (targetY >= 0)
+    // Cursor on the bright element (= encoder destination). In
+    // modulated user-edit the cursor lives on the box; everywhere
+    // else it lives on the line (target / single-param).
+    if (highlightValue && valueY >= 0)
+    {
+      mCursorState.x = mWorldLeft;
+      mCursorState.y = valueY;
+    }
+    else if (targetY >= 0)
     {
       mCursorState.x = mWorldLeft;
       mCursorState.y = targetY;
