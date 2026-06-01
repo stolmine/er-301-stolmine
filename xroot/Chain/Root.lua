@@ -1,8 +1,10 @@
+local app = app
 local Class = require "Base.Class"
 local Chain = require "Chain"
 local ScopeView = require "Chain.ScopeView"
 local PinView = require "PinView"
 local SequencerView = require "Sequencer.GridView"
+local Branch = require "Chain.Branch"
 
 local Root = Class {}
 Root:include(Chain)
@@ -262,6 +264,209 @@ function Root:exitSceneAuthoring()
     end
     self._scenePrevSubtitles = nil
   end
+end
+
+------------------------------------------------------
+-- Scene crossfader engine.
+--
+-- A single per-Root ParamSetMorph (with the 4.1 3-Parameter Item
+-- variant) interpolates every delta-able control's audio
+-- Parameter between scene A's and scene B's stored Parameters,
+-- weighted by the output of a chain-owned app.GainBias whose
+-- bias is the manual weight (M1 encoder in Performance view) and
+-- whose input branch is user-extensible (M1 dive in Performance
+-- view; users drop CV sources / LFOs / S&H / whatever).
+--
+-- Lazy created on first engage; survives until the chain is
+-- destroyed. Per-control base Parameter snapshots refreshed each
+-- engage from each audio param's current target().
+
+-- Lazy: build the morpher, the scene-cv GainBias + its mod
+-- branch, the audio-rate task that runs them, and wire the
+-- GainBias.Out -> morpher.mCV connection. Idempotent.
+function Root:_getOrBuildSceneMorph()
+  if self._sceneMorph then return self._sceneMorph end
+
+  local morph = app.ParamSetMorph()
+  morph:setName(self.title .. ".SceneMorph")
+  self._sceneMorph = morph
+
+  local gb = app.GainBias()
+  gb:setName(self.title .. ".SceneCV")
+  self._sceneCVGainBias = gb
+
+  -- Branch wrapping the GainBias input. Used by Performance view
+  -- M1 dive so user can insert CV-source units (LFO, S&H, etc.).
+  -- Output flows: branch units -> gb.In -> gb.Out -> morpher.mCV.
+  self._sceneCVBranch = Branch {
+    title = self.title,
+    subTitle = "scene-cv",
+    depth = self.depth + 1,
+    channelCount = 1,
+    leftDestination = gb:getInput("In"),
+    leftOutObject = gb,
+    leftOutletName = "Out",
+    unit = self,  -- Branch uses this for getRootChain
+  }
+
+  -- Wire GainBias.Out into the morpher's CV inlet.
+  app.AudioThread.connect(gb:getOutput("Out"), morph:getInput("CV"))
+
+  -- Per-control base Parameter snapshots, refreshed every engage.
+  -- Map: [unitKey][ctrlId] = app.Parameter holding the user-mode
+  -- value at the moment scene mode was engaged.
+  self._sceneBaseParams = {}
+
+  -- Audio-rate task that processes the GainBias then the morpher
+  -- (process order = insertion order). Add/remove from
+  -- AudioThread on engage/disengage.
+  self._sceneTask = app.ObjectList(self.title .. ".SceneTask")
+
+  return self._sceneMorph
+end
+
+function Root:getSceneCVBranch()
+  self:_getOrBuildSceneMorph()
+  return self._sceneCVBranch
+end
+
+function Root:getSceneCVGainBias()
+  self:_getOrBuildSceneMorph()
+  return self._sceneCVGainBias
+end
+
+function Root:_getOrCreateBaseParam(unitKey, ctrlId)
+  local u = self._sceneBaseParams[unitKey]
+  if u == nil then
+    u = {}
+    self._sceneBaseParams[unitKey] = u
+  end
+  local p = u[ctrlId]
+  if p == nil then
+    p = app.Parameter(string.format("scene-base/%s/%s",
+                                    tostring(unitKey), ctrlId), 0)
+    u[ctrlId] = p
+  end
+  return p
+end
+
+-- Walk every delta-able control and add a 3-Parameter morpher item
+-- per (audio target, sceneA endpoint, sceneB endpoint). Endpoints
+-- resolve to the scene's persistent Parameter when the scene has
+-- a delta for that control, else the chain's base Parameter
+-- (= "no delta" endpoint, stays at the user-mode value snapshot).
+-- Crossfader role of kEndpointBase (0) means "this side is base"
+-- so both endpoints become baseParam = zero movement on that side.
+function Root:_buildSceneMorphItems()
+  if self.sceneView == nil then return end
+  local morph = self._sceneMorph
+  if morph == nil then return end
+
+  local aIdx = self.sceneView:getCrossfaderA()
+  local bIdx = self.sceneView:getCrossfaderB()
+  local sceneA = (aIdx and aIdx > 0) and self.sceneView:getScene(aIdx) or nil
+  local sceneB = (bIdx and bIdx > 0) and self.sceneView:getScene(bIdx) or nil
+
+  _walkAllUnits(self, function(unit)
+    if not unit.controls then return end
+    local unitKey = unit:getInstanceKey()
+    for ctrlId, control in pairs(unit.controls) do
+      if control.getSceneAudioParam then
+        local audioParam = control:getSceneAudioParam()
+        local baseParam  = self:_getOrCreateBaseParam(unitKey, ctrlId)
+        local baseVal    = control:getSceneBaseValue()
+
+        local aParam
+        if sceneA and sceneA:hasDelta(unitKey, ctrlId) then
+          aParam = sceneA:getOrCreateParam(unitKey, ctrlId, baseVal)
+        else
+          aParam = baseParam
+        end
+
+        local bParam
+        if sceneB and sceneB:hasDelta(unitKey, ctrlId) then
+          bParam = sceneB:getOrCreateParam(unitKey, ctrlId, baseVal)
+        else
+          bParam = baseParam
+        end
+
+        morph:add(audioParam, aParam, bParam)
+      end
+    end
+  end)
+end
+
+-- Engage. Refresh base snapshots from current user-mode values,
+-- build morpher items per the crossfader A/B assignments, and
+-- schedule the audio-rate task. Idempotent.
+function Root:engageSceneMorph()
+  if self._sceneEngaged then return end
+  if self.sceneView == nil then return end  -- no scenes ever created
+
+  self:_getOrBuildSceneMorph()
+
+  -- Refresh base snapshots. Capture each control's current
+  -- target() now -- this is the "user just left user-edit"
+  -- baseline that "no delta" endpoints fall back to.
+  _walkAllUnits(self, function(unit)
+    if not unit.controls then return end
+    local unitKey = unit:getInstanceKey()
+    for ctrlId, control in pairs(unit.controls) do
+      if control.getSceneBaseValue then
+        local baseParam = self:_getOrCreateBaseParam(unitKey, ctrlId)
+        baseParam:hardSet(control:getSceneBaseValue())
+      end
+    end
+  end)
+
+  self._sceneTask:lock()
+  self._sceneTask:clear()
+  self._sceneMorph:clear()
+  self:_buildSceneMorphItems()
+  self._sceneTask:add(self._sceneCVGainBias)
+  self._sceneTask:add(self._sceneMorph)
+  self._sceneTask:unlock()
+
+  app.AudioThread.addTask(self._sceneTask, 0)
+  self._sceneEngaged = true
+end
+
+-- Disengage. Tear down the audio-rate scheduling and drop the
+-- live Parameters from each scene (the on-disk float deltas
+-- survive). Base Parameters stay -- cheap, reused next engage.
+function Root:disengageSceneMorph()
+  if not self._sceneEngaged then return end
+
+  app.AudioThread.removeTask(self._sceneTask)
+
+  self._sceneTask:lock()
+  self._sceneTask:clear()
+  self._sceneTask:unlock()
+
+  if self._sceneMorph then
+    self._sceneMorph:clear()
+  end
+
+  if self.sceneView then
+    for i = 1, self.sceneView:getSceneCount() do
+      local scene = self.sceneView:getScene(i)
+      if scene and scene.releaseParams then
+        scene:releaseParams()
+      end
+    end
+  end
+
+  self._sceneEngaged = false
+end
+
+-- Rebuild items without disengaging. Called when the user cycles
+-- A/B roles or adds/removes a scene. Weight (mWeight) preserved.
+function Root:rebuildSceneMorph()
+  if not self._sceneEngaged then return end
+  self._sceneTask:lock()
+  self._sceneMorph:clear()
+  self:_buildSceneMorphItems()
+  self._sceneTask:unlock()
 end
 
 -- Egress gestures from inside scene authoring. When the chain is
