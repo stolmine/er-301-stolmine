@@ -147,40 +147,51 @@ namespace od
     fb.hline(GRAY7, x - 2, x + 2, y0);
     fb.hline(GRAY7, x - 2, x + 2, y1);
 
-    // draw target position
-    if (mpTargetParameter)
-    {
-      float target = mReadout.convertToUnits(mpTargetParameter->target());
-      y = y0 + (int)(H * scale(target));
-      y = MIN(MAX(y, y0), y1);
-      fb.clear(x - 3, y - 1, x + 3, y + 1);
-      if (mHighlightTarget)
-      {
-        fb.box(mForeground, x - 3, y - 1, x + 3, y + 1);
-      }
-      else
-      {
-        fb.box(GRAY7, x - 3, y - 1, x + 3, y + 1);
-      }
-      mCursorState.x = mWorldLeft;
-      mCursorState.y = y;
-    }
-
-    // draw value position
+    // draw value position as the hollow box. This is the conventional
+    // bias indicator; it represents the live audio-path value and is
+    // styled the same across all modes (user-edit, hold, scene). In
+    // user-edit mode target == value so the target hline below draws
+    // through the box at the same y, preserving the established look.
+    // In scene authoring, value stays here (audio unchanged) and the
+    // target hline moves to the scene's stored value.
     if (mpValueParameter)
     {
       float value = mReadout.convertToUnits(mpValueParameter->value());
       y = y0 + (int)(H * scale(value));
       y = MIN(MAX(y, y0), y1);
-      // fb.box(GRAY7, x - 3, y - 1, x + 3, y + 1);
+      fb.clear(x - 3, y - 1, x + 3, y + 1);
       if (mHighlightTarget)
       {
-        fb.hline(GRAY7, x - 4, x + 4, y);
+        fb.box(GRAY7, x - 3, y - 1, x + 3, y + 1);
       }
       else
       {
+        fb.box(mForeground, x - 3, y - 1, x + 3, y + 1);
+      }
+    }
+
+    // draw target position as a thin horizontal line. The "extra"
+    // marker that hold/scene authoring adds; in user-edit mode it
+    // overlays the value box (target==value pointer) and reads as
+    // the conventional line through the bias box. In scene mode it
+    // separates from the box to show where the encoder is writing.
+    // Drawn after the box so the line is visible over the cleared
+    // box interior in user-edit mode.
+    if (mpTargetParameter)
+    {
+      float target = mReadout.convertToUnits(mpTargetParameter->target());
+      y = y0 + (int)(H * scale(target));
+      y = MIN(MAX(y, y0), y1);
+      if (mHighlightTarget)
+      {
         fb.hline(mForeground, x - 4, x + 4, y);
       }
+      else
+      {
+        fb.hline(GRAY7, x - 4, x + 4, y);
+      }
+      mCursorState.x = mWorldLeft;
+      mCursorState.y = y;
     }
 
     // draw zero position
