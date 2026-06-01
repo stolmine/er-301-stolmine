@@ -158,6 +158,27 @@ local function _walkAllUnits(chain, callback)
   end
 end
 
+-- Parallel walker that visits the root chain and every reachable
+-- sub-chain (branches + Custom-Unit patches). Used for the scene
+-- subtitle propagation so the "editing Sn" indicator shows on
+-- every chain header the user can dive into, not just the root.
+local function _walkAllChains(chain, callback)
+  callback(chain)
+  for i = 1, chain:length() do
+    local unit = chain:getUnit(i)
+    if unit then
+      if unit.branches then
+        for _, branch in pairs(unit.branches) do
+          _walkAllChains(branch, callback)
+        end
+      end
+      if unit.patch then
+        _walkAllChains(unit.patch, callback)
+      end
+    end
+  end
+end
+
 -- Arm every delta-able control reachable from the root chain for
 -- scene authoring. The walk descends through mod branches AND
 -- Custom-Unit interiors so a tweak inside, say, a Reverb's wet
@@ -179,8 +200,17 @@ function Root:enterSceneAuthoring(sceneView, sceneIdx)
   self.activeAuthoringIdx   = sceneIdx
   self._sceneTargetParams   = {}
   -- Header indicator so the user knows they're editing scene N,
-  -- not making live audio-path changes. Cleared on exit.
-  self:setSubTitle("editing " .. (scene.name or string.format("S%d", sceneIdx)))
+  -- not making live audio-path changes. Propagated to every
+  -- sub-chain so the cue survives a branch-dive. Previous
+  -- subtitle on each chain (e.g. "muted") is saved and restored
+  -- on exit so scene authoring doesn't clobber other indicators.
+  local label = "editing " .. (scene.name or string.format("S%d", sceneIdx))
+  self._scenePrevSubtitles = {}
+  _walkAllChains(self, function(c)
+    self._scenePrevSubtitles[#self._scenePrevSubtitles + 1] =
+      { chain = c, prev = c.subTitle }
+    c:setSubTitle(label)
+  end)
 
   _walkAllUnits(self, function(unit)
     if not unit.controls then return end
@@ -227,7 +257,19 @@ function Root:exitSceneAuthoring()
   self.activeAuthoringScene = nil
   self.activeAuthoringIdx   = nil
   self._sceneTargetParams   = nil
-  self:clearSubTitle()
+  -- Restore each chain's pre-authoring subtitle (nil = clear).
+  -- Chains added or removed during authoring are blocked by the
+  -- structural-edit lock, so the saved list always matches.
+  if self._scenePrevSubtitles then
+    for _, entry in ipairs(self._scenePrevSubtitles) do
+      if entry.prev then
+        entry.chain:setSubTitle(entry.prev)
+      else
+        entry.chain:clearSubTitle()
+      end
+    end
+    self._scenePrevSubtitles = nil
+  end
 end
 
 -- Egress gestures from inside scene authoring. When the chain is
