@@ -61,11 +61,12 @@ local Performance = Class {}
 Performance:include(Window)
 
 -- Layout constants. SECTION_PLY = 42 px (one M-key column).
--- Slot ply spans the full M-key region (height 60 leaves 4 px
--- top + bottom for cursor box outline / chip area below).
+-- M1 fader + slot TextPanels both render at full 64 height; the
+-- cursor outline frames the entire ply so the selection cue is
+-- consistent across the heterogeneous M1 fader and M2..M6 slots.
 local ply             = app.SECTION_PLY
-local kSlotHeight     = 50
-local kSlotY          = 7              -- bottom of slot panel (Y bottom-up)
+local kSlotHeight     = 64
+local kSlotY          = 0
 local kCursorOutline  = 1
 local kFontMain       = 9
 local kFontSub        = 10
@@ -95,7 +96,12 @@ function Performance:init(sceneView)
   -- user inserts CV / LFO / S&H / whatever to modulate weight.
   -- The morpher reads GainBias.Out at audio rate so manual +
   -- CV both flow into the crossfade.
-  self.cvFader = app.Fader(plyX(1), kSlotY, ply, kSlotHeight)
+  -- Full-height fader, same dimensions as a top-level unit's
+  -- GainBias control (Fader 0,0,ply,64) so M1 visually matches
+  -- the rest of the firmware's encoder controls. Range bar to
+  -- the right of the slot tracks gb.Out via the chain's
+  -- _sceneCVRange MinMax object.
+  self.cvFader = app.Fader(plyX(1), 0, ply, 64)
   self.cvFader:setLabel("xfade")
   if self.chain and self.chain.getSceneCVGainBias then
     local gb = self.chain:getSceneCVGainBias()
@@ -107,6 +113,10 @@ function Performance:init(sceneView)
     self.cvFader:setMap(Encoder.getMap("default"))
     self.cvFader:setUnits(app.unitNone)
     self.cvFader:setPrecision(2)
+    if self.chain.getSceneCVRange then
+      local range = self.chain:getSceneCVRange()
+      if range then self.cvFader:setRangeObject(range) end
+    end
   end
   self:addMainGraphic(self.cvFader)
 

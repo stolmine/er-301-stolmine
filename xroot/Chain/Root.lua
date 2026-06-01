@@ -317,6 +317,15 @@ function Root:_getOrBuildSceneMorph()
   gb:setName(self.title .. ".SceneCV")
   self._sceneCVGainBias = gb
 
+  -- MinMax tracks the live range of gb.Out so the Performance M1
+  -- fader can render its range bar (the gain indicator the user
+  -- sees to the right of the bias slot). Same wiring pattern as
+  -- a unit's GainBias control: input the modulated output, expose
+  -- Min/Max parameters.
+  local range = app.MinMax()
+  range:setName(self.title .. ".SceneCVRange")
+  self._sceneCVRange = range
+
   -- Branch wrapping the GainBias input. Used by Performance view
   -- M1 dive so user can insert CV-source units (LFO, S&H, etc.).
   -- Output flows: branch units -> gb.In -> gb.Out -> morpher.mCV.
@@ -331,8 +340,11 @@ function Root:_getOrBuildSceneMorph()
     unit = self,  -- Branch uses this for getRootChain
   }
 
-  -- Wire GainBias.Out into the morpher's CV inlet.
+  -- Wire GainBias.Out into both the morpher's CV inlet (drives
+  -- the weight) and the MinMax range tracker (drives the fader's
+  -- range indicator).
   app.AudioThread.connect(gb:getOutput("Out"), morph:getInput("CV"))
+  app.AudioThread.connect(gb:getOutput("Out"), range:getInput("In"))
 
   -- Per-control base Parameter snapshots, refreshed every engage.
   -- Map: [unitKey][ctrlId] = app.Parameter holding the user-mode
@@ -355,6 +367,11 @@ end
 function Root:getSceneCVGainBias()
   self:_getOrBuildSceneMorph()
   return self._sceneCVGainBias
+end
+
+function Root:getSceneCVRange()
+  self:_getOrBuildSceneMorph()
+  return self._sceneCVRange
 end
 
 function Root:_getOrCreateBaseParam(unitKey, ctrlId)
@@ -445,7 +462,14 @@ function Root:engageSceneMorph()
   self._sceneTask:clear()
   self._sceneMorph:clear()
   self:_buildSceneMorphItems()
+  -- Order matters: GainBias writes its Out, then range reads it,
+  -- then morpher reads it (via its mCV inlet). All three must be
+  -- in the same task and in this order so the morpher and range
+  -- see fresh data each frame.
   self._sceneTask:add(self._sceneCVGainBias)
+  if self._sceneCVRange then
+    self._sceneTask:add(self._sceneCVRange)
+  end
   self._sceneTask:add(self._sceneMorph)
   self._sceneTask:unlock()
 

@@ -33,11 +33,15 @@ function SlotControl:init(args)
   self.column  = column
   local plyLeft = (column - 1) * ply
 
-  -- Body: unit-header-style TextPanel anchoring the slot. Text
-  -- (scene name or blank) set by setScene / setEmpty.
+  -- Body: rounded transparent panel with a 1px GRAY3 border.
+  -- Mirrors the QuickSaver slot UX (xroot/Persist/QuickSaver.lua)
+  -- so scene slots and quicksave slots have the same visual idiom.
+  -- The Performance view's cursorBox handles selection emphasis
+  -- separately.
   self.panel = app.TextPanel("", column)
-  self.panel:setBackgroundColor(app.GRAY2)
-  self.panel:setOpaque(true)
+  self.panel:setCornerRadius(3, 3, 3, 3)
+  self.panel:setBorder(1)
+  self.panel:setBorderColor(app.GRAY3)
   window:addMainGraphic(self.panel)
 
   -- A/B chip overlay: small label at top-right of the ply.
