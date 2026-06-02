@@ -25,6 +25,7 @@ local Env = require "Env"
 local Signal = require "Signal"
 local Encoder = require "Encoder"
 local SlotControl = require "SceneView.SlotControl"
+local Drawings = require "Drawings"
 
 -- GainBias sub-display layout (mirrors Unit.ViewControl.GainBias).
 -- Centers + lines come from app.GRID5_* / app.BUTTON*_CENTER so
@@ -70,7 +71,6 @@ local kSlotY          = 0
 local kCursorOutline  = 1
 local kFontMain       = 9
 local kFontSub        = 10
-local kFontPlus       = 12
 local kEncoderThreshold = Env.EncoderThreshold.Default
 
 -- Per-ply X position (column-major helper). app.TextPanel takes
@@ -246,12 +246,14 @@ function Performance:init(sceneView)
   end
 
   -- Floating "+" placeholder: sits at the first un-populated ply
-  -- (column 2 + sceneCount, capped at 6). Hidden when all 5 slots
-  -- are full or when sceneCount == 0 forces it to slot 2 (which
-  -- is the default empty state -- user's invitation to start).
-  self.plusLabel = app.Label("+", kFontPlus)
-  self.plusLabel:setJustification(app.justifyCenter)
-  self:addMainGraphic(self.plusLabel)
+  -- (column 2 + sceneCount, scrolled into the visible range).
+  -- Hidden when scenes fill the right edge or sceneCount has hit
+  -- the per-chain limit. Glyph is two crossed lines (the original
+  -- hold-mode look) rather than a text "+" so it reads as a
+  -- proper button affordance at the panel resolution.
+  self.plusGlyph = app.Drawing(0, 0, 9, 9)
+  self.plusGlyph:add(Drawings.Control.Plus)
+  self:addMainGraphic(self.plusGlyph)
 
   -- Cursor outline: 1-px border tracking the currently selected
   -- ply. Rendered over the slot panels so the user sees which
@@ -371,15 +373,17 @@ function Performance:_refresh()
     self.slots[col]:setScene(scene, role)
   end
 
-  -- "+" placeholder position and visibility.
+  -- "+" placeholder position and visibility. Anchored to the
+  -- TextPanel's 43-stride center (same alignment fix the chip
+  -- + bias indicator got in .19) so the glyph stays visually
+  -- centered on the ply across all columns.
   local plusCol = self:_plusCol()
   if plusCol then
-    -- Center the "+" inside its ply (ply center = (col-1)*ply + ply/2).
-    local x = plyX(plusCol) + ply / 2
-    self.plusLabel:setCenter(x, kSlotY + kSlotHeight / 2)
-    self.plusLabel:show()
+    local panelCenterX = (plusCol - 1) * 43 + 20
+    self.plusGlyph:setCenter(panelCenterX, kSlotY + kSlotHeight / 2)
+    self.plusGlyph:show()
   else
-    self.plusLabel:hide()
+    self.plusGlyph:hide()
   end
 
   -- Selection box: only when an M1 sub-readout is focused.

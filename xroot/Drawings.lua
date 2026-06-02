@@ -38,4 +38,16 @@ x:hline(ply - 6, ply - 4, 57)
 x:vline(ply - 5, 56, 53)
 Drawings.Control.Pin = x
 
+-- Centered "+" glyph in a 9x9 area. Used by the hold-mode scenes
+-- Performance view for the empty-slot placeholder ply; two
+-- crossed single-pixel lines meeting at (4, 4) in the local
+-- coordinate space. Bolder than a text "+" at the panel
+-- resolution and reusable by anyone else who wants the
+-- generic add-slot affordance.
+x = app.DrawingInstructions()
+x:color(app.WHITE)
+x:hline(0, 8, 4)
+x:vline(4, 0, 8)
+Drawings.Control.Plus = x
+
 return Drawings

@@ -126,24 +126,6 @@ horizontal-offset variable that interpolates across a few frames.
 
 ---
 
-### "+" graphic glyph for empty slot
-
-The "+" placeholder ply currently renders a text label "+". The
-original hold-mode UI used a graphical plus icon (two crossed
-lines) that read better at the panel resolution. Reuse that graphic
-for the new Performance view's empty slot — the `Drawing`
-instructions are likely still in `Drawings.lua` or similar. If
-not, build a small new `app.DrawingInstructions` block with two
-centered lines.
-
-Also: ensure the "+" stays visually centered in the slot ply.
-The current text-label version may use the 42-stride math that
-the `.19` work showed drifts left across columns. Anchor the
-glyph on the TextPanel's `(col-1)*43 + 20` center, same as the
-A/B chip and the bias indicator now do.
-
----
-
 ## Shipped
 
 | Tag | Item | Commit |
@@ -153,4 +135,5 @@ A/B chip and the bias indicator now do.
 | `.18` | Initial bias-fill circle indicator on slot plies | `cb71973` |
 | `.19` | Indicator antialiasing + centering + Vee-mode pin + 6-16 scene scroll | `2d01c3d` |
 | `.20` | Duplicate scene via S1 in slot shift display | `9d7312e` |
-| `.21` | M1 auto-focuses bias on click (collapsed cycle) | `cf39728` |
+| `.21` | M1 auto-focuses bias on click (collapsed cycle) | `94237eb` |
+| `.22` | "+" placeholder ply uses graphic glyph (two crossed lines) + TextPanel-stride centering | `759bf8c` |
