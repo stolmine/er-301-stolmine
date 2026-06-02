@@ -225,6 +225,43 @@ Touch points: `od/objects/control/ParamSetMorph.cpp` `apply()`, `Chain.Root`
 scene-cv lifecycle, possibly the Performance view if option 2 is chosen and
 the slew control surfaces there.
 
+## Hold-Mode Scenes: Sub-Display Edits Bypass Scene Authoring
+During scene authoring the main-display fader is swapped to write to the
+scene's target Parameter (`enterSceneMode` rebinds setControlParameter +
+setTargetParameter to the scene target). Sub-display readouts on
+non-delta-able ViewControls are not. So a user who navigates to the sub
+display and edits a value via the readout encoder hard-writes the live
+audio Parameter, bypassing the scene system entirely. The change persists
+outside of authoring and can't be cleared by the "exit without saving"
+gesture (there is no scene-delta to clear because the write never went
+through the scene target).
+
+**Approach**: route every sub-display readout through a scene target by
+default. No per-control opt-in/opt-out flag; just walk each ViewControl's
+sub-display readouts during `enterSceneMode` and swap each one's
+Parameter binding to a freshly created scene target. The existing
+subchain walker already recurses through branches, so coverage extends to
+nested habitat units (Plaits, Clouds, Warps) without any per-package
+work. No graphics changes needed -- the readout will render whatever
+Parameter it's pointed at.
+
+Constraint to respect: user must not be able to change actual input
+routing to subchains during authoring. The structural-edit lock already
+in place during scene authoring should be sufficient -- this work only
+touches Parameter bindings on existing readouts, never chain topology.
+
+Touch points: extend `enterSceneMode` / `exitSceneMode` on every
+ViewControl (including currently-non-delta-able ones) to enumerate their
+sub-display Readouts and swap each readout's parameter. Likely needs a
+new ViewControl protocol method like `getSubDisplayParameters()` that
+returns `{ [ctrlSubId] = audioParam, ... }` so Chain.Root can create one
+scene target per sub-display readout and swap them on enter/exit. Update
+`exitSceneAuthoring`'s delta-capture walker to capture per-sub-id.
+
+`xroot/Unit/ViewControl/GainBias.lua` already swaps `self.bias` (the
+sub-display bias readout) but not `self.gain`. Decide whether gain
+should also participate; if so, this generalizes naturally.
+
 ## Screensaver Polish
 - Forest screensaver: full-screen coverage
 - Rain screensaver: splash particles
