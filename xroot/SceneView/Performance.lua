@@ -139,6 +139,14 @@ function Performance:init(sceneView)
     self.cvFader:setMap(self._biasMap)
     self.cvFader:setUnits(app.unitNone)
     self.cvFader:setPrecision(2)
+    -- Adaptive labels at the bias-range extremes: "A" replaces the
+    -- numeric readout when bias is essentially +1, "B" when
+    -- essentially -1. Same prior art Plaits/Canals/Rings use for
+    -- their model-select faders. Threshold sits just inside the
+    -- limit so the user gets the letter at the actual endpoint
+    -- rather than having to overshoot.
+    self.cvFader:setTextAbove(0.999, "A")
+    self.cvFader:setTextBelow(-0.999, "B")
     if self.chain.getSceneCVRange then
       local range = self.chain:getSceneCVRange()
       if range then self.cvFader:setRangeObject(range) end
@@ -175,6 +183,9 @@ function Performance:init(sceneView)
     self.m1Bias:setMap(self._biasMap)
     self.m1Bias:setUnits(app.unitNone)
     self.m1Bias:setPrecision(2)
+    -- Same adaptive A/B label as the main-display cvFader.
+    self.m1Bias:setTextAbove(0.999, "A")
+    self.m1Bias:setTextBelow(-0.999, "B")
     self.m1SubGroup:addChild(self.m1Bias)
 
     local desc = app.Label("X-fade", 10)

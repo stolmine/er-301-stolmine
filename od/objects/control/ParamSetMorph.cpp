@@ -106,11 +106,22 @@ namespace od
                     {
                         x = base;
                     }
-                    item.param->softSet(isDB ? fromDecibels(x) : x);
+                    // hardSet instead of softSet: the morpher's
+                    // output should track bias one-to-one so the
+                    // user can crossfade as fast as they can turn
+                    // the encoder. Click-protection on abrupt
+                    // assignment changes is the user's
+                    // responsibility -- if they want a ramp,
+                    // they drop a slew unit into the CV input
+                    // subchain. See TODO.md "Eliminate or make-
+                    // optional morph slew".
+                    item.param->hardSet(isDB ? fromDecibels(x) : x);
                     continue;
                 }
 
-                // 2-arg / 3-arg linear blend path.
+                // 2-arg / 3-arg linear blend path. Same reasoning
+                // as the VEE branch above: hardSet so the morph
+                // output tracks bias without an internal ramp.
                 float startVal, endVal;
                 if (item.startParam != nullptr)
                 {
@@ -135,11 +146,11 @@ namespace od
                 float x = w1 * startVal + w2 * endVal;
                 if (isDB)
                 {
-                    item.param->softSet(fromDecibels(x));
+                    item.param->hardSet(fromDecibels(x));
                 }
                 else
                 {
-                    item.param->softSet(x);
+                    item.param->hardSet(x);
                 }
             }
 
