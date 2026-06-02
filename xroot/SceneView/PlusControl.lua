@@ -34,8 +34,10 @@ function PlusControl:init()
   self.panel:setBorderColor(app.GRAY3)
   graphic:addChild(self.panel)
 
-  -- Plus glyph: 9 x 9 Drawing centered on the ply.
-  local glyph = app.Drawing(math.floor(ply / 2) - 4, 28, 9, 9)
+  -- Plus glyph: 9 x 9 Drawing centered on the panel (x=20,
+  -- y=32 is the panel's visual center in local coords; subtract
+  -- 4 to set the glyph's left/bottom).
+  local glyph = app.Drawing(20 - 4, 32 - 4, 9, 9)
   glyph:add(Drawings.Control.Plus)
   graphic:addChild(glyph)
 

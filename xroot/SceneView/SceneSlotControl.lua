@@ -22,14 +22,6 @@ local SpottedControl = require "SpottedStrip.Control"
 
 local ply = app.SECTION_PLY
 local kFontChip       = 9
--- TextPanel positions itself with a 43 px stride internally;
--- decorations anchored to the panel's actual center stay
--- aligned across scrolled positions.
-local kTextPanelStride = 43
--- Constants no longer needed: SpottedStrip section positions
--- the panel; we just declare local geometry within the
--- (0..ply) coordinate space.
-local kChipDX         = ply - 8
 local kChipY          = 49
 local kIndicatorRadius = 5
 local kIndicatorBottom = 6
@@ -70,17 +62,29 @@ function SceneSlotControl:init(sceneIdx, scene, weightParam)
   if scene then self.panel:setText(scene:getName()) end
   graphic:addChild(self.panel)
 
+  -- TextPanel(text, column=1) ctor sets its center to (20,
+  -- height/2) in the controlGraphic's local coord space (the
+  -- 43-stride formula: (col-1)*43 + 20). With panel width 42
+  -- that puts the panel x-range at [-1, 41]. Decorations
+  -- anchor on the panel's actual visual center (20), not on
+  -- the controlGraphic's geometric center (ply/2 == 21) --
+  -- the latter caused the 1 px right-drift the user spotted
+  -- in .25.
+  local panelCenterX = 20
+  -- A/B chip: kChipInset px left of the panel's right edge.
+  local kChipInset = 7
+  local panelRightX = panelCenterX + math.floor(ply / 2)
   self.chip = app.Label("", kFontChip)
   self.chip:setJustification(app.justifyCenter)
-  self.chip:setCenter(kChipDX, kChipY)
+  self.chip:setCenter(panelRightX - kChipInset, kChipY)
   self.chip:setForegroundColor(app.WHITE)
   graphic:addChild(self.chip)
 
-  -- Bias-fill indicator: centered horizontally in the ply at
-  -- (ply/2). Pre-attached to the morpher Weight Parameter the
-  -- caller passes in.
+  -- Bias-fill indicator: centered on panelCenterX so it lines up
+  -- visually with the scene name above it. Pre-attached to the
+  -- morpher Weight Parameter the caller passes in.
   self.indicator = app.SceneSlotIndicator(
-      math.floor(ply / 2) - kIndicatorRadius,
+      panelCenterX - kIndicatorRadius,
       kIndicatorBottom,
       kIndicatorRadius)
   if weightParam then self.indicator:setBias(weightParam) end

@@ -94,6 +94,11 @@ function M1Control:init(chain)
     end
   end
   self:setControlGraphic(self.cvFader)
+  -- Main caret follows the fader (its bias indicator) -- same
+  -- convention as Unit.ViewControl.GainBias at line 145. When M1
+  -- is the focused widget the ▶ caret renders at the fader's
+  -- mCursorState position.
+  self:setMainCursorController(self.cvFader)
 
   -- One spot, ply-wide, centered on the fader.
   self:addSpotDescriptor{
@@ -319,6 +324,10 @@ function M1Control:_setFocusedReadout(readout)
   end
   if readout then readout:save() end
   self.focusedReadout = readout
+  -- Sub caret follows the focused readout; cleared when no
+  -- readout is focused so the section's default cursor takes
+  -- over. Same pattern as Unit.ViewControl.GainBias:setFocusedReadout.
+  self:setSubCursorController(readout)
 end
 
 function M1Control:_gainSet()
