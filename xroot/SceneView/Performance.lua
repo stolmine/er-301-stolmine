@@ -762,17 +762,19 @@ function Performance:mainReleased(i, shifted)
     self:_refresh()
     return true
   end
-  -- Tap on M1. Three states cycled by repeated taps:
-  --   1. cursor elsewhere -> move cursor to M1, no focus yet
-  --      (so the user can preview before committing to edit).
-  --   2. cursor on M1 + no focus -> focus the bias readout
-  --      (encoder ready, ▶ caret shows on main and sub).
-  --   3. cursor on M1 + focused -> unfocus (back to nav state).
-  -- This is the standard chain-edit "tap to focus, tap again to
-  -- unfocus" gesture but adapted to Performance's M-key model.
+  -- Tap on M1. Two states cycled by repeated taps:
+  --   1. cursor elsewhere -> move cursor to M1 AND focus the
+  --      bias readout in the same gesture (encoder is
+  --      immediately writing the indicator the user just
+  --      visually landed on). Matches the user-edit GainBias
+  --      gesture where clicking a control's M key auto-grabs
+  --      bias.
+  --   2. cursor on M1 + focused -> unfocus (back to nav state).
+  --      Tapping again from unfocused re-grabs bias.
   if i == 1 then
     if self.cursorCol ~= 1 then
       self.cursorCol = 1
+      if self.m1Bias then self:_setM1FocusedReadout(self.m1Bias) end
     elseif self.m1FocusedReadout then
       self:_setM1FocusedReadout(nil)
     elseif self.m1Bias then

@@ -144,29 +144,6 @@ A/B chip and the bias indicator now do.
 
 ---
 
-### M1 auto-focuses bias on click
-
-Currently clicking M1 moves the cursor to M1 but doesn't focus the
-bias readout — the user has to tap S3 or M1 again to start writing
-bias. In user-edit mode the parallel gesture (clicking a GainBias
-unit's M-key) auto-grabs the bias readout so the encoder is
-immediately writing the value the user just visually landed on.
-Match that.
-
-Mechanism: the current `mainReleased` case for `i == 1` cycles
-through three states (cursor elsewhere → cursor to M1 unfocused →
-M1 focused on bias → M1 unfocused). Collapse the first two: when
-the cursor moves to M1, also call `_setM1FocusedReadout(self.m1Bias)`
-immediately so the bias readout has focus on landing. Cycle order
-then becomes: "cursor elsewhere" → "M1 focused on bias" →
-"M1 unfocused". Tap-tap-tap from another column reads as
-"land on bias" → "unfocus" → "re-focus bias" etc.
-
-**Touch points**: `xroot/SceneView/Performance.lua` `mainReleased`
-case `i == 1`, around line 700-720.
-
----
-
 ## Shipped
 
 | Tag | Item | Commit |
@@ -176,3 +153,4 @@ case `i == 1`, around line 700-720.
 | `.18` | Initial bias-fill circle indicator on slot plies | `cb71973` |
 | `.19` | Indicator antialiasing + centering + Vee-mode pin + 6-16 scene scroll | `2d01c3d` |
 | `.20` | Duplicate scene via S1 in slot shift display | `9d7312e` |
+| `.21` | M1 auto-focuses bias on click (collapsed cycle) | `cf39728` |
