@@ -413,6 +413,16 @@ function Root:getSceneCVGainBias()
   return self._sceneCVGainBias
 end
 
+-- Expose the morpher itself so views can subscribe to its live
+-- "Weight" Parameter (post-CV crossfade weight, [-1, +1]).
+-- Performance view's per-slot bias-fill indicator reads this each
+-- frame to animate. Built lazily like the rest of the scene-cv
+-- chain so callers can hit this before scene mode is engaged.
+function Root:getSceneMorph()
+  self:_getOrBuildSceneMorph()
+  return self._sceneMorph
+end
+
 function Root:getSceneCVRange()
   self:_getOrBuildSceneMorph()
   return self._sceneCVRange

@@ -226,8 +226,17 @@ function Performance:init(sceneView)
   -- A/B chip overlay + delta count. Performance just tells each
   -- one which scene (if any) it represents on every refresh.
   self.slots = {}
+  -- Live morpher weight ([-1, +1], post-CV) drives each slot's
+  -- bias-fill indicator. Pull once and hand the Parameter to
+  -- every slot so they all read the same source each frame.
+  local weightParam = nil
+  if self.chain and self.chain.getSceneMorph then
+    local morph = self.chain:getSceneMorph()
+    if morph then weightParam = morph:getParameter("Weight") end
+  end
   for col = 2, 6 do
     self.slots[col] = SlotControl { window = self, column = col }
+    if weightParam then self.slots[col]:setBiasSource(weightParam) end
   end
 
   -- Floating "+" placeholder: sits at the first un-populated ply

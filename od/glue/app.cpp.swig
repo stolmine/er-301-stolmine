@@ -154,6 +154,7 @@
 #include <od/graphics/controls/DurationControl.h>
 #include <od/graphics/controls/SixDigits.h>
 #include <od/graphics/controls/MenuArc.h>
+#include <od/graphics/controls/SceneSlotIndicator.h>
 
 #include <od/graphics/holdview/MorphFader.h>
 #include <od/graphics/holdview/TriggerGroup.h>
@@ -378,6 +379,7 @@ bool Uart_isEnabled();
 %include <od/graphics/controls/DurationControl.h>
 %include <od/graphics/controls/SixDigits.h>
 %include <od/graphics/controls/MenuArc.h>
+%include <od/graphics/controls/SceneSlotIndicator.h>
 
 %include <od/graphics/holdview/MorphFader.h>
 %include <od/graphics/holdview/TriggerGroup.h>
