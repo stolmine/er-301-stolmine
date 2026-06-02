@@ -253,3 +253,142 @@ possible), we either:
 
 The audit might land in `.29` (no scene-system code changes),
 or `.29+` if fixes accumulate.
+
+---
+
+## Phase A findings (2026-06-02)
+
+### Persisted-field table
+
+| Field | Source | Destination | Backward-compat | Status |
+|---|---|---|---|---|
+| Per-chain root: `t.sceneView` | `Chain.Root:serialize` line 101-103 (only if `self.sceneView` exists) | `Chain.Root:deserialize` line 114-118 (lazy-creates SceneView via `getSceneView()`) | Missing field → SceneView not force-created. Preset opens normally without scenes. | ✓ |
+| `sceneView.schemaVersion` | Hardcoded `1` in `SceneView:serialize` | Not consulted on `deserialize` | Reserved for future migrations | ✓ |
+| `sceneView.sceneCount` | `#self.scenes` | Implicit (iterated via `ipairs(t.scenes)`) | Field is informational; deserialize uses `t.scenes` directly | ✓ |
+| `sceneView.scenes[]` | Per-scene `Scene:serialize()` | `SceneView:deserialize` iterates with `kMaxScenes=16` cap | Missing → empty scenes list | ✓ |
+| `sceneView.crossfaderA` / `B` | `self.crossfaderA / B` | Restored to `t.crossfader* or kEndpointBase` | Missing → defaults to 0 (base). Out-of-range clamped post-restore | ✓ |
+| `sceneView.cvInput` (legacy) | Not written | Intentionally ignored on load (Phase 4 moved CV into the scene-cv branch) | Old saves' field silently dropped | ✓ |
+| `scene.name` | `Scene:serialize` | `Scene:deserialize` writes only if present | Missing → preserves the default-name behavior | ✓ |
+| `scene.deltas[unitKey][ctrlId]` | After `_syncDeltasFromParams()` | Direct copy of the map | Missing → empty deltas | ✓ |
+| Unit instance keys | `Unit:serialize` line 396 | `Unit:deserialize` line 455-456 | Same key persists → scene deltas re-bind to the right unit on reload | ✓ |
+| **`Chain.Root._sceneCVBranch` contents** | **NOT SERIALIZED** | **NOT RESTORED** | n/a | **GAP** |
+| **`Chain.Root._sceneCVGainBias` bias + gain** | **NOT SERIALIZED** | **NOT RESTORED** | n/a | **GAP** |
+| `Chain.Root._sceneMorph` mWeight | Not serialized (audio-thread runtime) | Re-initialized on engage | n/a | ✓ by design |
+| `Chain.Root._sceneEngaged` flag | Not serialized | Re-engaged when user presses HOLD post-load | n/a | ✓ by design |
+| Performance view UI state (scroll, cursor, focus) | Not serialized | Reset on view open | n/a | ✓ by design |
+
+### Gaps found
+
+**Gap 1 — Scene-CV branch contents lost.** When the user dives
+into M1 from Performance and inserts CV-source units (LFO, S&H,
+External, etc.), those units live in `Chain.Root._sceneCVBranch`,
+a `Branch` object stored as a sibling-of-units on the root chain.
+Nothing in the serialize pipeline reaches it:
+
+- `Chain.Root:serialize` calls `Chain.serialize(self)` for the
+  base data, plus `pinView` and `sceneView`. No mention of
+  `_sceneCVBranch`.
+- `Chain.serialize` only walks `self.units`, `self.channels`,
+  `self.selection`. Branches owned by individual *units* are
+  walked by `Unit:serialize` line 425-431; the scene-CV branch
+  has no parent unit.
+
+User impact: any patch wired into M1 dive (e.g. an LFO driving
+the crossfade) is silently dropped on preset save / reload.
+
+**Gap 2 — M1 bias / gain parameters lost.** `Chain.Root.
+_sceneCVGainBias` is a free-standing `app.GainBias()` Object
+whose Bias and Gain Parameters carry the M1 fader position. The
+Performance view calls `enableSerialization()` on both, but
+nothing actually walks them to write the values out. They get
+re-built with defaults (bias=0, gain=1) on next `_getOrBuildSceneMorph`.
+
+User impact: the crossfade position the user dialed in pre-save
+isn't restored. Comes back at bias=0 (which is 50/50 A/B under
+the .27 linear math).
+
+Whether this is by design or a bug is a UX call. A performance
+fader's "park" position arguably shouldn't persist (like a mixer
+that zeros faders between sessions). But the `enableSerialization`
+calls in Performance.lua suggest the original intent was to
+persist. Persisting is the lower-surprise default; the user can
+always clear the value.
+
+### Proposed fix
+
+One commit. Extend `Chain.Root:serialize` + `:deserialize` to
+cover both gaps. Lazy-only: skip if the scene-CV pipeline hasn't
+been built (most users don't engage scene mode).
+
+```lua
+function Root:serialize()
+  local t = Chain.serialize(self)
+  t.pinView = self.pinView:serialize()
+  if self.sceneView then
+    t.sceneView = self.sceneView:serialize()
+  end
+  -- Scene-CV pipeline (M1 dive contents + bias/gain). Only
+  -- persisted if the user actually engaged scene mode (the
+  -- pipeline is lazy-built by _getOrBuildSceneMorph).
+  if self._sceneCVBranch then
+    t.sceneCVBranch = self._sceneCVBranch:serialize()
+  end
+  if self._sceneCVGainBias then
+    t.sceneCVParams = {
+      bias = self._sceneCVGainBias:getParameter("Bias"):target(),
+      gain = self._sceneCVGainBias:getParameter("Gain"):target(),
+    }
+  end
+  return t
+end
+
+function Root:deserialize(t)
+  Chain.deserialize(self, t)
+  if t.pinView then self.pinView:deserialize(t.pinView)
+  else self.pinView:removeAllPinSets() end
+  if t.sceneView then self:getSceneView():deserialize(t.sceneView) end
+  -- Force the scene-cv pipeline to exist before restoring its
+  -- state. Same lazy-build entry point user-mode HOLD takes.
+  if t.sceneCVBranch or t.sceneCVParams then
+    self:_getOrBuildSceneMorph()
+    if t.sceneCVBranch then
+      self._sceneCVBranch:deserialize(t.sceneCVBranch)
+    end
+    if t.sceneCVParams then
+      if t.sceneCVParams.bias then
+        self._sceneCVGainBias:getParameter("Bias"):hardSet(t.sceneCVParams.bias)
+      end
+      if t.sceneCVParams.gain then
+        self._sceneCVGainBias:getParameter("Gain"):hardSet(t.sceneCVParams.gain)
+      end
+    end
+  end
+end
+```
+
+Cross-firmware: vanilla firmware reads `t.sceneCVBranch` and
+`t.sceneCVParams` as unknown fields and silently ignores them.
+No breakage.
+
+Forward-compat: old presets (pre-this-fix) lack both keys; the
+guards skip both restore branches; the user has to re-create M1
+dive contents. Acceptable since the feature branch hasn't shipped
+to develop yet.
+
+### What does NOT need fixing
+
+- Scene's `self.params` table (live `app.Parameter` per scene).
+  Explicit `self.params = {}` reset on `Scene:deserialize` is
+  correct; getOrCreateParam rebuilds from `self.deltas` on next
+  engage.
+- Out-of-range A/B clamping. Already handled at
+  `SceneView:deserialize` lines 159-164.
+- Missing `t.scenes` etc. fields. Guarded with `if t.scenes then`.
+- Schema version. Reserved for future use; no migration needed
+  for the current shape.
+
+### Phase A status
+
+Audit complete. One commit pending: implement the scene-CV
+branch + params persistence per the snippet above. Then tag,
+build am335x, hand to bench for Phase C.
