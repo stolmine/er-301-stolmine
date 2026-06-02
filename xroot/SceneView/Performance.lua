@@ -460,8 +460,8 @@ function Performance:_refreshSub()
     self.subStatus:setText(string.format("scene %d: %s%s",
                                           sceneIdx, scene:getName(), chip))
     if self.shiftModeByCol[col] then
-      -- Shifted bindings: S1 has none, S2 = rename, S3 = delete.
-      self.slotS1:setText("")
+      -- Shifted bindings: S1 = duplicate, S2 = rename, S3 = delete.
+      self.slotS1:setText("copy")
       self.slotS2:setText("rename")
       self.slotS3:setText("delete")
     else
@@ -889,9 +889,10 @@ function Performance:subReleased(i, shifted)
   local scene = self.sceneView:getScene(sceneIdx)
   if scene == nil then return false end
 
-  -- Shifted: S2 -> rename, S3 -> delete (parallels the
-  -- sub-display SubButton labels in shiftMode).
+  -- Shifted: S1 -> duplicate, S2 -> rename, S3 -> delete
+  -- (parallels the sub-display SubButton labels in shiftMode).
   if effShifted then
+    if i == 1 then return self:_duplicateScene(sceneIdx, scene) end
     if i == 2 then return self:_renameScene(sceneIdx, scene) end
     if i == 3 then return self:_confirmDelete(sceneIdx, scene) end
     return false
@@ -966,6 +967,80 @@ function Performance:_rebuildSceneMorph()
   if self.chain and self.chain.rebuildSceneMorph then
     self.chain:rebuildSceneMorph()
   end
+end
+
+-- Duplicate the source scene to a fresh slot at the end of the
+-- scene list. The copy carries the source's deltas verbatim but
+-- starts unassigned to either crossfader endpoint -- the user
+-- almost always wants to either keep working from the copy with
+-- a different A/B assignment, or use it as a starting point for
+-- further edits.
+--
+-- Naming: source name + " N" with the lowest N starting at 2
+-- that doesn't collide with any existing scene name. Bails after
+-- 99 to avoid an unbounded loop on pathological state.
+function Performance:_duplicateScene(sceneIdx, scene)
+  -- Make sure any live Parameter edits land in deltas before the
+  -- copy reads from them. countDeltas does this as a side effect;
+  -- explicit _syncDeltasFromParams keeps the intent obvious.
+  if scene._syncDeltasFromParams then
+    scene:_syncDeltasFromParams()
+  end
+
+  -- Find a non-colliding name.
+  local srcName = scene:getName() or "scene"
+  local nameInUse = {}
+  for i = 1, self.sceneView:getSceneCount() do
+    local s = self.sceneView:getScene(i)
+    if s then nameInUse[s:getName()] = true end
+  end
+  local newName = srcName
+  if nameInUse[srcName] then
+    for n = 2, 99 do
+      local candidate = string.format("%s %d", srcName, n)
+      if not nameInUse[candidate] then
+        newName = candidate
+        break
+      end
+    end
+  end
+
+  local newScene, newIdx = self.sceneView:addScene(newName)
+  if newScene == nil then return true end  -- max scenes reached, silent no-op
+
+  -- Deep-copy deltas. Two nested tables: deltas[unitKey][ctrlId] = float.
+  for unitKey, perUnit in pairs(scene.deltas) do
+    for ctrlId, value in pairs(perUnit) do
+      newScene:setDelta(unitKey, ctrlId, value)
+    end
+  end
+
+  -- The new scene exists in the SceneView; the morpher's items
+  -- need a rebuild only if the new scene happens to land at an
+  -- A/B-assigned index (impossible here -- addScene appends, and
+  -- the new index is fresh). Rebuild for safety anyway since
+  -- _buildSceneMorphItems is cheap and idempotent and keeps the
+  -- view consistent with any future logic that might depend on
+  -- scene-count changes.
+  self:_rebuildSceneMorph()
+
+  -- Move cursor + scroll viewport so the new scene is in view.
+  -- newIdx == sceneCount post-add. Visible col for newIdx is
+  -- newIdx - scrollOffset + 1. If that's > 6, advance scroll
+  -- until it fits at col 6.
+  local newCol = newIdx - self.scrollOffset + 1
+  while newCol > 6 and self.scrollOffset < self:_maxScrollOffset() do
+    self.scrollOffset = self.scrollOffset + 1
+    newCol = newIdx - self.scrollOffset + 1
+  end
+  -- Reset shift toggles on visible cols: the user just left the
+  -- source scene in shifted mode (that's how they got to "copy"),
+  -- and we don't want the new scene's slot showing rename/delete
+  -- labels by inheritance.
+  for c = 2, 6 do self.shiftModeByCol[c] = false end
+  self.cursorCol = newCol
+  self:_refresh()
+  return true
 end
 
 function Performance:_renameScene(sceneIdx, scene)
