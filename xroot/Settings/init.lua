@@ -353,6 +353,15 @@ local defaults = {
     description = "When clearing all favorites...",
     value = true
   },
+  confirmSceneDelete = {
+    category = "Confirmations",
+    description = "When deleting a scene...",
+    value = "yes",
+    choices = {
+      "yes",
+      "no"
+    }
+  },
   confirmQuickSaveOverwrite = {
     category = "Confirmations",
     description = "When saving over an occupied quicksave...",

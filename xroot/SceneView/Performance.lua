@@ -795,33 +795,47 @@ function Performance:mainReleased(i, shifted)
   return true
 end
 
+-- Carry out the delete + post-delete state cleanup. Split out
+-- of _confirmDelete so the confirmation-toggle "no" branch can
+-- skip straight to the deletion without duplicating the cleanup.
+function Performance:_doDeleteScene(sceneIdx)
+  self.sceneView:removeScene(sceneIdx)
+  self:_rebuildSceneMorph()
+  -- Delete shifts subsequent slot indices down, so a freshly
+  -- positioned slot at the deleted index inherits the deleted
+  -- slot's column. Reset all slot shift modes to the default
+  -- unshifted so the inherited column doesn't show stale
+  -- rename/delete labels on the new occupant.
+  for col = 2, 6 do self.shiftModeByCol[col] = false end
+  -- Clamp scrollOffset: if delete reduced sceneCount enough
+  -- that scrollOffset is past the new max, walk it back so
+  -- the right edge of the viewport always shows content.
+  local maxScroll = self:_maxScrollOffset()
+  if self.scrollOffset > maxScroll then self.scrollOffset = maxScroll end
+  -- Snap cursor back into bounds if we just deleted the
+  -- currently-selected slot (or any slot past the now-shrunk
+  -- range).
+  local maxCol = self:_maxSelectableCol()
+  if self.cursorCol > maxCol then self.cursorCol = maxCol end
+  self:_refresh()
+end
+
 function Performance:_confirmDelete(sceneIdx, scene)
+  -- System-settings toggle: when the user opts out of the
+  -- confirmation dialog, skip straight to the delete. Matches
+  -- the confirmUnitDelete / confirmChainClear / etc. pattern
+  -- in Settings.Confirmations.
+  local Settings = require "Settings"
+  if Settings.get("confirmSceneDelete") == "no" then
+    self:_doDeleteScene(sceneIdx)
+    return true
+  end
   local Verification = require "Verification"
   local dlg = Verification.Sub(
     string.format("Delete scene %d (%s)?", sceneIdx, scene:getName()),
     "")
   dlg:subscribe("done", function(ans)
-    if ans then
-      self.sceneView:removeScene(sceneIdx)
-      self:_rebuildSceneMorph()
-      -- Delete shifts subsequent slot indices down, so a freshly
-      -- positioned slot at the deleted index inherits the deleted
-      -- slot's column. Reset all slot shift modes to the default
-      -- unshifted so the inherited column doesn't show stale
-      -- rename/delete labels on the new occupant.
-      for col = 2, 6 do self.shiftModeByCol[col] = false end
-      -- Clamp scrollOffset: if delete reduced sceneCount enough
-      -- that scrollOffset is past the new max, walk it back so
-      -- the right edge of the viewport always shows content.
-      local maxScroll = self:_maxScrollOffset()
-      if self.scrollOffset > maxScroll then self.scrollOffset = maxScroll end
-      -- Snap cursor back into bounds if we just deleted the
-      -- currently-selected slot (or any slot past the now-shrunk
-      -- range).
-      local maxCol = self:_maxSelectableCol()
-      if self.cursorCol > maxCol then self.cursorCol = maxCol end
-      self:_refresh()
-    end
+    if ans then self:_doDeleteScene(sceneIdx) end
   end)
   dlg:show()
   return true

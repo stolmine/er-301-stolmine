@@ -94,20 +94,6 @@ param restore).
 
 ---
 
-### Confirmation toggle for scene deletion
-
-Add a system-settings checkbox in the confirmations section gating
-the scene-delete verification dialog. Same pattern as the existing
-favorites-clear confirmation guard. Default on. When off, shift+S3
-(or shift+M on a slot) deletes immediately.
-
-**Touch points**: `xroot/SceneView/Performance.lua` `_confirmDelete`
-(gate the dialog on the setting), `xroot/Settings/init.lua` (new
-boolean entry), `xroot/Settings/Interface.lua` (surface under
-confirmations section).
-
----
-
 ### Easing animation on slot scroll
 
 Slot scrolling currently snaps instantly between viewport positions.
@@ -137,3 +123,4 @@ horizontal-offset variable that interpolates across a few frames.
 | `.20` | Duplicate scene via S1 in slot shift display | `9d7312e` |
 | `.21` | M1 auto-focuses bias on click (collapsed cycle) | `94237eb` |
 | `.22` | "+" placeholder ply uses graphic glyph (two crossed lines) + TextPanel-stride centering | `759bf8c` |
+| `.23` | System-settings confirmSceneDelete toggle gates the delete dialog | `07dde18` |

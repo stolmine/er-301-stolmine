@@ -197,6 +197,10 @@ menuItems[#menuItems + 1] = {
 }
 menuItems[#menuItems + 1] = {
   "addVariable",
+  "confirmSceneDelete"
+}
+menuItems[#menuItems + 1] = {
+  "addVariable",
   "confirmQuickSaveOverwrite"
 }
 menuItems[#menuItems + 1] = {
