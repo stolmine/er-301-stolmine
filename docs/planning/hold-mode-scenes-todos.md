@@ -139,3 +139,4 @@ param restore).
 | `.25` | Performance refactor: Window → SpottedStrip + per-scene Controls | `a4a375c` |
 | `.26` | M1 fader / sub readout ▶ carets restored + indicator/chip/plus glyph centering anchored on TextPanel visual center | `99eb948` |
 | `.27` | Crossfade switched from tri-state VEE (through-zero base) to bipolar linear A↔B. Escape from scene contribution is via unassigned (or empty-delta) endpoint; baseParam still fed in for that fallback. Indicators become opposing crescents that sum to 1. | `68dd914` |
+| `.29` | Scene serialization gap fix: Chain.Root now persists scene-CV branch contents (M1 dive subchain units) + M1 bias/gain Parameters. Resolves two Phase A audit gaps. Cross-firmware safe (vanilla treats unknown keys as no-op). The `.28` slot was previously used for the rejected sub-display routing work; bumped to `.29` to keep dev-digit semantics. | `c8dec34` |

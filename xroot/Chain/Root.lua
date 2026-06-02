@@ -101,6 +101,21 @@ function Root:serialize()
   if self.sceneView then
     t.sceneView = self.sceneView:serialize()
   end
+  -- Scene-CV pipeline state (M1 dive contents + bias/gain).
+  -- The scene-CV branch is a Branch held directly on Root, NOT
+  -- in self.units, so the standard Chain.serialize walk doesn't
+  -- reach it. We persist it here. Only present if scene mode has
+  -- been engaged at least once this session (the pipeline is
+  -- lazy-built by _getOrBuildSceneMorph).
+  if self._sceneCVBranch then
+    t.sceneCVBranch = self._sceneCVBranch:serialize()
+  end
+  if self._sceneCVGainBias then
+    t.sceneCVParams = {
+      bias = self._sceneCVGainBias:getParameter("Bias"):target(),
+      gain = self._sceneCVGainBias:getParameter("Gain"):target(),
+    }
+  end
   return t
 end
 
@@ -115,6 +130,24 @@ function Root:deserialize(t)
     -- Force-create SceneView only if the preset actually carries
     -- scene state. Restores the data verbatim.
     self:getSceneView():deserialize(t.sceneView)
+  end
+  -- Scene-CV pipeline restore. Force-build the morpher + GainBias
+  -- + branch BEFORE restoring their state (same lazy entry point
+  -- the HOLD-press path takes). Bias / gain restored via hardSet
+  -- so the values land immediately without softSet ramp dynamics.
+  if t.sceneCVBranch or t.sceneCVParams then
+    self:_getOrBuildSceneMorph()
+    if t.sceneCVBranch then
+      self._sceneCVBranch:deserialize(t.sceneCVBranch)
+    end
+    if t.sceneCVParams then
+      if t.sceneCVParams.bias then
+        self._sceneCVGainBias:getParameter("Bias"):hardSet(t.sceneCVParams.bias)
+      end
+      if t.sceneCVParams.gain then
+        self._sceneCVGainBias:getParameter("Gain"):hardSet(t.sceneCVParams.gain)
+      end
+    end
   end
 end
 
