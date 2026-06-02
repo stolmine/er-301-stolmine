@@ -262,6 +262,33 @@ scene target per sub-display readout and swap them on enter/exit. Update
 sub-display bias readout) but not `self.gain`. Decide whether gain
 should also participate; if so, this generalizes naturally.
 
+## Hold-Mode Scenes: Verify Serialize / Deserialize Round-Trip
+The scene-system serialize/deserialize path was wired in Phase 1 + Phase
+4.3, but never bench-tested end-to-end past the latest delta-map and
+state-machine changes (.10 through .18). Verify on hardware:
+
+- Build a chain with at least 2 scenes, each carrying deltas on 2+
+  controls across 2+ units (including a nested branch).
+- Assign scene 1 to A, scene 2 to B. Save quickset.
+- Reboot device. Load the quickset. Confirm:
+  - Both scenes present with original names.
+  - Crossfader A/B assignments restored.
+  - Delta count + delta values per scene match originals.
+  - Bias-fill indicator drives correctly from the restored A/B.
+  - Authoring entry on each restored scene shows the original
+    delta'd controls highlighted.
+  - Bias movement on M1 produces the same audio sweep as pre-save.
+- Repeat with the sub-display-routing changes (once shipped — task
+  #49) to confirm sub deltas also round-trip.
+- Cross-firmware: save on stolmine, load on vanilla -- scenes should
+  be gracefully ignored, base values preserved.
+- Old-preset compat: load a pre-scenes preset on .18 firmware --
+  should open with no scenes, no errors, normal user mode.
+
+Touch points: `xroot/SceneView/init.lua` (SceneView serialize/deserialize),
+`xroot/SceneView/Scene.lua` (per-scene serialize), `xroot/Chain/Root.lua`
+(scene-cv branch serialize + base param restore).
+
 ## Screensaver Polish
 - Forest screensaver: full-screen coverage
 - Rain screensaver: splash particles
