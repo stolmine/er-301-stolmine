@@ -289,6 +289,64 @@ Touch points: `xroot/SceneView/init.lua` (SceneView serialize/deserialize),
 `xroot/SceneView/Scene.lua` (per-scene serialize), `xroot/Chain/Root.lua`
 (scene-cv branch serialize + base param restore).
 
+## Hold-Mode Scenes: Confirmation Toggle for Scene Deletion
+Add a system-settings checkbox in the confirmations section that gates
+the scene-delete verification dialog. Same pattern as the existing
+favorites-clear confirmation guard. Default on. When off, the
+shift+S3 (or shift+M on a slot) delete gesture skips the
+`Verification.Sub` dialog and deletes immediately.
+
+Touch points: `xroot/SceneView/Performance.lua` `_confirmDelete` (gate
+the dialog on the setting), `xroot/Settings/init.lua` (new boolean
+entry), `xroot/Settings/Interface.lua` (surface under confirmations
+section).
+
+## Hold-Mode Scenes: Duplicate Scene (S1 in Slot Shift Display)
+Slot shift-display currently has `rename / -- / delete` labels for
+S1/S2/S3 with S1 unused. Use S1 for duplicate: push a copy of the
+current scene to the first empty slot to the right (or to the end of
+the list if the cursor is already at the highest scene), with the
+copy unassigned to either crossfader endpoint.
+
+Mechanism: read the source scene's deltas map and name; call
+`sceneView:addScene(newName)`, then copy each `(unitKey, ctrlId)`
+entry from source deltas to the new scene. Name suggestion: source
+name + " 2" with collision avoidance (" 2", " 3", ...).
+
+Touch points: `xroot/SceneView/Performance.lua` (S1 handler in shift
+mode, update the SubButton labels in `_refreshSub`), new method on
+`xroot/SceneView/Scene.lua` like `copyDeltasFrom(other)` or do the
+copy inline.
+
+## Hold-Mode Scenes: Easing Animation on Slot Scroll
+Slot scrolling currently snaps instantly between viewport positions.
+User-edit's slot scroll uses an easing animation (the section/ply
+slides smoothly across the screen over a few frames). Apply the same
+to Performance view scrolling so the user perceives the slot list as
+a continuous strip rather than a discrete page-flip. Helps confirm
+that scrolling actually happened, especially when the new viewport
+holds visually similar scene names.
+
+Touch points: figure out where chain-edit slot scroll animates (likely
+`xroot/Chain/Section.lua` or `xroot/SpottedStrip.lua`), apply the
+same mechanism to `Performance.lua` slot rendering. May require
+each slot's TextPanel + indicator + chip to share a horizontal-
+offset variable that animates across a few frames.
+
+## Hold-Mode Scenes: "+" Glyph for Empty Slots
+The "+" placeholder ply currently renders a text label "+" centered
+in the empty slot. The original hold-mode UI used a graphical plus
+icon (two crossed lines) that read better at the panel resolution.
+Reuse that graphic for the new Performance view's empty slot — the
+`Drawing` instructions are likely still in `Drawings.lua` or
+similar. If not, build a small new `app.DrawingInstructions` block
+with two centered lines.
+
+Also: ensure the "+" stays visually centered in the slot ply (the
+current text-label version may be using `setCenter` with the
+42-stride math that we just discovered drifts left in further
+columns; verify it lines up).
+
 ## Screensaver Polish
 - Forest screensaver: full-screen coverage
 - Rain screensaver: splash particles
