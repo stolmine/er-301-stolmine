@@ -92,7 +92,55 @@ function Root:deserializePins(data)
   self.pinView:deserialize(data)
 end
 
+-- Hard-restore every audio Parameter that the morpher writes to,
+-- back to its user-edit base value. Used at disengage and at
+-- save time so the audio param matches the user's pre-scene
+-- value rather than the morpher's last blend output.
+--
+-- Without the save-time call, persisting while scene mode is
+-- engaged would capture audio = blend(base, sceneA, sceneB) into
+-- the preset. On reload, re-engaging snapshots base from
+-- audio.target -- so the *blended* value becomes the new base,
+-- permanently baking in whatever scene contribution was active
+-- at save time. Bug deeper than the .29 M1 fix; reported by user
+-- bench 2026-06-02.
+function Root:_hardRestoreAudioToBase()
+  if self._sceneBaseParams == nil then return end
+  _walkAllUnits(self, function(unit)
+    if not unit.controls then return end
+    local unitKey = unit:getInstanceKey()
+    local perUnit = self._sceneBaseParams[unitKey]
+    if not perUnit then return end
+    for ctrlId, control in pairs(unit.controls) do
+      if control.getSceneAudioParam then
+        local baseParam = perUnit[ctrlId]
+        if baseParam then
+          local audioParam = control:getSceneAudioParam()
+          if audioParam then
+            audioParam:hardSet(baseParam:target())
+          end
+        end
+      end
+    end
+  end)
+end
+
 function Root:serialize()
+  -- If scene mode is engaged, lock the audio-rate task and snap
+  -- every affected audio Parameter back to its base before the
+  -- unit-walk serialize captures values. Otherwise the saved
+  -- audio targets carry the morpher's last blend output and
+  -- re-engagement post-load bakes scene contribution into the
+  -- user's base permanently. The lock blocks the morpher's
+  -- apply from running mid-snapshot; serialize is Lua-side so
+  -- the audio thread re-blends as soon as we unlock.
+  local snappedForSave = false
+  if self._sceneEngaged and self._sceneTask then
+    self._sceneTask:lock()
+    self:_hardRestoreAudioToBase()
+    snappedForSave = true
+  end
+
   local t = Chain.serialize(self)
   t.pinView = self.pinView:serialize()
   -- Only serialize scene state if SceneView has actually been
@@ -115,6 +163,15 @@ function Root:serialize()
       bias = self._sceneCVGainBias:getParameter("Bias"):target(),
       gain = self._sceneCVGainBias:getParameter("Gain"):target(),
     }
+  end
+
+  if snappedForSave then
+    -- Release the task; audio thread fires immediately, morpher
+    -- hardSets audio = blend(base, A, B) on its very next apply,
+    -- audio returns to its pre-snapshot blended state. Audible
+    -- glitch is one audio frame of "audio at base" -- imperceptible
+    -- unless bias was at an extreme.
+    self._sceneTask:unlock()
   end
   return t
 end
@@ -664,25 +721,7 @@ function Root:disengageSceneMorph()
   -- need to snap the audio param back to base before we swap
   -- the widget back to "audio param drives everything" via
   -- exitModulatedDisplay.
-  if self._sceneBaseParams then
-    _walkAllUnits(self, function(unit)
-      if not unit.controls then return end
-      local unitKey = unit:getInstanceKey()
-      local perUnit = self._sceneBaseParams[unitKey]
-      if not perUnit then return end
-      for ctrlId, control in pairs(unit.controls) do
-        if control.getSceneAudioParam then
-          local baseParam = perUnit[ctrlId]
-          if baseParam then
-            local audioParam = control:getSceneAudioParam()
-            if audioParam then
-              audioParam:hardSet(baseParam:target())
-            end
-          end
-        end
-      end
-    end)
-  end
+  self:_hardRestoreAudioToBase()
 
   -- Exit modulated display on every delta-able control: widgets
   -- snap back to single-param (audio) binding. After this point
