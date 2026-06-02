@@ -126,17 +126,21 @@ function Root:_hardRestoreAudioToBase()
 end
 
 function Root:serialize()
-  -- If scene mode is engaged, lock the audio-rate task and snap
-  -- every affected audio Parameter back to its base before the
-  -- unit-walk serialize captures values. Otherwise the saved
-  -- audio targets carry the morpher's last blend output and
-  -- re-engagement post-load bakes scene contribution into the
-  -- user's base permanently. The lock blocks the morpher's
-  -- apply from running mid-snapshot; serialize is Lua-side so
-  -- the audio thread re-blends as soon as we unlock.
+  -- If scene mode is engaged, temporarily yank the morpher task
+  -- off the audio thread so it can't write audio = blend during
+  -- the unit-walk. Hard-restore audio Params to base, capture
+  -- state, then re-add the task. The audio thread's next pass
+  -- writes audio = blend(base, A, B) again.
+  --
+  -- An earlier (.30) version held _sceneTask:lock across the
+  -- whole serialize. That worked semantically but blocked the
+  -- audio thread at the task's mutex for the full unit-walk
+  -- duration -- watchdog kill / hard crash. removeTask /
+  -- addTask is the lighter-weight equivalent: the audio thread
+  -- just doesn't schedule the morpher for the window.
   local snappedForSave = false
   if self._sceneEngaged and self._sceneTask then
-    self._sceneTask:lock()
+    app.AudioThread.removeTask(self._sceneTask)
     self:_hardRestoreAudioToBase()
     snappedForSave = true
   end
@@ -166,12 +170,11 @@ function Root:serialize()
   end
 
   if snappedForSave then
-    -- Release the task; audio thread fires immediately, morpher
-    -- hardSets audio = blend(base, A, B) on its very next apply,
-    -- audio returns to its pre-snapshot blended state. Audible
-    -- glitch is one audio frame of "audio at base" -- imperceptible
-    -- unless bias was at an extreme.
-    self._sceneTask:unlock()
+    -- Re-add task; morpher's next apply writes audio = blend(
+    -- base, A, B), audio returns to its pre-snapshot blended
+    -- state. Audible glitch is one audio frame of "audio at
+    -- base" -- imperceptible unless bias was at an extreme.
+    app.AudioThread.addTask(self._sceneTask, 0)
   end
   return t
 end
