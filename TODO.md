@@ -188,6 +188,43 @@ since those have their own release cadences. Authors of those
 packages can normalize on their own schedule; the dispatch table
 in `Glyph.lua` already accepts the variants they currently use.
 
+## Hold-Mode Scenes: Animated Bias Indicator on Slot Plies
+Each scene slot ply (Performance view, S2-S6) should carry a small animated
+indicator showing the bias fader's contribution from that slot. A waxing /
+waning moon glyph is one candidate: empty when bias is fully away from this
+slot, full when bias is fully toward it, partial crescent in between. Slots
+not currently assigned to either A or B render the indicator dim or hidden.
+
+Data source: same `GainBias` output that drives the morpher CV inlet
+(`Chain.Root._sceneCVGainBias` / `_sceneCVRange`). Should update at frame
+rate without thrashing layout. Reuses or extends `xroot/SceneView/SlotControl.lua`.
+
+Open: pick the glyph (moon, filled-arc gauge, fader-mini, etc.); decide
+whether to animate only on the A and B slots or on every slot (with
+unassigned slots showing "no relationship" state).
+
+## Hold-Mode Scenes: Eliminate or Make-Optional Morph Slew
+The morpher writes audio params via `softSet`, which ramps via
+`Parameter::rampTo` (50-tick `mStep` slew). For a manually-driven crossfader
+the user perceives an unwanted lag on fast bias movements. The slew is "not
+completely undesirable" (click protection on abrupt scene assignment changes)
+but the user should control it, not the firmware.
+
+Options:
+1. **Hard apply.** Switch the morpher's `apply()` to `hardSet` so audio
+   tracks bias instantly. Loses click-protection on abrupt A/B reassignment.
+2. **User-controllable slew parameter.** Add a per-Root or per-scene "morph
+   slew" Parameter (ms or "off") that the user can dial in. Default = off
+   (instant); value > 0 sets the ramp count. Exposed via a sub-display knob
+   on Performance, or via an admin setting if global.
+3. **Hybrid.** `hardSet` during continuous CV-driven morph (manual crossfade
+   tracking), `softSet` only on discrete A/B reassignments (where the click
+   guard matters). Best UX but most plumbing.
+
+Touch points: `od/objects/control/ParamSetMorph.cpp` `apply()`, `Chain.Root`
+scene-cv lifecycle, possibly the Performance view if option 2 is chosen and
+the slew control surfaces there.
+
 ## Screensaver Polish
 - Forest screensaver: full-screen coverage
 - Rain screensaver: splash particles
