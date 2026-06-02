@@ -88,7 +88,16 @@ function Performance:init(sceneView)
   -- SceneView caps at kMaxScenes (16 / chain). Visible scene at
   -- visible col N (N in [2, 6]) = scene at index N - 1 + scrollOffset.
   -- scrollOffset == 0 reproduces the legacy 5-scenes-max layout.
+  --
+  -- scrollFrac is a float that eases toward the integer
+  -- scrollOffset over several frames (driven by an onDisplayFrame
+  -- callback). subPx = (scrollOffset - scrollFrac) * 43 is applied
+  -- to every visible slot widget so the strip slides in from the
+  -- direction the scroll just advanced. Snaps to scrollOffset
+  -- when within kScrollSnap; the per-frame callback bails when
+  -- not animating to avoid burning the UI thread on an idle view.
   self.scrollOffset = 0
+  self.scrollFrac   = 0
 
   -- cursorCol = 1..6 (1 = CV widget, 2..6 = slot positions, with
   -- the "+" ply being the first un-populated slot).
@@ -316,6 +325,28 @@ function Performance:init(sceneView)
   self:_refresh()
 end
 
+-- Show / hide hooks: register the per-frame callback that drives
+-- scroll easing. The callback bails when scrollFrac has snapped
+-- to scrollOffset so an idle Performance view doesn't burn UI-
+-- thread cycles. onShow snaps scrollFrac to scrollOffset so a
+-- hide+show cycle doesn't replay an in-flight slide.
+function Performance:onShow()
+  self.scrollFrac = self.scrollOffset
+  self.frameCallback = function()
+    if not self:_isScrollAnimating() then return end
+    self:_advanceScrollAnim()
+    self:_applyScrollOffset()
+  end
+  Signal.register("onDisplayFrame", self.frameCallback)
+end
+
+function Performance:onHide()
+  if self.frameCallback then
+    Signal.remove("onDisplayFrame", self.frameCallback)
+    self.frameCallback = nil
+  end
+end
+
 -- Translate a visible column (2..6) to the backing-store scene
 -- index it currently maps to under the active scrollOffset.
 -- Col 1 is M1 (no scene); returns 0 for that to surface a "no
@@ -336,6 +367,58 @@ function Performance:_maxScrollOffset()
   local maxOff = lastIdx - 5
   if maxOff < 0 then maxOff = 0 end
   return maxOff
+end
+
+-- Scroll easing primitives. scrollFrac lerps toward scrollOffset
+-- each frame so a tap that bumps scrollOffset visibly slides the
+-- slot strip across instead of snapping. Matches the existing
+-- chain-edit (user-edit) convention from
+-- od/graphics/spotted/SpottedStrip.cpp:37 -- 0.20 lerp coefficient,
+-- 2-pixel snap threshold, constant regardless of Settings.animation
+-- (the global setting only gates higher-level Window transitions
+-- via Base.Context). Settings.animation == "disabled" still gets
+-- the instant-snap behavior so users who opt out of motion don't
+-- get a hidden exception here.
+--
+-- kScrollSnap expressed in ply-units (one ply = 43 px). 2 px / 43
+-- = ~0.0465.
+local kScrollLerp = 0.20
+local kScrollSnap = 2 / 43
+
+local function _lerpForAnimation()
+  local Settings = require "Settings"
+  if Settings.get("animation") == "disabled" then return 1.0 end
+  return kScrollLerp
+end
+
+function Performance:_isScrollAnimating()
+  return math.abs(self.scrollFrac - self.scrollOffset) > kScrollSnap
+end
+
+function Performance:_advanceScrollAnim()
+  local lerp = _lerpForAnimation()
+  self.scrollFrac = self.scrollFrac * (1 - lerp)
+                     + self.scrollOffset * lerp
+  if math.abs(self.scrollFrac - self.scrollOffset) < kScrollSnap then
+    self.scrollFrac = self.scrollOffset
+  end
+end
+
+-- Apply the current visual offset (scrollOffset - scrollFrac
+-- expressed in pixels) to every slot widget + the "+" glyph.
+-- subPx > 0 = strip drawn to the right of nominal (just bumped
+-- scrollOffset up, scrollFrac hasn't caught up). subPx < 0 = strip
+-- drawn to the left (just bumped scrollOffset down). Eases toward
+-- 0 each frame as scrollFrac chases scrollOffset.
+function Performance:_applyScrollOffset()
+  local subPx = (self.scrollOffset - self.scrollFrac) * 43
+  for col = 2, 6 do self.slots[col]:setXOffset(subPx) end
+  local plusCol = self:_plusCol()
+  if plusCol and self.plusGlyph then
+    local panelCenterX = (plusCol - 1) * 43 + 20
+    self.plusGlyph:setCenter(panelCenterX + subPx,
+                             kSlotY + kSlotHeight / 2)
+  end
 end
 
 -- Visible column where the "+" placeholder appears, or nil
@@ -373,18 +456,22 @@ function Performance:_refresh()
     self.slots[col]:setScene(scene, role)
   end
 
-  -- "+" placeholder position and visibility. Anchored to the
-  -- TextPanel's 43-stride center (same alignment fix the chip
-  -- + bias indicator got in .19) so the glyph stays visually
-  -- centered on the ply across all columns.
-  local plusCol = self:_plusCol()
-  if plusCol then
-    local panelCenterX = (plusCol - 1) * 43 + 20
-    self.plusGlyph:setCenter(panelCenterX, kSlotY + kSlotHeight / 2)
+  -- "+" placeholder visibility. Position is set by
+  -- _applyScrollOffset() at the end of this refresh so the
+  -- glyph participates in the scroll-easing slide alongside
+  -- the slot panels.
+  if self:_plusCol() then
     self.plusGlyph:show()
   else
     self.plusGlyph:hide()
   end
+
+  -- Apply current scroll-ease offset to slots + plus glyph.
+  -- During an in-flight transition this draws everything at
+  -- a sub-pixel offset from the nominal column centers; at
+  -- rest (scrollFrac == scrollOffset) it positions everything
+  -- exactly on the column centers.
+  self:_applyScrollOffset()
 
   -- Selection box: only when an M1 sub-readout is focused.
   -- Slot navigation is conveyed by the ▼ caret alone -- the

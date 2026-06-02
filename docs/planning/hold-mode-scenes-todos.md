@@ -94,24 +94,6 @@ param restore).
 
 ---
 
-### Easing animation on slot scroll
-
-Slot scrolling currently snaps instantly between viewport positions.
-User-edit's section scroll uses an easing animation (the ply strip
-slides smoothly across the screen over a few frames). Apply the
-same to Performance view scrolling so the user perceives the slot
-list as a continuous strip rather than a discrete page-flip. Helps
-confirm that scrolling happened, especially when the new viewport
-holds visually similar scene names.
-
-**Touch points**: locate the chain-edit section animation mechanism
-(likely `xroot/Chain/Section.lua` or `xroot/SpottedStrip.lua`),
-apply pattern to `Performance.lua` slot rendering. Each slot's
-TextPanel + indicator + chip may need to share an animated
-horizontal-offset variable that interpolates across a few frames.
-
----
-
 ## Shipped
 
 | Tag | Item | Commit |
@@ -124,3 +106,4 @@ horizontal-offset variable that interpolates across a few frames.
 | `.21` | M1 auto-focuses bias on click (collapsed cycle) | `94237eb` |
 | `.22` | "+" placeholder ply uses graphic glyph (two crossed lines) + TextPanel-stride centering | `759bf8c` |
 | `.23` | System-settings confirmSceneDelete toggle gates the delete dialog | `07dde18` |
+| `.24` | Slot scroll easing (matches SpottedStrip 0.20 lerp / 2 px snap) | `8a90339` |

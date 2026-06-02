@@ -90,6 +90,20 @@ function SlotControl:setBiasSource(weightParam)
   self.indicator:setBias(weightParam)
 end
 
+-- Horizontal offset applied to all three of this slot's widgets
+-- (panel + chip + indicator). Used by Performance's scroll-easing
+-- to slide the whole slot strip across a few frames when
+-- scrollOffset changes. dx = 0 returns the slot to its nominal
+-- (col-1)*43 + 20 center.
+function SlotControl:setXOffset(dx)
+  local panelCenterX = (self.column - 1) * 43 + 20
+  self.panel:setCenter(panelCenterX + dx, 32)
+  self.chip:setCenter(panelCenterX + math.floor(ply / 2) - kChipInset + dx,
+                      kChipY)
+  self.indicator:setPosition(panelCenterX - kIndicatorRadius + dx,
+                             kIndicatorBottom)
+end
+
 -- Render an empty slot: blank text, no chip, indicator unassigned.
 -- Used both for the "+" placeholder ply (Performance.lua draws its
 -- own "+" on top) and for ply positions past the last occupied
