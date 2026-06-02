@@ -107,3 +107,5 @@ param restore).
 | `.22` | "+" placeholder ply uses graphic glyph (two crossed lines) + TextPanel-stride centering | `759bf8c` |
 | `.23` | System-settings confirmSceneDelete toggle gates the delete dialog | `07dde18` |
 | `.24` | Slot scroll easing (matches SpottedStrip 0.20 lerp / 2 px snap) | `8a90339` |
+| `.25` | Performance refactor: Window → SpottedStrip + per-scene Controls | `a4a375c` |
+| `.26` | M1 fader / sub readout ▶ carets restored + indicator/chip/plus glyph centering anchored on TextPanel visual center | `99eb948` |
