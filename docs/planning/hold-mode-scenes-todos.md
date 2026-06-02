@@ -13,25 +13,78 @@ SWIG render no-op flags, multi-entry state machines).
 
 ## Open
 
-### Incorporate sub-display edits into scene authoring
+### Sub-display params gated off in scene authoring
 
-Original impl plan (`hold-mode-scenes-impl.md:107`,
-`hold-mode-scenes.md:107-116`) defines delta-able as *every*
-continuous Parameter the user can edit, including sub-display-only
-params on habitat units. Current phase 3b implementation only
-covers ONE Parameter per ViewControl (the main fader's value param).
-Sub-display readouts that bind to a *separate* Parameter on the same
-control (GainBias's gain, habitat-unit-style multi-knob layouts) are
-not scene-routable — encoder writes on them bypass scenes
-entirely.
+Decision 2026-06-02: sub-display readouts that bind to a separate
+Parameter from the main fader are **intentionally not** scene-routable.
+Habitat units that want a sub-display knob to participate in scenes
+should surface it as a standalone GainBias control in the unit's
+expanded view; the existing single-Parameter scene model picks it up
+there. We don't want to drive the schema, per-control state, and UI
+complexity of multi-slot routing for the small payoff of keeping the
+focused sub readout always-active.
 
-**Goal**: extend the per-control state machine so every Parameter
-a ViewControl exposes via an editable Readout participates in
-scene authoring and the crossfade.
+What this work actually needs: a **guard** that prevents the focused
+sub readout from writing to a Parameter that's outside the scene
+system during authoring. Today the encoder will happily edit a
+sub-display readout's underlying Parameter; the change persists past
+authoring exit, bypassing the scene-target swap.
 
-Detailed plan to be written before implementation. Scope and
-schema-migration story matter enough to warrant a separate doc.
-See `docs/planning/hold-mode-scenes-sub-display-routing.md`.
+Options for the guard:
+
+1. During authoring, intercept focus changes inside ViewControl so
+   focusing a non-routed sub readout is either disallowed (silent
+   no-op, maybe with a flash message) or downgraded to "view only"
+   (focus highlights the readout but encoder is grabbed for nothing
+   so writes don't land).
+2. Soft variant: leave focus possible but route the encoder writes
+   to a discarded Parameter so the user can spin without effect. Flash
+   message + maybe a visual indicator that this readout isn't
+   participating in the scene.
+3. Hard variant: refuse focus entirely. The user has to leave authoring
+   to edit non-scene sub params. Cleanest semantics but possibly
+   surprising the first time it's hit.
+
+Touch points: `Unit.ViewControl.GainBias` (gain readout focus path),
+similar for any other ViewControl with multiple editable Parameters.
+`Chain.Root.activeAuthoringScene` is already the "are we authoring?"
+flag; the guard reads it on focus / encoder.
+
+**See REJECTED plan**:
+`docs/planning/hold-mode-scenes-sub-display-routing.md` records the
+analysis of the alternative (extending the scene system to cover
+sub-display params). Worth reading for context on why "gate, don't
+extend" won.
+
+---
+
+### Subchain dive in scene authoring needs source-picker gating
+
+Users need to dive into subchains during scene authoring so they can
+edit delta-able params on units inside a sub-mod-branch (Mix unit's
+sub levels, Custom Unit interior, etc.). The existing dive gesture
+already works. **But** the source picker invoked inside the subchain
+lets the user reassign the subchain's input source to a different
+jack / global outlet — and that structural reassignment is a
+non-delta-able change that survives authoring exit.
+
+The structural-edit lock in `Chain.Root.rejectSceneAuthoringEdit`
+already gates other patch-state operations (insert / paste / delete /
+bypass / move / rename / preset-replace). The source picker path
+needs equivalent gating: while authoring is active, the picker should
+either refuse to open OR present only the current source as
+non-editable.
+
+Touch points: `xroot/Source/Chooser.lua` and `xroot/Source/Local.lua`
+(wherever the source picker entry point is). Probably one
+`Chain.Root.rejectSceneAuthoringEdit` call in the picker open path
+that flashes the lock message and returns. Mirror the existing
+gated-callsite pattern.
+
+Companion: re-verify subchain dive doesn't surface other structural
+gestures (move unit, delete unit, paste from clipboard) — those
+already gate via `rejectSceneAuthoringEdit` but a fresh audit
+confirms they all reach it.
 
 ---
 

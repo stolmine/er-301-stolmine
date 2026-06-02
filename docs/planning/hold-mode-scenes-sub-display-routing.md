@@ -1,6 +1,26 @@
 # Hold-mode scenes: sub-display Parameter routing
 
-## Goal
+> **Status: REJECTED (2026-06-02).** Implemented through phases 1-5 in
+> `v0.7.0-stolmine.9.3.0.28` (commits `7ed77a0` → `268dcbd`), then
+> reverted before the tag landed. Reasoning: most habitat units
+> already surface their sub-display continuous params as standalone
+> GainBias controls in the unit's expanded view; those already
+> participate in scenes through the single-slot model. The added
+> complexity of multi-slot routing (per-slot scene targets, base
+> snapshots, morpher items, ViewControl protocol expansion, schema
+> migration) wasn't worth the small surface it covered. Users adapt
+> by editing through the expanded-view fader instead of the focused
+> sub-display readout.
+>
+> What replaces this work: explicit gating that **prevents** sub-display
+> readout edits from leaking into scene authoring. See "Sub-display
+> params gated off in scene authoring" + "Subchain dive gating via
+> source picker" in `hold-mode-scenes-todos.md`.
+>
+> The analysis below stays as a record of what was considered and why
+> the alternative (gate, don't extend) won.
+
+## Goal (REJECTED)
 
 Extend the per-control state machine (introduced in phase 3b) so
 every Parameter a ViewControl exposes via an editable Readout
