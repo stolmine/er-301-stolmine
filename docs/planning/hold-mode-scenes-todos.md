@@ -1,0 +1,178 @@
+# Hold-mode scenes: open TODOs + shipped log
+
+Consolidated tracker for the hold-mode scenes feature
+(`feature/hold-mode-scenes`). The repo-wide `TODO.md` points
+here; do not duplicate items in both files.
+
+Bench-stable at `v0.7.0-stolmine.9.3.0.20`. See
+`hold-mode-scenes-postmortem.md` for the `.10 → .19` bring-up
+arc and the three distilled lessons (free-floating Parameters,
+SWIG render no-op flags, multi-entry state machines).
+
+---
+
+## Open
+
+### Sub-display edits bypass scene authoring
+
+During scene authoring the main-display fader is swapped to write
+to the scene's target Parameter (`enterSceneMode` rebinds
+`setControlParameter` + `setTargetParameter` to the scene target).
+Sub-display readouts on non-delta-able ViewControls are not. A user
+who navigates to the sub display and edits a value via the readout
+encoder hard-writes the live audio Parameter, bypassing the scene
+system entirely. The change persists outside authoring and can't be
+cleared by "exit without saving" because the write never went
+through the scene target.
+
+**Approach**: route every sub-display readout through a scene target
+by default. No per-control opt-in/opt-out flag; walk each
+ViewControl's sub-display readouts during `enterSceneMode` and swap
+each one's Parameter binding to a freshly created scene target. The
+existing subchain walker already recurses through branches, so
+coverage extends to nested habitat units (Plaits, Clouds, Warps)
+without per-package work. No graphics changes needed; the readout
+renders whatever Parameter it's pointed at.
+
+**Constraint**: user must not be able to change actual input routing
+to subchains during authoring. Structural-edit lock already in place
+during authoring covers this; this work only touches Parameter
+bindings on existing readouts, never chain topology.
+
+**Touch points**: extend `enterSceneMode` / `exitSceneMode` on every
+ViewControl (including currently-non-delta-able ones) to enumerate
+their sub-display Readouts and swap each readout's parameter. Likely
+needs a new ViewControl protocol method like
+`getSubDisplayParameters()` returning `{ [ctrlSubId] = audioParam,
+... }` so `Chain.Root` can create one scene target per sub-display
+readout and swap them on enter/exit. Update `exitSceneAuthoring`'s
+delta-capture walker to capture per-sub-id.
+
+`xroot/Unit/ViewControl/GainBias.lua` already swaps `self.bias` (the
+sub-display bias readout) but not `self.gain`. Decide whether gain
+should also participate; if so, this generalizes naturally.
+
+Companion: per-control sub-display delta indicator (small dog-ear
+on the sub-display ply corner showing the readout has a stored
+scene delta). Generalize the existing main-display
+`_setSceneAuthoringIndicator` to take a position arg.
+
+---
+
+### Verify serialize / deserialize round-trip
+
+Scene-system serialize/deserialize was wired in Phase 1 + 4.3 but
+never bench-tested end-to-end past the `.10 → .20` state-machine,
+delta-map, indicator, and viewport-scroll changes.
+
+Hardware checklist:
+
+- Build a chain with 2+ scenes, each carrying deltas on 2+ controls
+  across 2+ units, including a nested branch.
+- Assign scene 1 to A, scene 2 to B. Save quickset.
+- Reboot device. Load the quickset. Confirm:
+  - Both scenes present with original names.
+  - Crossfader A/B assignments restored.
+  - Delta count + delta values per scene match originals.
+  - Bias-fill indicator drives correctly from the restored A/B.
+  - Authoring entry on each restored scene shows the original
+    delta'd controls highlighted.
+  - Bias movement on M1 produces the same audio sweep as pre-save.
+- More than 5 scenes: save with 8+, reload, confirm scroll viewport
+  works and all scenes round-trip.
+- Repeat after the sub-display-routing change ships so sub deltas
+  also round-trip.
+- Cross-firmware: save on stolmine, load on vanilla. Scenes should
+  be gracefully ignored, base values preserved.
+- Old-preset compat: load a pre-scenes preset on the current
+  firmware. Should open with no scenes, no errors, normal user mode.
+
+**Touch points**: `xroot/SceneView/init.lua` (SceneView
+serialize/deserialize), `xroot/SceneView/Scene.lua` (per-scene
+serialize), `xroot/Chain/Root.lua` (scene-cv branch serialize + base
+param restore).
+
+---
+
+### Confirmation toggle for scene deletion
+
+Add a system-settings checkbox in the confirmations section gating
+the scene-delete verification dialog. Same pattern as the existing
+favorites-clear confirmation guard. Default on. When off, shift+S3
+(or shift+M on a slot) deletes immediately.
+
+**Touch points**: `xroot/SceneView/Performance.lua` `_confirmDelete`
+(gate the dialog on the setting), `xroot/Settings/init.lua` (new
+boolean entry), `xroot/Settings/Interface.lua` (surface under
+confirmations section).
+
+---
+
+### Easing animation on slot scroll
+
+Slot scrolling currently snaps instantly between viewport positions.
+User-edit's section scroll uses an easing animation (the ply strip
+slides smoothly across the screen over a few frames). Apply the
+same to Performance view scrolling so the user perceives the slot
+list as a continuous strip rather than a discrete page-flip. Helps
+confirm that scrolling happened, especially when the new viewport
+holds visually similar scene names.
+
+**Touch points**: locate the chain-edit section animation mechanism
+(likely `xroot/Chain/Section.lua` or `xroot/SpottedStrip.lua`),
+apply pattern to `Performance.lua` slot rendering. Each slot's
+TextPanel + indicator + chip may need to share an animated
+horizontal-offset variable that interpolates across a few frames.
+
+---
+
+### "+" graphic glyph for empty slot
+
+The "+" placeholder ply currently renders a text label "+". The
+original hold-mode UI used a graphical plus icon (two crossed
+lines) that read better at the panel resolution. Reuse that graphic
+for the new Performance view's empty slot — the `Drawing`
+instructions are likely still in `Drawings.lua` or similar. If
+not, build a small new `app.DrawingInstructions` block with two
+centered lines.
+
+Also: ensure the "+" stays visually centered in the slot ply.
+The current text-label version may use the 42-stride math that
+the `.19` work showed drifts left across columns. Anchor the
+glyph on the TextPanel's `(col-1)*43 + 20` center, same as the
+A/B chip and the bias indicator now do.
+
+---
+
+### M1 auto-focuses bias on click
+
+Currently clicking M1 moves the cursor to M1 but doesn't focus the
+bias readout — the user has to tap S3 or M1 again to start writing
+bias. In user-edit mode the parallel gesture (clicking a GainBias
+unit's M-key) auto-grabs the bias readout so the encoder is
+immediately writing the value the user just visually landed on.
+Match that.
+
+Mechanism: the current `mainReleased` case for `i == 1` cycles
+through three states (cursor elsewhere → cursor to M1 unfocused →
+M1 focused on bias → M1 unfocused). Collapse the first two: when
+the cursor moves to M1, also call `_setM1FocusedReadout(self.m1Bias)`
+immediately so the bias readout has focus on landing. Cycle order
+then becomes: "cursor elsewhere" → "M1 focused on bias" →
+"M1 unfocused". Tap-tap-tap from another column reads as
+"land on bias" → "unfocus" → "re-focus bias" etc.
+
+**Touch points**: `xroot/SceneView/Performance.lua` `mainReleased`
+case `i == 1`, around line 700-720.
+
+---
+
+## Shipped
+
+| Tag | Item | Commit |
+|-----|------|--------|
+| `.17` | Eliminate morph slew (hardSet in apply, three sites) | `de66fcd` |
+| `.17` | Adaptive A/B labels at fader extremes | `de66fcd` |
+| `.18` | Initial bias-fill circle indicator on slot plies | `cb71973` |
+| `.19` | Indicator antialiasing + centering + Vee-mode pin + 6-16 scene scroll | `2d01c3d` |
+| `.20` | Duplicate scene via S1 in slot shift display | `9d7312e` |
