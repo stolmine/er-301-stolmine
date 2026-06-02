@@ -13,49 +13,25 @@ SWIG render no-op flags, multi-entry state machines).
 
 ## Open
 
-### Sub-display edits bypass scene authoring
+### Incorporate sub-display edits into scene authoring
 
-During scene authoring the main-display fader is swapped to write
-to the scene's target Parameter (`enterSceneMode` rebinds
-`setControlParameter` + `setTargetParameter` to the scene target).
-Sub-display readouts on non-delta-able ViewControls are not. A user
-who navigates to the sub display and edits a value via the readout
-encoder hard-writes the live audio Parameter, bypassing the scene
-system entirely. The change persists outside authoring and can't be
-cleared by "exit without saving" because the write never went
-through the scene target.
+Original impl plan (`hold-mode-scenes-impl.md:107`,
+`hold-mode-scenes.md:107-116`) defines delta-able as *every*
+continuous Parameter the user can edit, including sub-display-only
+params on habitat units. Current phase 3b implementation only
+covers ONE Parameter per ViewControl (the main fader's value param).
+Sub-display readouts that bind to a *separate* Parameter on the same
+control (GainBias's gain, habitat-unit-style multi-knob layouts) are
+not scene-routable — encoder writes on them bypass scenes
+entirely.
 
-**Approach**: route every sub-display readout through a scene target
-by default. No per-control opt-in/opt-out flag; walk each
-ViewControl's sub-display readouts during `enterSceneMode` and swap
-each one's Parameter binding to a freshly created scene target. The
-existing subchain walker already recurses through branches, so
-coverage extends to nested habitat units (Plaits, Clouds, Warps)
-without per-package work. No graphics changes needed; the readout
-renders whatever Parameter it's pointed at.
+**Goal**: extend the per-control state machine so every Parameter
+a ViewControl exposes via an editable Readout participates in
+scene authoring and the crossfade.
 
-**Constraint**: user must not be able to change actual input routing
-to subchains during authoring. Structural-edit lock already in place
-during authoring covers this; this work only touches Parameter
-bindings on existing readouts, never chain topology.
-
-**Touch points**: extend `enterSceneMode` / `exitSceneMode` on every
-ViewControl (including currently-non-delta-able ones) to enumerate
-their sub-display Readouts and swap each readout's parameter. Likely
-needs a new ViewControl protocol method like
-`getSubDisplayParameters()` returning `{ [ctrlSubId] = audioParam,
-... }` so `Chain.Root` can create one scene target per sub-display
-readout and swap them on enter/exit. Update `exitSceneAuthoring`'s
-delta-capture walker to capture per-sub-id.
-
-`xroot/Unit/ViewControl/GainBias.lua` already swaps `self.bias` (the
-sub-display bias readout) but not `self.gain`. Decide whether gain
-should also participate; if so, this generalizes naturally.
-
-Companion: per-control sub-display delta indicator (small dog-ear
-on the sub-display ply corner showing the readout has a stored
-scene delta). Generalize the existing main-display
-`_setSceneAuthoringIndicator` to take a position arg.
+Detailed plan to be written before implementation. Scope and
+schema-migration story matter enough to warrant a separate doc.
+See `docs/planning/hold-mode-scenes-sub-display-routing.md`.
 
 ---
 
