@@ -54,6 +54,16 @@ namespace od
         void hardSet(float x);
         void reset();
 
+        // Force the CV -> mWeight mapping mode. Normally toggled by
+        // add/addVee/clear/remove based on Item kinds. Scene-cv
+        // callers wire the morpher's CV inlet before any Items have
+        // been built (Performance view comes up with zero deltas);
+        // calling setVeeMode(true) keeps process() in bipolar
+        // pass-through so the live "Weight" Parameter that views
+        // read for indicators is always in [-1, +1] semantics,
+        // never the legacy linear [0, 1] remap.
+        void setVeeMode(bool on);
+
     protected:
         struct Item
         {

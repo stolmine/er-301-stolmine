@@ -355,6 +355,13 @@ function Root:_getOrBuildSceneMorph()
 
   local morph = app.ParamSetMorph()
   morph:setName(self.title .. ".SceneMorph")
+  -- Pin Vee semantics for the scene-cv pipeline. Without this the
+  -- morpher's mVeeMode auto-flag only flips true once at least one
+  -- VEE Item has been added, so a fresh chain with no scene deltas
+  -- runs in the legacy linear (1-cv)/2 remap and the live "Weight"
+  -- Parameter that views read for indicators reports the wrong
+  -- semantics (halfway at 0, reversed at extremes).
+  morph:setVeeMode(true)
   self._sceneMorph = morph
 
   local gb = app.GainBias()

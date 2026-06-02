@@ -325,19 +325,22 @@ namespace od
         {
             mItems.erase(i);
             mUpdateNeeded = true;
-            // Recompute flags in case the removed item was the
-            // only one of its kind.
+            // Recompute mHasLiveItems in case the removed item was
+            // the only Live/Vee item.
+            //
+            // mVeeMode is intentionally NOT recomputed here. Owners
+            // can pin it via setVeeMode -- once a morpher is wired
+            // into a scene-cv pipeline that expects bipolar
+            // semantics, removing all Items shouldn't silently
+            // collapse the live "Weight" Parameter back to legacy
+            // linear [0,1] mapping. addVee still flips it on as
+            // before for the auto-detection case.
             mHasLiveItems = false;
-            mVeeMode = false;
             for (Item &item : mItems)
             {
                 if (item.kind == Item::kLive3 || item.kind == Item::kVee4)
                 {
                     mHasLiveItems = true;
-                }
-                if (item.kind == Item::kVee4)
-                {
-                    mVeeMode = true;
                 }
             }
         }
@@ -347,8 +350,17 @@ namespace od
     {
         mItems.clear();
         mHasLiveItems = false;
-        mVeeMode = false;
+        // mVeeMode intentionally NOT reset here. See setVeeMode
+        // and remove() for the same reasoning: once an owner has
+        // pinned the morpher into Vee semantics, a transient clear
+        // (rebuild between scene assignments) shouldn't drop the
+        // mode and silently re-remap the live "Weight" Parameter.
         hardSet(0.0f);
+    }
+
+    void ParamSetMorph::setVeeMode(bool on)
+    {
+        mVeeMode = on;
     }
 
     int ParamSetMorph::size()

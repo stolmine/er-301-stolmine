@@ -84,6 +84,12 @@ function Performance:init(sceneView)
   self.sceneView = sceneView
   self.chain     = sceneView.chain
 
+  -- Horizontal scroll for the 5-wide slot viewport (M2..M6).
+  -- SceneView caps at kMaxScenes (16 / chain). Visible scene at
+  -- visible col N (N in [2, 6]) = scene at index N - 1 + scrollOffset.
+  -- scrollOffset == 0 reproduces the legacy 5-scenes-max layout.
+  self.scrollOffset = 0
+
   -- cursorCol = 1..6 (1 = CV widget, 2..6 = slot positions, with
   -- the "+" ply being the first un-populated slot).
   self.cursorCol    = 1
@@ -308,13 +314,37 @@ function Performance:init(sceneView)
   self:_refresh()
 end
 
--- The "+" ply column: M2 if sceneCount == 0, else M(2+sceneCount).
--- Returns nil when scenes have filled all 5 slot positions
--- (sceneCount == 5).
+-- Translate a visible column (2..6) to the backing-store scene
+-- index it currently maps to under the active scrollOffset.
+-- Col 1 is M1 (no scene); returns 0 for that to surface a "no
+-- scene" sentinel without crashing on getScene(0).
+function Performance:_sceneIdxForCol(col)
+  if col < 2 then return 0 end
+  return col - 1 + self.scrollOffset
+end
+
+-- Largest scrollOffset that still keeps at least one slot or
+-- the "+" placeholder visible at the right edge.
+-- visible cols [2..6] cover sceneIdx [scrollOffset+1, scrollOffset+5].
+-- "+" placeholder lives at conceptual sceneIdx (sceneCount+1).
+function Performance:_maxScrollOffset()
+  local n = self.sceneView:getSceneCount()
+  local hasPlus = (n < self.sceneView:getMaxScenes())
+  local lastIdx = n + (hasPlus and 1 or 0)
+  local maxOff = lastIdx - 5
+  if maxOff < 0 then maxOff = 0 end
+  return maxOff
+end
+
+-- Visible column where the "+" placeholder appears, or nil
+-- when scenes fill the right edge or scrollOffset has paged
+-- past the "+".
 function Performance:_plusCol()
   local n = self.sceneView:getSceneCount()
-  if n >= 5 then return nil end
-  return n + 2
+  if n >= self.sceneView:getMaxScenes() then return nil end
+  local col = (n + 1) - self.scrollOffset + 1
+  if col < 2 or col > 6 then return nil end
+  return col
 end
 
 -- Repaint everything from current state.
@@ -327,10 +357,11 @@ function Performance:_refresh()
 
   -- M2..M6 slots. SlotControl handles name + A/B chip + delta
   -- count rendering; we just hand it the scene + crossfader role.
+  -- scrollOffset shifts which slice of the scene list is visible.
   local a = self.sceneView:getCrossfaderA()
   local b = self.sceneView:getCrossfaderB()
   for col = 2, 6 do
-    local sceneIdx = col - 1
+    local sceneIdx = self:_sceneIdxForCol(col)
     local scene = self.sceneView:getScene(sceneIdx)
     local role
     if scene then
@@ -416,7 +447,7 @@ function Performance:_refreshSub()
   if self.m1SubGroup then self.m1SubGroup:hide() end
   if self.slotSubGroup then self.slotSubGroup:show() end
 
-  local sceneIdx = col - 1
+  local sceneIdx = self:_sceneIdxForCol(col)
   local scene = self.sceneView:getScene(sceneIdx)
   if scene then
     -- Top-left: index + name + (A/B) chip when bound.
@@ -609,14 +640,23 @@ function Performance:_m1BiasSet()
   kb:show()
 end
 
--- The rightmost selectable ply: M1 always; M(1+sceneCount) for
--- occupied scenes; the "+" ply if not all slots are full. Used by
--- encoder navigation to know when to stop.
+-- The rightmost selectable ply within the visible viewport.
+-- M1 always selectable; visible occupied slots up to col 6;
+-- the visible "+" if present. Encoder uses this to decide
+-- when to stop advancing the cursor (vs scrolling).
 function Performance:_maxSelectableCol()
   local n = self.sceneView:getSceneCount()
+  -- Rightmost occupied col in the current viewport: clamped to 6.
+  -- (n - scrollOffset) is the count of scenes from scrollOffset+1
+  -- onwards; +1 because col 2 holds the first visible scene.
+  local lastOccupied = n - self.scrollOffset + 1
+  if lastOccupied < 1 then lastOccupied = 1 end  -- M1 always selectable
+  if lastOccupied > 6 then lastOccupied = 6 end
   local plusCol = self:_plusCol()
-  if plusCol then return plusCol end
-  return n + 1
+  if plusCol and plusCol > lastOccupied then
+    return plusCol
+  end
+  return lastOccupied
 end
 
 -- ---------------------------------------------------------------------------
@@ -643,19 +683,38 @@ function Performance:encoder(change, shifted)
     return true
   end
   -- Cursor on a slot ply: encoder navigates between M-keys.
+  -- At the right edge (col 6) with more scenes off-screen,
+  -- advance scrollOffset instead of clamping. At the left edge
+  -- of the slot viewport (col 2) with scrollOffset > 0, retreat
+  -- the scroll before stepping cursor to M1; this means the
+  -- only way back to M1 from a scrolled view is to first
+  -- unscroll. Acceptable tradeoff: gives the user a direct
+  -- way to page through 16 scenes via the encoder alone.
   self.encoderAccum = self.encoderAccum + change
   local moved = false
-  local maxCol = self:_maxSelectableCol()
   while self.encoderAccum >= kEncoderThreshold do
     self.encoderAccum = self.encoderAccum - kEncoderThreshold
+    local maxCol = self:_maxSelectableCol()
     if self.cursorCol < maxCol then
       self.cursorCol = self.cursorCol + 1
+      moved = true
+    elseif self.cursorCol == 6 and
+           self.scrollOffset < self:_maxScrollOffset() then
+      self.scrollOffset = self.scrollOffset + 1
+      -- Reset shift state on visible slots when scrolling so a
+      -- stale shifted toggle doesn't bleed onto a scene that
+      -- just slid under the cursor's slot column.
+      for c = 2, 6 do self.shiftModeByCol[c] = false end
       moved = true
     end
   end
   while self.encoderAccum <= -kEncoderThreshold do
     self.encoderAccum = self.encoderAccum + kEncoderThreshold
-    if self.cursorCol > 1 then
+    if self.cursorCol == 2 and self.scrollOffset > 0 then
+      self.scrollOffset = self.scrollOffset - 1
+      for c = 2, 6 do self.shiftModeByCol[c] = false end
+      moved = true
+    elseif self.cursorCol > 1 then
       self.cursorCol = self.cursorCol - 1
       moved = true
     end
@@ -670,7 +729,7 @@ function Performance:mainReleased(i, shifted)
   -- shift+M on M1 / the "+" / blank plies is a no-op.
   if shifted then
     if i >= 2 then
-      local sceneIdx = i - 1
+      local sceneIdx = self:_sceneIdxForCol(i)
       local scene = self.sceneView:getScene(sceneIdx)
       if scene then return self:_confirmDelete(sceneIdx, scene) end
     end
@@ -689,7 +748,17 @@ function Performance:mainReleased(i, shifted)
     if self.shiftModeByCol[i] ~= nil then
       self.shiftModeByCol[i] = false
     end
+    -- New scene lives at the conceptual "+" position; keep
+    -- the cursor on that visible column. If the "+" was at
+    -- col 6 and there are now more scenes than visible cols,
+    -- bump scrollOffset so the freshly-created scene stays
+    -- visible (and the "+" advances to col 6 again if more
+    -- scenes can still be added).
     self.cursorCol = i
+    local maxScroll = self:_maxScrollOffset()
+    if self.scrollOffset < maxScroll and i == 6 then
+      self.scrollOffset = self.scrollOffset + 1
+    end
     self:_refresh()
     return true
   end
@@ -712,7 +781,7 @@ function Performance:mainReleased(i, shifted)
     self:_refresh()
     return true
   end
-  if self.sceneView:getScene(i - 1) then
+  if self.sceneView:getScene(self:_sceneIdxForCol(i)) then
     self.cursorCol = i
     self:_refresh()
     return true
@@ -735,6 +804,11 @@ function Performance:_confirmDelete(sceneIdx, scene)
       -- unshifted so the inherited column doesn't show stale
       -- rename/delete labels on the new occupant.
       for col = 2, 6 do self.shiftModeByCol[col] = false end
+      -- Clamp scrollOffset: if delete reduced sceneCount enough
+      -- that scrollOffset is past the new max, walk it back so
+      -- the right edge of the viewport always shows content.
+      local maxScroll = self:_maxScrollOffset()
+      if self.scrollOffset > maxScroll then self.scrollOffset = maxScroll end
       -- Snap cursor back into bounds if we just deleted the
       -- currently-selected slot (or any slot past the now-shrunk
       -- range).
@@ -811,7 +885,7 @@ function Performance:subReleased(i, shifted)
     return false
   end
   -- Slot plies.
-  local sceneIdx = col - 1
+  local sceneIdx = self:_sceneIdxForCol(col)
   local scene = self.sceneView:getScene(sceneIdx)
   if scene == nil then return false end
 
