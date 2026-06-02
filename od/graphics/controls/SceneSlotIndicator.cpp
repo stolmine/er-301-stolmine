@@ -46,17 +46,23 @@ namespace od
     // slot is bound to a crossfader endpoint.
     int outlineBright = (mSide == kSideNone) ? GRAY5 : WHITE;
 
-    // Compute live fill fraction in [0, 1]. mWeight semantics:
-    // +1 = full A, -1 = full B, 0 = neither (audio at base).
-    // Each side only fills on its half of the range.
+    // Live A<->B mix fraction in [0, 1]. Matches the morpher's
+    // linear bipolar crossfade:
+    //   wA = (1 + bias) / 2      bias=+1 -> A full
+    //   wB = 1 - wA              bias=-1 -> B full
+    // Both indicators always show their proportion; at bias=0
+    // each is half-filled (50/50 mix), reading as opposing
+    // crescents that wax and wane in opposition as the user
+    // moves the fader.
     float bias = mpBias ? mpBias->value() : 0.0f;
     float fillFrac = 0.0f;
     bool hasFill = (mSide != kSideNone) && mpBias != 0;
     if (hasFill)
     {
-      if (mSide == kSideA)      fillFrac = bias > 0.0f ?  bias : 0.0f;
-      else                      fillFrac = bias < 0.0f ? -bias : 0.0f;
-      if (fillFrac > 1.0f) fillFrac = 1.0f;
+      if (bias < -1.0f) bias = -1.0f;
+      else if (bias > 1.0f) bias = 1.0f;
+      if (mSide == kSideA) fillFrac = (bias + 1.0f) * 0.5f;
+      else                 fillFrac = (1.0f - bias) * 0.5f;
       if (fillFrac <= 0.0f) hasFill = false;
     }
 

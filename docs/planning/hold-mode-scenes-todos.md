@@ -109,3 +109,4 @@ param restore).
 | `.24` | Slot scroll easing (matches SpottedStrip 0.20 lerp / 2 px snap) | `8a90339` |
 | `.25` | Performance refactor: Window → SpottedStrip + per-scene Controls | `a4a375c` |
 | `.26` | M1 fader / sub readout ▶ carets restored + indicator/chip/plus glyph centering anchored on TextPanel visual center | `99eb948` |
+| `.27` | Crossfade switched from tri-state VEE (through-zero base) to bipolar linear A↔B. Escape from scene contribution is via unassigned (or empty-delta) endpoint; baseParam still fed in for that fallback. Indicators become opposing crescents that sum to 1. | `68dd914` |

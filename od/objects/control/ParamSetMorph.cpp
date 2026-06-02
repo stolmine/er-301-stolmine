@@ -80,41 +80,39 @@ namespace od
 
                 if (item.kind == Item::kVee4)
                 {
-                    // VEE blend. w2 is the bipolar bias in [-1, +1].
-                    // sceneA stored in startParam, sceneB in endParam,
-                    // base in baseParam.
-                    float bias = w2;
-                    float base = isDB ? toDecibels(item.baseParam->target())
-                                      : item.baseParam->target();
-                    float x;
-                    if (bias > 0.0f && item.startParam != nullptr)
-                    {
-                        float sceneA = isDB
-                            ? toDecibels(item.startParam->target())
-                            : item.startParam->target();
-                        x = (1.0f - bias) * base + bias * sceneA;
-                    }
-                    else if (bias < 0.0f && item.endParam != nullptr)
-                    {
-                        float sceneB = isDB
-                            ? toDecibels(item.endParam->target())
-                            : item.endParam->target();
-                        float absB = -bias;
-                        x = (1.0f - absB) * base + absB * sceneB;
-                    }
-                    else
-                    {
-                        x = base;
-                    }
-                    // hardSet instead of softSet: the morpher's
-                    // output should track bias one-to-one so the
-                    // user can crossfade as fast as they can turn
-                    // the encoder. Click-protection on abrupt
-                    // assignment changes is the user's
-                    // responsibility -- if they want a ramp,
-                    // they drop a slew unit into the CV input
-                    // subchain. See TODO.md "Eliminate or make-
-                    // optional morph slew".
+                    // Linear bipolar A<->B crossfade.
+                    //   wA = (1 + bias) / 2     -- bias = +1 -> A only
+                    //   wB = 1 - wA             -- bias = -1 -> B only
+                    //   x  = wA * sceneA + wB * sceneB
+                    //
+                    // Unassigned endpoints are filled with baseParam
+                    // by Chain.Root._buildSceneMorphItems, so a
+                    // sweep "into" an unassigned (or blank-delta)
+                    // slot reveals base. Same affordance the
+                    // Elektron lineage uses: the escape from scene
+                    // contribution is a slot you can stage instead
+                    // of a magic midpoint.
+                    //
+                    // baseParam stays in the Item for ABI stability
+                    // (addVee is the public ctor); apply doesn't
+                    // need it -- the caller already routed base
+                    // through start/end when it wanted base on
+                    // that side.
+                    //
+                    // hardSet (no morpher-internal ramp): see
+                    // commit `de66fcd` reasoning -- the user adds
+                    // slew in the CV input subchain if they want
+                    // click protection on abrupt assignment
+                    // changes.
+                    float sceneA = isDB
+                        ? toDecibels(item.startParam->target())
+                        : item.startParam->target();
+                    float sceneB = isDB
+                        ? toDecibels(item.endParam->target())
+                        : item.endParam->target();
+                    float wA = (w2 + 1.0f) * 0.5f;
+                    float wB = 1.0f - wA;
+                    float x = wA * sceneA + wB * sceneB;
                     item.param->hardSet(isDB ? fromDecibels(x) : x);
                     continue;
                 }

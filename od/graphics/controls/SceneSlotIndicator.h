@@ -10,13 +10,16 @@ namespace od
   // Small hollow-circle indicator drawn on each scene-slot ply in
   // the hold-mode Performance view. When the slot is assigned to
   // crossfader endpoint A or B, fills in from the corresponding
-  // side as the morpher's live weight Parameter moves toward that
-  // endpoint. Slot A fills left-to-right, slot B fills right-to-
-  // left. Unassigned slots draw only the hollow outline.
+  // side as the morpher's live weight Parameter moves through the
+  // bipolar A<->B crossfade. Slot A fills left-to-right with
+  // (1 + bias) / 2; slot B fills right-to-left with (1 - bias) / 2.
+  // Both indicators always show their proportion; at bias=0 each
+  // is half-filled and the pair reads as opposing crescents.
+  // Unassigned slots draw only the hollow outline.
   //
   // The fill is a horizontal wipe clipped to the circle's profile:
   // each row inside the circle draws an hline whose length is
-  // `chord_width * |bias|`. Mimics "clip a rectangle to a circle
+  // `chord_width * fillFrac`. Mimics "clip a rectangle to a circle
   // and keyframe it in" from any video editor.
   class SceneSlotIndicator : public Graphic
   {

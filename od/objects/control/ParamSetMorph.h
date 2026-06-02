@@ -34,16 +34,19 @@ namespace od
         // Parameter) tracks live during scene authoring. PinView
         // keeps the cached-float 2-arg path above.
         void add(Parameter *target, Parameter *startParam, Parameter *endParam);
-        // VEE-blend variant for the scene crossfader. mWeight is
-        // bipolar in [-1, +1] (the M1 bias).
-        //   weight > 0  audio = (1 - w) * base + w * sceneA
-        //   weight < 0  audio = (1 + w) * base + |w| * sceneB
-        //   weight == 0 audio = base
-        // Differs from the linear (2-arg / 3-arg) variants: bias at
-        // center leaves audio sitting on the user's pre-scene value,
-        // and scene contribution ramps in as the user pulls bias
-        // toward an endpoint. Scenes never mix unless the user
-        // actively crosses the midpoint.
+        // Bipolar linear crossfade variant for the scene system.
+        // mWeight is the M1 bias in [-1, +1].
+        //   wA = (1 + bias) / 2,   wB = 1 - wA
+        //   audio = wA * sceneA + wB * sceneB
+        // bias = +1 -> all A, -1 -> all B, 0 -> 50/50 mix. Direct
+        // A<->B path (no through-zero detour through base) --
+        // matches the Elektron-lineage crossfader convention.
+        // Escape from scene contribution is via an unassigned
+        // (or empty-delta) endpoint: Chain.Root collapses those
+        // to baseParam before calling, so a sweep into an
+        // unassigned slot reveals the user's pre-scene base.
+        // baseParam is retained in the signature for ABI
+        // stability but no longer consulted in apply().
         void addVee(Parameter *target, Parameter *baseParam,
                     Parameter *sceneA, Parameter *sceneB);
         void remove(Parameter *param);
