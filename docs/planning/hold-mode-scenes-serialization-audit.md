@@ -389,6 +389,34 @@ to develop yet.
 
 ### Phase A status
 
-Audit complete. One commit pending: implement the scene-CV
-branch + params persistence per the snippet above. Then tag,
-build am335x, hand to bench for Phase C.
+Audit complete. Fix shipped in `.29` (`cc587ea`): scene-CV branch
++ bias/gain serialize/deserialize. Subsequent fixes:
+
+- `.30` `e696a3b`: save-while-engaged snapshot via `_sceneTask:lock`
+  + `_hardRestoreAudioToBase`. CRASHED (lock blocked audio thread).
+- `.31` `03ccee1`: replaced lock with `removeTask` / `addTask`.
+  Avoided audio-thread block but exposed a forward-reference bug
+  in `_hardRestoreAudioToBase` that was masked by the lock crash
+  in `.30`.
+- `.32` `b5a71e6`: fixed the forward-reference bug + moved
+  `Crash.init()` to top of `Application.init` so init-time errors
+  produce a real dialog. **Boot + quicksave round-trip clean on
+  bench.**
+
+## Phase C status
+
+Bench round-trip on `.32`: **clean.** Save while scene mode
+engaged, reload, scenes + A/B + M1 bias/gain + scene-CV branch
+contents all restored without drift. The bake-in-base regression
+from pre-`.30` is gone. No "reassign to refresh" workaround
+needed.
+
+Remaining items deferred to followups:
+
+- 16-scene scroll round-trip (not tested with > 5 scenes yet).
+- Cross-firmware round-trip (save on stolmine → load on vanilla
+  → no crash; vanilla → stolmine → no crash).
+- Pre-`.27` VEE-math preset migration (data shape unchanged so
+  should just work, but worth a smoke).
+- Orphan-unit case (delete a unit, save, reload — does the
+  scene's dangling delta get dropped cleanly?).
