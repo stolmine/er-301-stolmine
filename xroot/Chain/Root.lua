@@ -92,39 +92,6 @@ function Root:deserializePins(data)
   self.pinView:deserialize(data)
 end
 
--- Hard-restore every audio Parameter that the morpher writes to,
--- back to its user-edit base value. Used at disengage and at
--- save time so the audio param matches the user's pre-scene
--- value rather than the morpher's last blend output.
---
--- Without the save-time call, persisting while scene mode is
--- engaged would capture audio = blend(base, sceneA, sceneB) into
--- the preset. On reload, re-engaging snapshots base from
--- audio.target -- so the *blended* value becomes the new base,
--- permanently baking in whatever scene contribution was active
--- at save time. Bug deeper than the .29 M1 fix; reported by user
--- bench 2026-06-02.
-function Root:_hardRestoreAudioToBase()
-  if self._sceneBaseParams == nil then return end
-  _walkAllUnits(self, function(unit)
-    if not unit.controls then return end
-    local unitKey = unit:getInstanceKey()
-    local perUnit = self._sceneBaseParams[unitKey]
-    if not perUnit then return end
-    for ctrlId, control in pairs(unit.controls) do
-      if control.getSceneAudioParam then
-        local baseParam = perUnit[ctrlId]
-        if baseParam then
-          local audioParam = control:getSceneAudioParam()
-          if audioParam then
-            audioParam:hardSet(baseParam:target())
-          end
-        end
-      end
-    end
-  end)
-end
-
 function Root:serialize()
   -- If scene mode is engaged, temporarily yank the morpher task
   -- off the audio thread so it can't write audio = blend during
@@ -264,6 +231,44 @@ local function _walkAllChains(chain, callback)
       end)
     end
   end
+end
+
+-- Hard-restore every audio Parameter that the morpher writes to,
+-- back to its user-edit base value. Used at disengage and at
+-- save time so the audio Param matches the user's pre-scene
+-- value rather than the morpher's last blend output.
+--
+-- Without the save-time call, persisting while scene mode is
+-- engaged would capture audio = blend(base, sceneA, sceneB) into
+-- the preset. On reload, re-engaging snapshots base from
+-- audio.target -- so the *blended* value becomes the new base,
+-- permanently baking in whatever scene contribution was active
+-- at save time.
+--
+-- Lives AFTER _walkAllUnits / _walkAllChains so the closure
+-- captures them as locals. An earlier (.29 - .31) placement
+-- before the walker definitions made `_walkAllUnits` resolve to
+-- the nil global, hard-crashing the .30 quicksave
+-- (Chain.Root.lua:109: attempt to call a nil value).
+function Root:_hardRestoreAudioToBase()
+  if self._sceneBaseParams == nil then return end
+  _walkAllUnits(self, function(unit)
+    if not unit.controls then return end
+    local unitKey = unit:getInstanceKey()
+    local perUnit = self._sceneBaseParams[unitKey]
+    if not perUnit then return end
+    for ctrlId, control in pairs(unit.controls) do
+      if control.getSceneAudioParam then
+        local baseParam = perUnit[ctrlId]
+        if baseParam then
+          local audioParam = control:getSceneAudioParam()
+          if audioParam then
+            audioParam:hardSet(baseParam:target())
+          end
+        end
+      end
+    end
+  end)
 end
 
 -- Arm every delta-able control reachable from the root chain for
