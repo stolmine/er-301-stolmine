@@ -637,13 +637,15 @@ end
 -- scene target Parameter, but self.gain stays bound to the live
 -- audio gainParam. Editing gain while authoring would silently
 -- bypass the scene system and stick the change as a base-level
--- edit. Refuse focus with a flash so the user knows why.
+-- edit. Defer to the same root.rejectSceneAuthoringEdit helper
+-- the other structural gates (EmptySection / InputControl /
+-- MonitorControl) use, so the user sees the uniform
+-- "Locked while editing scene." flash everywhere structural
+-- writes are blocked.
 function GainBias:_rejectGainEditWhileAuthoring()
   local root = self:getRootChain()
-  if root and root.activeAuthoringScene then
-    local Overlay = require "Overlay"
-    Overlay.flashMainMessage("Gain isn't scene-routed -- exit authoring to edit.")
-    return true
+  if root and root.rejectSceneAuthoringEdit then
+    return root:rejectSceneAuthoringEdit()
   end
   return false
 end
