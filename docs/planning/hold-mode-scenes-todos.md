@@ -13,7 +13,19 @@ SWIG render no-op flags, multi-entry state machines).
 
 ## Open
 
-### Sub-display params gated off in scene authoring
+### Sub-display params gated off in scene authoring (PARTIAL — gain gated in .33)
+
+GainBias gain readout gated in `.33` (`setFocusedReadout` +
+`doGainSet` both refuse + flash). Remaining gap: if the user
+is ALREADY focused on gain when authoring starts (e.g. they
+left the focus on gain in user-edit, then engaged scene mode),
+the gate doesn't unfocus retroactively — they could still turn
+the encoder. Mitigation: have `enterSceneMode` force-unfocus
+non-routed slots when entering authoring. Small followup; rare
+in practice.
+
+Background:
+
 
 Decision 2026-06-02: sub-display readouts that bind to a separate
 Parameter from the main fader are **intentionally not** scene-routable.
@@ -143,3 +155,4 @@ param restore).
 | `.30` | Save-while-engaged bug: serialize now snaps audio Params back to base (via `_sceneTask:lock` + `_hardRestoreAudioToBase`) before the unit-walk captures values. Without this, the morpher's last blend output was being persisted as the audio target, then re-engagement post-load snapshotted that *blended* value as the new base — baking scene contribution into the user's pre-scene base permanently. Shared helper refactored out of disengageSceneMorph. | `e696a3b` (hard crash on quicksave: lock blocks audio thread) |
 | `.31` | Replace `_sceneTask:lock` with `removeTask` / `addTask` around the snap. `lock` enters a mutex the audio thread also tries to enter on every morpher pass; holding it across the whole unit-walk caused a watchdog kill on quicksave. `removeTask` just yanks the morpher off the scheduler for the snap window — no mutex contention. Same end behavior, audio thread doesn't block. | `03ccee1` |
 | `.32` | Boot hardening. (1) Fixed forward-reference bug in `_hardRestoreAudioToBase` — was defined before `local function _walkAllUnits`, so the closure bound the nil global instead of the walker; every save/disengage with scene mode engaged crashed. (2) Moved `Crash.init()` from `Application.loop` to top of `Application.init` so init-time errors get the friendly dialog + crash.log entry instead of falling through to start.lua's silent emergency event loop. | `b5a71e6` |
+| `.33` | GainBias gain readout gated during scene authoring. Gain isn't scene-routed (enterSceneMode swaps `self.bias` to the per-scene target but `self.gain` stays bound to the live audio Parameter); without the gate, focusing gain or opening the decimal keyboard for gain would silently bypass the scene system. Both `setFocusedReadout(self.gain)` and `doGainSet` now refuse + flash "Gain isn't scene-routed -- exit authoring to edit." | `aa7fd57` |

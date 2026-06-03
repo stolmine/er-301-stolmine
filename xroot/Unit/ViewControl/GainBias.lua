@@ -632,7 +632,26 @@ function GainBias:getGainMap()
   return self.privateGainMap or self.defaults.gainMap
 end
 
+-- Scene authoring gates only the GAIN readout because gain is
+-- NOT scene-routed: enterSceneMode swaps self.bias to the per-
+-- scene target Parameter, but self.gain stays bound to the live
+-- audio gainParam. Editing gain while authoring would silently
+-- bypass the scene system and stick the change as a base-level
+-- edit. Refuse focus with a flash so the user knows why.
+function GainBias:_rejectGainEditWhileAuthoring()
+  local root = self:getRootChain()
+  if root and root.activeAuthoringScene then
+    local Overlay = require "Overlay"
+    Overlay.flashMainMessage("Gain isn't scene-routed -- exit authoring to edit.")
+    return true
+  end
+  return false
+end
+
 function GainBias:setFocusedReadout(readout)
+  if readout == self.gain and self:_rejectGainEditWhileAuthoring() then
+    return
+  end
   if readout then
     readout:save()
   end
@@ -703,6 +722,7 @@ function GainBias:onFocused()
 end
 
 function GainBias:doGainSet()
+  if self:_rejectGainEditWhileAuthoring() then return end
   local Decimal = require "Keyboard.Decimal"
   local desc = self.description:getText()
   local kb = Decimal {
