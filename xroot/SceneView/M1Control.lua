@@ -71,7 +71,7 @@ function M1Control:init(chain)
   -- Bias Parameter. Full ply width / 64 height -- the section
   -- will setPosition it; we just declare local geometry.
   self.cvFader = app.Fader(0, 0, ply, 64)
-  self.cvFader:setLabel("xfade")
+  self.cvFader:setLabel("morph")
   if chain and chain.getSceneCVGainBias then
     local gb = chain:getSceneCVGainBias()
     self._gainParam = gb:getParameter("Gain")
@@ -137,7 +137,7 @@ function M1Control:init(chain)
     self.biasReadout:setTextBelow(-0.999, "B")
     sub:addChild(self.biasReadout)
 
-    local desc = app.Label("X-fade", 10)
+    local desc = app.Label("morph", 10)
     desc:fitToText(3)
     desc:setSize(ply * 2, desc.mHeight)
     desc:setBorder(1)
@@ -333,7 +333,7 @@ end
 function M1Control:_gainSet()
   local Decimal = require "Keyboard.Decimal"
   local kb = Decimal {
-    message = "Crossfader gain.",
+    message = "Morph gain.",
     commitMessage = "gain updated.",
     initialValue = self.gainReadout:getValueInUnits()
   }
@@ -353,7 +353,7 @@ end
 function M1Control:_biasSet()
   local Decimal = require "Keyboard.Decimal"
   local kb = Decimal {
-    message = "Crossfader bias.",
+    message = "Morph bias.",
     commitMessage = "bias updated.",
     initialValue = self.biasReadout:getValueInUnits()
   }
