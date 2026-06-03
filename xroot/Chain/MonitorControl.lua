@@ -54,7 +54,26 @@ function MonitorControl:contentChanged(chain)
   end
 end
 
+-- Scene authoring lock for the monitor ply's mutation paths:
+-- inserting a unit at position 1 (via M1 enter or S3) and pasting
+-- a chain clipboard (via S1). Mirrors the gate in EmptySection /
+-- InsertControl / InputControl -- same root.rejectSceneAuthoringEdit
+-- helper, same "Locked while editing scene." flash. The leaky
+-- M1 insert path was the missing seam after .34 closed off the
+-- subchain input source path.
+function MonitorControl:_lockedDuringSceneAuthoring()
+  local chain = self:getWindow()
+  if chain and chain.getRootChain then
+    local root = chain:getRootChain()
+    if root and root.rejectSceneAuthoringEdit then
+      return root:rejectSceneAuthoringEdit()
+    end
+  end
+  return false
+end
+
 function MonitorControl:activateChooser()
+  if self:_lockedDuringSceneAuthoring() then return end
   local UnitChooser = require "Unit.Chooser"
   local chooser = UnitChooser {
     goal = "insert",
@@ -79,6 +98,7 @@ function MonitorControl:subReleased(i, shifted)
   if i == 1 then
     local Clipboard = require "Chain.Clipboard"
     if Clipboard.hasData(1) then
+      if self:_lockedDuringSceneAuthoring() then return true end
       local chain = self:getWindow()
       if chain then
         Clipboard.paste(self:getWindow(), nil, 1)
