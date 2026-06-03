@@ -44,8 +44,27 @@ function InputControl:init(index)
   self.menuGraphic = graphic
 end
 
+-- Scene authoring locks structural mutations -- input source
+-- reassignment is one (it changes which jack / global feeds the
+-- subchain, surviving authoring exit silently). Mirror the
+-- EmptySection / InsertControl pattern: walk to root, ask the
+-- lock, flash + return when active. Gating at the click (before
+-- the picker opens) is friendlier than gating at apply -- the
+-- user never sees the source chooser pop up just to fail.
+function InputControl:_lockedDuringSceneAuthoring()
+  local chain = self:getWindow()
+  if chain and chain.getRootChain then
+    local root = chain:getRootChain()
+    if root and root.rejectSceneAuthoringEdit then
+      return root:rejectSceneAuthoringEdit()
+    end
+  end
+  return false
+end
+
 function InputControl:spotReleased(i, shifted)
   if not shifted then
+    if self:_lockedDuringSceneAuthoring() then return end
     local chain = self:getWindow()
     if chain then
       local SourceChooser = require "Source.Chooser"
@@ -108,6 +127,9 @@ function InputControl:subReleased(i, shifted)
     return
   end
   if i == 3 then
+    -- "clear" rebinds the input source to none -- same class of
+    -- structural mutation as setInputSource; gate same way.
+    if self:_lockedDuringSceneAuthoring() then return true end
     self:callUp("clearInputSource", self.inputIndex)
   end
   return true
