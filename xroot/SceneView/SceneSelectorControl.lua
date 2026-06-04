@@ -1,0 +1,392 @@
+-- SceneSelectorControl: per-role A/B selector ply in the hold-mode
+-- Performance view (v1.1). Lives between M1Control (morph) and
+-- the scene bank, parameterized by role string "A" or "B".
+--
+-- Backed by a chain-owned SceneIndexArbiter. Encoder + Bias readout
+-- writes go through arbiter:hardSetBias (which forces Tracking-
+-- Manual and latches the CV-at-entry Schmitt baseline). CV input
+-- arrives via the dive subchain that wraps arbiter.In; the arbiter
+-- arbitrates between CV and manual using its state machine.
+--
+-- Main fader visualization mirrors the habitat ModeSelector
+-- pattern (mods/biome/assets/ModeSelector.lua): after each input
+-- event the fader label is set to the current scene's name via
+-- :setLabel(). 5.4 phase: control renders + writes arbiter.Bias;
+-- audio still flows through the v1.0 SceneView:setCrossfaderA/B
+-- path so chip taps remain functional. 5.5 will rewire the
+-- morpher to consume arbiter.Out directly and the SceneView
+-- crossfader becomes computed from round(arbiter.out).
+
+local app = app
+local Class = require "Base.Class"
+local Encoder = require "Encoder"
+local SpottedControl = require "SpottedStrip.Control"
+
+local ply = app.SECTION_PLY
+
+-- Sub-display layout constants (match M1Control + Unit.ViewControl.GainBias).
+local subLine1   = app.GRID5_LINE1
+local subLine4   = app.GRID5_LINE4
+local subCenter1 = app.GRID5_CENTER1
+local subCenter3 = app.GRID5_CENTER3
+local subCenter4 = app.GRID5_CENTER4
+local subCol1    = app.BUTTON1_CENTER
+local subCol2    = app.BUTTON2_CENTER
+local subCol3    = app.BUTTON3_CENTER
+
+-- Same gain x CV diagram instructions M1Control draws; recreated
+-- here so M1Control's local subInstructions doesn't have to be
+-- exposed.
+local subInstructions = app.DrawingInstructions()
+subInstructions:circle(subCol2, subCenter3, 8)
+subInstructions:line(subCol2 - 3, subCenter3 - 3,
+                     subCol2 + 3, subCenter3 + 3)
+subInstructions:line(subCol2 - 3, subCenter3 + 3,
+                     subCol2 + 3, subCenter3 - 3)
+subInstructions:circle(subCol3, subCenter3, 8)
+subInstructions:hline(subCol3 - 5, subCol3 + 5, subCenter3)
+subInstructions:vline(subCol3, subCenter3 - 5, subCenter3 + 5)
+subInstructions:hline(subCol1 + 20, subCol2 - 9, subCenter3)
+subInstructions:triangle(subCol2 - 12, subCenter3, 0, 3)
+subInstructions:hline(subCol2 + 9, subCol3 - 8, subCenter3)
+subInstructions:triangle(subCol3 - 11, subCenter3, 0, 3)
+subInstructions:vline(subCol3, subCenter3 + 8, subLine1 - 2)
+subInstructions:triangle(subCol3, subLine1 - 2, 90, 3)
+
+local SceneSelectorControl = Class {}
+SceneSelectorControl:include(SpottedControl)
+
+-- chain: the Chain.Root owning the arbiter.
+-- role: "A" or "B".
+-- sceneView: passed in for getSceneCount / getScene(idx):getName().
+function SceneSelectorControl:init(chain, role, sceneView)
+  SpottedControl.init(self)
+  self:setClassName("SceneView.SceneSelectorControl")
+  self.chain = chain
+  self.role = role
+  self.sceneView = sceneView
+
+  -- Main fader bound to arbiter.Bias. Integer-stepped DialMap so
+  -- the encoder feels like it's clicking through scene indices.
+  -- Range [0, sceneCount]; default-grown to 16 as a safe upper
+  -- bound (clipped per-frame by the arbiter's setSceneCount).
+  self.cvFader = app.Fader(0, 0, ply, 64)
+  self.cvFader:setLabel(role)
+  self.arbiter = chain and chain.getSceneArbiter and chain:getSceneArbiter(role)
+  if self.arbiter then
+    self._gainParam = self.arbiter:getParameter("Gain")
+    self._biasParam = self.arbiter:getParameter("Bias")
+    self._gainParam:enableSerialization()
+    self._biasParam:enableSerialization()
+    -- Gain cap +-32 (locked in plan); integer-coarse 1 step for
+    -- bias-side encoder feel, fine 0.1 for inter-scene snap
+    -- when the user wants intermediate values (preview, not
+    -- audible -- arbiter rounds to int for output).
+    self._biasMap = app.LinearDialMap(0, 16)
+    self._biasMap:setSteps(1.0, 1.0, 0.1, 0.01)
+    self.cvFader:setParameter(self._biasParam)
+    self.cvFader:setMap(self._biasMap)
+    self.cvFader:setUnits(app.unitNone)
+    self.cvFader:setPrecision(0)
+    if chain.getSceneCVRange then
+      local range = chain:getSceneCVRange(role)
+      if range then self.cvFader:setRangeObject(range) end
+    end
+  end
+  self:setControlGraphic(self.cvFader)
+  self:setMainCursorController(self.cvFader)
+
+  self:addSpotDescriptor{
+    center = 0.5 * ply,
+    radius = 0.5 * ply
+  }
+
+  -- Sub display. Same three-slot layout as M1: dive (S1), Gain
+  -- readout (S2), Bias readout (S3) plus scope + diagram + role
+  -- label.
+  local sub = app.Graphic(0, 0, 128, 64)
+  if self._biasParam then
+    local drawing = app.Drawing(0, 0, 128, 64)
+    drawing:add(subInstructions)
+    sub:addChild(drawing)
+
+    self.scope = app.MiniScope(subCol1 - 20, subLine4, 40, 45)
+    self.scope:setBorder(1)
+    self.scope:setCornerRadius(3, 3, 3, 3)
+    sub:addChild(self.scope)
+
+    self.gainReadout = app.Readout(0, 0, ply, 10)
+    self.gainReadout:setParameter(self._gainParam)
+    self.gainReadout:setCenter(subCol2, subCenter4)
+    self.gainReadout:setMap(Encoder.getMap("gain"))
+    self.gainReadout:setUnits(app.unitNone)
+    self.gainReadout:setPrecision(2)
+    sub:addChild(self.gainReadout)
+
+    self.biasReadout = app.Readout(0, 0, ply, 10)
+    self.biasReadout:setParameter(self._biasParam)
+    self.biasReadout:setCenter(subCol3, subCenter4)
+    self.biasReadout:setMap(self._biasMap)
+    self.biasReadout:setUnits(app.unitNone)
+    self.biasReadout:setPrecision(0)
+    sub:addChild(self.biasReadout)
+
+    local desc = app.Label(role, 10)
+    desc:fitToText(3)
+    desc:setSize(ply * 2, desc.mHeight)
+    desc:setBorder(1)
+    desc:setCornerRadius(3, 0, 0, 3)
+    desc:setCenter(0.5 * (subCol2 + subCol3), subCenter1 + 1)
+    sub:addChild(desc)
+
+    self.modButton = app.SubButton("empty", 1)
+    sub:addChild(self.modButton)
+    self.gainButton = app.SubButton("gain", 2)
+    self.biasButton = app.SubButton("bias", 3)
+    sub:addChild(self.gainButton)
+    sub:addChild(self.biasButton)
+  end
+  self.menuGraphic = sub
+
+  self.gainEncoderState = Encoder.Coarse
+  self.biasEncoderState = Encoder.Coarse
+  self.focusedReadout = nil
+
+  -- Initial label refresh.
+  self:_updateLabel()
+end
+
+------------------------------------------------------------
+-- ModeSelector-style fader label refresh. Pulls the scene name
+-- at the current rounded Bias position from SceneView. Called
+-- on init, after every input event, and whenever Performance
+-- refreshes (scene add / rename / delete).
+
+function SceneSelectorControl:_updateLabel()
+  if not (self.cvFader and self._biasParam) then return end
+  local idx = math.floor(self._biasParam:value() + 0.5)
+  if idx <= 0 then
+    self.cvFader:setLabel(self.role)
+    return
+  end
+  if self.sceneView == nil then return end
+  local scene = self.sceneView:getScene(idx)
+  if scene then
+    self.cvFader:setLabel(scene:getName() or self.role)
+  else
+    self.cvFader:setLabel(self.role)
+  end
+end
+
+-- Called by Performance after the scene-CV branch contents
+-- change (user inserts / removes / focuses a CV source unit
+-- inside the role's dive).
+function SceneSelectorControl:contentChanged()
+  if not self.chain or not self.chain.getSceneCVBranch then return end
+  local branch = self.chain:getSceneCVBranch(self.role)
+  if branch == nil then return end
+  if self.modButton then
+    self.modButton:setText(branch:mnemonic())
+  end
+  if self.scope then
+    local out = branch:getMonitoringOutput(1)
+    self.scope:watchOutlet(out)
+  end
+end
+
+function SceneSelectorControl:onCursorEnter()
+  if self.menuGraphic then self:addSubGraphic(self.menuGraphic) end
+  self:grabFocus("subReleased")
+end
+
+function SceneSelectorControl:onCursorLeave()
+  self:_setFocusedReadout(nil)
+  if self.menuGraphic then self:removeSubGraphic(self.menuGraphic) end
+  self:releaseFocus("subReleased")
+end
+
+-- Tap-tap focus cycle on the main M-key. Same pattern M1 uses
+-- (.55 auto-focus behavior).
+function SceneSelectorControl:spotPressed(spotIndex, shifted, isFocusedPress)
+  if shifted then return end
+  if not isFocusedPress then
+    self:_setFocusedReadout(self.biasReadout)
+    return
+  end
+  if self.focusedReadout then
+    self:_setFocusedReadout(nil)
+  else
+    self:_setFocusedReadout(self.biasReadout)
+  end
+end
+
+function SceneSelectorControl:subReleased(i, shifted)
+  if shifted then
+    if i == 2 then return self:_gainSet() end
+    if i == 3 then return self:_biasSet() end
+    return false
+  end
+  if i == 1 then
+    return self:callUp("diveSceneCV", self.role)
+  elseif i == 2 then
+    if self.focusedReadout == self.gainReadout then
+      return self:_gainSet()
+    end
+    self:_setFocusedReadout(self.gainReadout)
+    return true
+  elseif i == 3 then
+    if self.focusedReadout == self.biasReadout then
+      return self:_biasSet()
+    end
+    self:_setFocusedReadout(self.biasReadout)
+    return true
+  end
+  return false
+end
+
+function SceneSelectorControl:encoder(change, shifted)
+  if self.focusedReadout == nil then return false end
+  local fine
+  if self.focusedReadout == self.gainReadout then
+    fine = (self.gainEncoderState == Encoder.Fine)
+  else
+    fine = (self.biasEncoderState == Encoder.Fine)
+  end
+  self.focusedReadout:encoder(change, shifted, fine)
+  -- Bias-side encoder writes also need to land on the arbiter's
+  -- internal state machine so manual mode latches the CV
+  -- baseline. The Readout writes the Parameter directly; route
+  -- through hardSetBias to keep state consistent.
+  if self.focusedReadout == self.biasReadout and self.arbiter then
+    self.arbiter:hardSetBias(self._biasParam:value())
+  end
+  self:_updateLabel()
+  -- 5.4 dual-write: notify Performance so the v1.0 SceneView
+  -- crossfader stays in sync with the arbiter Bias. Performance
+  -- handles the rebuild. 5.5 drops this when the morpher consumes
+  -- arbiter.Out directly.
+  self:callUp("syncSceneCrossfader", self.role,
+              math.floor(self._biasParam:value() + 0.5))
+  return true
+end
+
+function SceneSelectorControl:upReleased(shifted)
+  if self.focusedReadout then
+    self:_setFocusedReadout(nil)
+    return true
+  end
+  return false
+end
+
+function SceneSelectorControl:cancelReleased(shifted)
+  if self.focusedReadout then
+    self.focusedReadout:restore()
+    return true
+  end
+  return false
+end
+
+function SceneSelectorControl:zeroPressed()
+  if self.focusedReadout then
+    self.focusedReadout:zero()
+    return true
+  end
+  return false
+end
+
+function SceneSelectorControl:dialPressed(shifted)
+  if self.focusedReadout == self.gainReadout then
+    if self.gainEncoderState == Encoder.Coarse then
+      self.gainEncoderState = Encoder.Fine
+    else
+      self.gainEncoderState = Encoder.Coarse
+    end
+    Encoder.set(self.gainEncoderState)
+    return true
+  elseif self.focusedReadout == self.biasReadout then
+    if self.biasEncoderState == Encoder.Coarse then
+      self.biasEncoderState = Encoder.Fine
+    else
+      self.biasEncoderState = Encoder.Coarse
+    end
+    Encoder.set(self.biasEncoderState)
+    return true
+  end
+  return false
+end
+
+------------------------------------------------------------
+
+function SceneSelectorControl:_setFocusedReadout(readout)
+  if self.focusedReadout == readout then return end
+  if self.focusedReadout == nil and readout ~= nil then
+    self:grabFocus("encoder", "upReleased", "cancelReleased",
+                   "zeroPressed", "dialPressed")
+    if readout == self.gainReadout then
+      Encoder.set(self.gainEncoderState)
+    else
+      Encoder.set(self.biasEncoderState)
+    end
+  elseif self.focusedReadout ~= nil and readout == nil then
+    self:releaseFocus("encoder", "upReleased", "cancelReleased",
+                      "zeroPressed", "dialPressed")
+    Encoder.set(Encoder.Neutral)
+  elseif self.focusedReadout ~= nil and readout ~= nil then
+    if readout == self.gainReadout then
+      Encoder.set(self.gainEncoderState)
+    else
+      Encoder.set(self.biasEncoderState)
+    end
+  end
+  if readout then readout:save() end
+  self.focusedReadout = readout
+  self:setSubCursorController(readout)
+end
+
+function SceneSelectorControl:_gainSet()
+  local Decimal = require "Keyboard.Decimal"
+  local kb = Decimal {
+    message = self.role .. " gain.",
+    commitMessage = "gain updated.",
+    initialValue = self.gainReadout:getValueInUnits()
+  }
+  local task = function(value)
+    if value then
+      self.gainReadout:save()
+      self.gainReadout:setValueInUnits(value)
+      self:_setFocusedReadout(nil)
+    end
+  end
+  kb:subscribe("done", task)
+  kb:subscribe("commit", task)
+  kb:show()
+  return true
+end
+
+function SceneSelectorControl:_biasSet()
+  local Decimal = require "Keyboard.Decimal"
+  local kb = Decimal {
+    message = self.role .. " scene index.",
+    commitMessage = "scene index updated.",
+    initialValue = self.biasReadout:getValueInUnits()
+  }
+  local task = function(value)
+    if value then
+      self.biasReadout:save()
+      self.biasReadout:setValueInUnits(value)
+      if self.arbiter then
+        self.arbiter:hardSetBias(value)
+      end
+      self:_updateLabel()
+      self:callUp("syncSceneCrossfader", self.role,
+                  math.floor(value + 0.5))
+      self:_setFocusedReadout(nil)
+    end
+  end
+  kb:subscribe("done", task)
+  kb:subscribe("commit", task)
+  kb:show()
+  return true
+end
+
+return SceneSelectorControl

@@ -25,9 +25,10 @@ local SpottedStrip = require "SpottedStrip"
 local Section = require "SpottedStrip.Section"
 local Signal = require "Signal"
 
-local M1Control          = require "SceneView.M1Control"
-local SceneSlotControl   = require "SceneView.SceneSlotControl"
-local PlusControl        = require "SceneView.PlusControl"
+local M1Control            = require "SceneView.M1Control"
+local SceneSelectorControl = require "SceneView.SceneSelectorControl"
+local SceneSlotControl     = require "SceneView.SceneSlotControl"
+local PlusControl          = require "SceneView.PlusControl"
 
 local Performance = Class {}
 Performance:include(SpottedStrip)
@@ -55,9 +56,21 @@ function Performance:init(sceneView)
   self.section:addView("default")
   self:appendSection(self.section)
 
-  -- M1 first.
+  -- M1 (morph) first.
   self.m1Control = M1Control(self.chain)
   self.section:addControl("default", self.m1Control)
+
+  -- M2 (A) and M3 (B): v1.1 per-role scene selectors. Render
+  -- the arbiter Bias as a scene-name fader; encoder + decimal
+  -- keyboard write arbiter.Bias and (during 5.4) also mirror
+  -- through SceneView:setCrossfaderA/B via syncSceneCrossfader
+  -- so the v1.0 morpher path keeps audio in sync.
+  self.selectorControls = {}
+  for _, role in ipairs({"A", "B"}) do
+    local sel = SceneSelectorControl(self.chain, role, sceneView)
+    self.section:addControl("default", sel)
+    self.selectorControls[role] = sel
+  end
 
   -- One SceneSlotControl per existing scene.
   self.slotControls = {}
@@ -86,15 +99,24 @@ function Performance:init(sceneView)
   -- A/B chip + bias-fill role per slot.
   self:_refreshSlotRoles()
 
-  -- Subscribe to the scene-CV branch's contentChanged so M1's
-  -- mod button label + scope outlet update when the user wires
-  -- in or removes a CV source.
+  -- Subscribe to each role's scene-CV branch contentChanged so
+  -- the dive owners' mod button + scope outlet update when the
+  -- user wires in or removes a CV source. Track each branch so
+  -- :contentChanged(branch) can route the signal to the right
+  -- control.
+  self._sceneCVBranches = {}
   if self.chain and self.chain.getSceneCVBranch then
-    local branch = self.chain:getSceneCVBranch()
-    if branch then
-      self._sceneCVBranch = branch
-      branch:subscribe("contentChanged", self)
-      self.m1Control:contentChanged()
+    for _, entry in ipairs({
+      {role = "morph", control = self.m1Control},
+      {role = "A",     control = self.selectorControls.A},
+      {role = "B",     control = self.selectorControls.B},
+    }) do
+      local branch = self.chain:getSceneCVBranch(entry.role)
+      if branch then
+        self._sceneCVBranches[branch] = entry.control
+        branch:subscribe("contentChanged", self)
+        entry.control:contentChanged()
+      end
     end
   end
 end
@@ -103,9 +125,8 @@ end
 -- Signal callbacks
 
 function Performance:contentChanged(branch)
-  if branch == self._sceneCVBranch then
-    self.m1Control:contentChanged()
-  end
+  local control = self._sceneCVBranches and self._sceneCVBranches[branch]
+  if control then control:contentChanged() end
 end
 
 ------------------------------------------------------------
@@ -190,6 +211,9 @@ function Performance:renameScene(sceneIdx)
       scene:setName(text)
       local slot = self.slotControls[sceneIdx]
       if slot then slot:setScene(scene, slot.crossfaderRole) end
+      -- If the renamed scene is currently A or B, the M2/M3
+      -- fader label needs to repaint.
+      self:_refreshSelectorLabels()
     end
   end)
   kb:show()
@@ -255,6 +279,11 @@ function Performance:toggleEndpoint(sceneIdx, role)
   end
   self:_rebuildSceneMorph()
   self:_refreshSlotRoles()
+  -- 5.4 mirror chip-tap writes into the arbiter Bias so M2/M3
+  -- faders track. Dropped in 5.5 when the chip tap will write
+  -- the arbiter directly and the SceneView crossfader becomes
+  -- a computed read.
+  self:_syncArbitersFromCrossfaders()
   return true
 end
 
@@ -264,10 +293,35 @@ function Performance:enterAuthoring(sceneIdx)
   return true
 end
 
-function Performance:diveSceneCV()
+function Performance:diveSceneCV(role)
   if not (self.chain and self.chain.getSceneCVBranch) then return true end
-  local branch = self.chain:getSceneCVBranch()
+  local branch = self.chain:getSceneCVBranch(role or "morph")
   if branch and branch.show then branch:show() end
+  return true
+end
+
+-- 5.4 transitional dual-write path. SceneSelectorControl writes
+-- arbiter.Bias for visual + state-machine tracking; this mirror
+-- also updates the v1.0 SceneView crossfader so the morpher
+-- (still kVee4) keeps audio in sync. 5.5 will remove this: the
+-- morpher will consume arbiter.Out directly and the SceneView
+-- crossfader becomes computed from round(arbiter.out).
+function Performance:syncSceneCrossfader(role, idx)
+  if role ~= "A" and role ~= "B" then return true end
+  idx = math.max(0, math.min(idx or 0, self.sceneView:getMaxScenes()))
+  if role == "A" then
+    if self.sceneView:getCrossfaderA() ~= idx then
+      self.sceneView:setCrossfaderA(idx)
+      self:_rebuildSceneMorph()
+      self:_refreshSlotRoles()
+    end
+  else
+    if self.sceneView:getCrossfaderB() ~= idx then
+      self.sceneView:setCrossfaderB(idx)
+      self:_rebuildSceneMorph()
+      self:_refreshSlotRoles()
+    end
+  end
   return true
 end
 
@@ -296,6 +350,34 @@ function Performance:_refreshSlotRoles()
     if a == i then role = "A"
     elseif b == i then role = "B" end
     slot:setScene(self.sceneView:getScene(i), role)
+  end
+  self:_refreshSelectorLabels()
+end
+
+-- Push the v1.0 SceneView crossfader integer into the arbiter
+-- Bias for each role, so M2/M3 faders track the chip-tap path
+-- during 5.4. Also refreshes their scene-name labels.
+function Performance:_syncArbitersFromCrossfaders()
+  if not self.selectorControls then return end
+  if not (self.chain and self.chain.getSceneArbiter) then return end
+  local values = {
+    A = self.sceneView:getCrossfaderA(),
+    B = self.sceneView:getCrossfaderB(),
+  }
+  for role, idx in pairs(values) do
+    local arb = self.chain:getSceneArbiter(role)
+    if arb then arb:hardSetBias(idx) end
+  end
+  self:_refreshSelectorLabels()
+end
+
+-- Refresh the ModeSelector-style scene-name label on each
+-- SceneSelectorControl. Called after scene rename, scene
+-- add/delete, and any arbiter Bias update.
+function Performance:_refreshSelectorLabels()
+  if not self.selectorControls then return end
+  for _, sel in pairs(self.selectorControls) do
+    if sel._updateLabel then sel:_updateLabel() end
   end
 end
 

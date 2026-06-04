@@ -134,8 +134,8 @@ function Root:serialize()
       t.sceneCVBranches[role] = {
         branch = entry.branch:serialize(),
         params = {
-          bias = entry.gainBias:getParameter("Bias"):target(),
-          gain = entry.gainBias:getParameter("Gain"):target(),
+          bias = entry.valueSource:getParameter("Bias"):target(),
+          gain = entry.valueSource:getParameter("Gain"):target(),
         },
       }
     end
@@ -184,10 +184,10 @@ function Root:deserialize(t)
         end
         if entry.params then
           if entry.params.bias then
-            target.gainBias:getParameter("Bias"):hardSet(entry.params.bias)
+            target.valueSource:getParameter("Bias"):hardSet(entry.params.bias)
           end
           if entry.params.gain then
-            target.gainBias:getParameter("Gain"):hardSet(entry.params.gain)
+            target.valueSource:getParameter("Gain"):hardSet(entry.params.gain)
           end
         end
       end
@@ -201,10 +201,10 @@ function Root:deserialize(t)
     end
     if t.sceneCVParams then
       if t.sceneCVParams.bias then
-        morph.gainBias:getParameter("Bias"):hardSet(t.sceneCVParams.bias)
+        morph.valueSource:getParameter("Bias"):hardSet(t.sceneCVParams.bias)
       end
       if t.sceneCVParams.gain then
-        morph.gainBias:getParameter("Gain"):hardSet(t.sceneCVParams.gain)
+        morph.valueSource:getParameter("Gain"):hardSet(t.sceneCVParams.gain)
       end
     end
   end
@@ -494,13 +494,20 @@ function Root:_getOrBuildSceneMorph()
   morph:setVeeMode(true)
   self._sceneMorph = morph
 
-  -- Multi-role scene-CV map (v1.1 phase 5.2). Role -> {branch,
-  -- gainBias, range}. v1.0 had a single _sceneCVBranch /
-  -- _sceneCVGainBias / _sceneCVRange for the morph weight; that
-  -- now lives under role "morph". Phase 5.3 will add "A" and "B"
-  -- roles whose entries hold an arbiter instead of a gainBias.
+  -- Multi-role scene-CV map. Role -> {branch, gainBias|arbiter,
+  -- valueSource, range}. "morph" carries a GainBias whose Out
+  -- drives the morpher's CV inlet (continuous A<->B blend
+  -- weight in [-1, +1]). "A" / "B" carry a SceneIndexArbiter
+  -- whose Out drives the morpher's IndexA / IndexB inlets
+  -- (integer scene index). The morpher consumes the index inlets
+  -- only for kVeeIndexed items (added in phase 5.5); until then
+  -- the arbiter outputs are wired but ignored, so the M2/M3 dive
+  -- controls can render the arbiter state independent of the
+  -- morpher's selection path.
   self._sceneCVBranches = {}
-  self:_buildSceneCVRole("morph", morph:getInput("CV"))
+  self:_buildSceneCVMorphRole(morph:getInput("CV"))
+  self:_buildSceneCVArbiterRole("A", morph:getInput("IndexA"))
+  self:_buildSceneCVArbiterRole("B", morph:getInput("IndexB"))
 
   -- Per-control base Parameter snapshots, refreshed every engage.
   -- Map: [unitKey][ctrlId] = app.Parameter holding the user-mode
@@ -512,16 +519,57 @@ function Root:_getOrBuildSceneMorph()
   -- AudioThread on engage/disengage.
   self._sceneTask = app.ObjectList(self.title .. ".SceneTask")
 
+  -- Seed arbiter scene-count from current SceneView if one exists.
+  self:_syncSceneArbiterCounts()
+
   return self._sceneMorph
 end
 
--- Build a single role's scene-CV chain: GainBias + MinMax range +
--- Branch wrapping the GainBias input. Wires GainBias.Out into the
--- consumer inlet (morpher CV for "morph"; future arbiter index
--- inlets for "A" / "B"). Result stored in self._sceneCVBranches[role].
-function Root:_buildSceneCVRole(role, consumerInlet)
+-- Build the morph role: GainBias (linear sum, additive CV) +
+-- MinMax range + Branch wrapping the GainBias input. Stored under
+-- role "morph". GainBias.Out -> morpher.CV drives the continuous
+-- A<->B weight in [-1, +1].
+function Root:_buildSceneCVMorphRole(consumerInlet)
   local gb = app.GainBias()
-  gb:setName(self.title .. ".SceneCV." .. role)
+  gb:setName(self.title .. ".SceneCV.morph")
+
+  local range = app.MinMax()
+  range:setName(self.title .. ".SceneCVRange.morph")
+
+  local branch = Branch {
+    title = self.title,
+    subTitle = "scene-cv morph",
+    depth = self.depth + 1,
+    channelCount = 1,
+    leftDestination = gb:getInput("In"),
+    leftOutObject = gb,
+    leftOutletName = "Out",
+    unit = self,
+  }
+
+  app.AudioThread.connect(gb:getOutput("Out"), consumerInlet)
+  app.AudioThread.connect(gb:getOutput("Out"), range:getInput("In"))
+
+  self._sceneCVBranches["morph"] = {
+    branch = branch,
+    gainBias = gb,
+    valueSource = gb,  -- uniform key for engage/serialize loops
+    range = range,
+  }
+end
+
+-- Build an A/B role: SceneIndexArbiter (2-state machine, last-
+-- writer-wins between CV input and manual writes) + MinMax range
+-- + Branch wrapping the arbiter input. Arbiter.Out drives the
+-- morpher's IndexA or IndexB inlet for live scene-index
+-- selection in kVeeIndexed items. Until the engage path emits
+-- addVeeIndexed (phase 5.5), the morpher ignores these inlets;
+-- the arbiter still runs each frame so M2/M3 dive controls can
+-- render its state independent of the morpher's actual
+-- selection path.
+function Root:_buildSceneCVArbiterRole(role, consumerInlet)
+  local arb = app.SceneIndexArbiter()
+  arb:setName(self.title .. ".SceneCV." .. role)
 
   local range = app.MinMax()
   range:setName(self.title .. ".SceneCVRange." .. role)
@@ -531,18 +579,19 @@ function Root:_buildSceneCVRole(role, consumerInlet)
     subTitle = "scene-cv " .. role,
     depth = self.depth + 1,
     channelCount = 1,
-    leftDestination = gb:getInput("In"),
-    leftOutObject = gb,
+    leftDestination = arb:getInput("In"),
+    leftOutObject = arb,
     leftOutletName = "Out",
-    unit = self,  -- Branch uses this for getRootChain
+    unit = self,
   }
 
-  app.AudioThread.connect(gb:getOutput("Out"), consumerInlet)
-  app.AudioThread.connect(gb:getOutput("Out"), range:getInput("In"))
+  app.AudioThread.connect(arb:getOutput("Out"), consumerInlet)
+  app.AudioThread.connect(arb:getOutput("Out"), range:getInput("In"))
 
   self._sceneCVBranches[role] = {
     branch = branch,
-    gainBias = gb,
+    arbiter = arb,
+    valueSource = arb,  -- uniform key for engage/serialize loops
     range = range,
   }
 end
@@ -557,6 +606,29 @@ function Root:getSceneCVGainBias(role)
   self:_getOrBuildSceneMorph()
   local entry = self._sceneCVBranches[role or "morph"]
   return entry and entry.gainBias
+end
+
+-- A / B role accessor. Returns the SceneIndexArbiter for the
+-- given role, or nil for "morph" (which has a GainBias instead).
+-- SceneSelectorControl uses this to bind its Bias/Gain readouts
+-- and to route chip-tap / encoder writes to hardSetBias.
+function Root:getSceneArbiter(role)
+  self:_getOrBuildSceneMorph()
+  local entry = self._sceneCVBranches[role]
+  return entry and entry.arbiter
+end
+
+-- Push the current SceneView count into every A/B arbiter so
+-- Bias clips correctly and the morpher's IndexA/B Inlets see
+-- valid index ranges. Called after build, on engage, and after
+-- any scene add/delete (rebuildSceneMorph). No-op for the morph
+-- role (no arbiter there).
+function Root:_syncSceneArbiterCounts()
+  if not self._sceneCVBranches then return end
+  local n = self.sceneView and self.sceneView:getSceneCount() or 0
+  for _, entry in pairs(self._sceneCVBranches) do
+    if entry.arbiter then entry.arbiter:setSceneCount(n) end
+  end
 end
 
 -- Expose the morpher itself so views can subscribe to its live
@@ -691,6 +763,9 @@ function Root:engageSceneMorph()
   if self.sceneView == nil then return end  -- no scenes ever created
 
   self:_getOrBuildSceneMorph()
+  -- Sync arbiter scene-counts before any audio starts so Bias
+  -- clamps line up with the current bank size.
+  self:_syncSceneArbiterCounts()
 
   -- Refresh base snapshots from audio params. This is the user's
   -- pre-scene-mode value captured into baseParam; once engaged,
@@ -726,7 +801,7 @@ function Root:engageSceneMorph()
   -- be in the same task in this order so the morpher and ranges
   -- see fresh data each frame.
   for _, entry in pairs(self._sceneCVBranches) do
-    self._sceneTask:add(entry.gainBias)
+    self._sceneTask:add(entry.valueSource)
     if entry.range then
       self._sceneTask:add(entry.range)
     end
@@ -825,6 +900,9 @@ function Root:rebuildSceneMorph()
   self._sceneMorph:clear()
   self:_buildSceneMorphItems()
   self._sceneTask:unlock()
+  -- Bank may have grown / shrunk since last rebuild; refresh
+  -- the arbiters' clip ranges so Bias values stay in-bounds.
+  self:_syncSceneArbiterCounts()
 end
 
 -- Egress gestures from inside scene authoring. When the chain is
