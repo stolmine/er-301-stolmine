@@ -36,7 +36,22 @@ function InsertControl:init()
   }
 end
 
+-- Returns true (and shows a flash) when the chain is in scene
+-- authoring, in which case the caller should bail. Insert / paste
+-- both mutate patch structure, which is locked during authoring.
+function InsertControl:_lockedDuringSceneAuthoring()
+  local chain = self:getWindow()
+  if chain and chain.getRootChain then
+    local root = chain:getRootChain()
+    if root and root.rejectSceneAuthoringEdit then
+      return root:rejectSceneAuthoringEdit()
+    end
+  end
+  return false
+end
+
 function InsertControl:activateChooser()
+  if self:_lockedDuringSceneAuthoring() then return end
   local chooser = UnitChooser {
     goal = "insert",
     chain = self:getWindow()
@@ -59,6 +74,7 @@ function InsertControl:subReleased(i, shifted)
   end
   if i == 1 then
     if Clipboard.hasData(1) then
+      if self:_lockedDuringSceneAuthoring() then return true end
       local chain = self:getWindow()
       if chain then
         Clipboard.paste(self:getWindow(), nil, 1)

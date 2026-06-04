@@ -147,40 +147,115 @@ namespace od
     fb.hline(GRAY7, x - 2, x + 2, y0);
     fb.hline(GRAY7, x - 2, x + 2, y1);
 
-    // draw target position
+    // Detect whether scene authoring (or any context that sets
+    // target distinct from value) is active. setParameter() at unit
+    // init binds all three to the same Parameter*, so target ==
+    // value in plain user-edit. enterSceneMode() (and the legacy
+    // PinView pin setup) bind a separate target -- pointer compare
+    // is enough.
+    bool sceneActive = (mpValueParameter != 0 && mpTargetParameter != 0 &&
+                        mpTargetParameter != mpValueParameter);
+
+    int valueY = -1, targetY = -1;
+    if (mpValueParameter)
+    {
+      // In scene-active state (modulated user-edit + scene
+      // authoring) the value parameter is the user's base
+      // Parameter, a free-floating app.Parameter not owned by
+      // any audio Object -- nobody calls update() on it, so
+      // mValue stays frozen at the last hardSet and only
+      // mTarget advances on softSet writes. Reading target()
+      // here makes the box track the user's set point
+      // immediately. In legacy (target == value) mode keep
+      // reading value() so smoothing on CV-modulated faders
+      // still produces the usual "audio is here, target is
+      // there" look.
+      float v = sceneActive ? mpValueParameter->target()
+                            : mpValueParameter->value();
+      float value = mReadout.convertToUnits(v);
+      valueY = y0 + (int)(H * scale(value));
+      valueY = MIN(MAX(valueY, y0), y1);
+    }
     if (mpTargetParameter)
     {
       float target = mReadout.convertToUnits(mpTargetParameter->target());
-      y = y0 + (int)(H * scale(target));
-      y = MIN(MAX(y, y0), y1);
-      fb.clear(x - 3, y - 1, x + 3, y + 1);
-      if (mHighlightTarget)
-      {
-        fb.box(mForeground, x - 3, y - 1, x + 3, y + 1);
-      }
-      else
-      {
-        fb.box(GRAY7, x - 3, y - 1, x + 3, y + 1);
-      }
-      mCursorState.x = mWorldLeft;
-      mCursorState.y = y;
+      targetY = y0 + (int)(H * scale(target));
+      targetY = MIN(MAX(targetY, y0), y1);
     }
 
-    // draw value position
-    if (mpValueParameter)
+    // Brightness, draw order, and cursor follow mHighlightTarget
+    // when sceneActive (value != target). The element that's
+    // bright + drawn on top + has the cursor on it is the element
+    // the encoder is editing:
+    //
+    //   mHighlightTarget=true   -> line bright on top, cursor on line.
+    //     Used by scene authoring (encoder writes to scene target)
+    //     and by the legacy single-parameter case (no value/target
+    //     split; both indices identical).
+    //   mHighlightTarget=false  -> box bright on top, cursor on box.
+    //     Used by modulated user-edit (encoder writes to base, which
+    //     is the value parameter; the target line tracks the
+    //     morpher's live audio output and is a passive indicator).
+    //
+    // sceneActive=false collapses to the legacy convention: target
+    // line is the single bright indicator and the cursor lives on
+    // it; this preserves every pre-scenes UI.
+    bool highlightValue = sceneActive && !mHighlightTarget;
+    uint32_t valueColor  = highlightValue ? mForeground : GRAY7;
+    uint32_t targetColor = highlightValue ? GRAY7 : mForeground;
+
+    if (highlightValue)
     {
-      float value = mReadout.convertToUnits(mpValueParameter->value());
-      y = y0 + (int)(H * scale(value));
-      y = MIN(MAX(y, y0), y1);
-      // fb.box(GRAY7, x - 3, y - 1, x + 3, y + 1);
-      if (mHighlightTarget)
+      // Box bright on top. Draw line first (dim), box on top.
+      if (targetY >= 0)
       {
-        fb.hline(GRAY7, x - 4, x + 4, y);
+        fb.hline(targetColor, x - 4, x + 4, targetY);
       }
-      else
+      if (valueY >= 0)
       {
-        fb.hline(mForeground, x - 4, x + 4, y);
+        fb.clear(x - 3, valueY - 1, x + 3, valueY + 1);
+        fb.box(valueColor, x - 3, valueY - 1, x + 3, valueY + 1);
       }
+    }
+    else if (sceneActive)
+    {
+      // Line bright on top (scene authoring). Box first, line on top.
+      if (valueY >= 0)
+      {
+        fb.clear(x - 3, valueY - 1, x + 3, valueY + 1);
+        fb.box(valueColor, x - 3, valueY - 1, x + 3, valueY + 1);
+      }
+      if (targetY >= 0)
+      {
+        fb.hline(targetColor, x - 4, x + 4, targetY);
+      }
+    }
+    else
+    {
+      // Legacy single-parameter look (target == value).
+      if (targetY >= 0)
+      {
+        fb.hline(targetColor, x - 4, x + 4, targetY);
+      }
+      if (valueY >= 0)
+      {
+        fb.clear(x - 3, valueY - 1, x + 3, valueY + 1);
+        fb.box(valueColor, x - 3, valueY - 1, x + 3, valueY + 1);
+      }
+    }
+
+    // Cursor on the bright element (= encoder destination). In
+    // modulated user-edit the cursor lives on the box; everywhere
+    // else it lives on the line (target / single-param).
+    if (highlightValue && valueY >= 0)
+    {
+      mCursorState.x = mWorldLeft;
+      mCursorState.y = valueY;
+    }
+    else if (targetY >= 0)
+    {
+      mCursorState.x = mWorldLeft;
+      mCursorState.y = targetY;
     }
 
     // draw zero position

@@ -45,6 +45,13 @@ function Effect:findByInstanceKey(key)
   end
 end
 
+function Effect:walkChildChains(callback)
+  Unit.walkChildChains(self, callback)
+  if self.patch then
+    callback(self.patch)
+  end
+end
+
 function Effect:onLoadGraph(channelCount)
   self.patch = Patch {
     title = self.title,

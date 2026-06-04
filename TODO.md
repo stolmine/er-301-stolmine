@@ -188,6 +188,12 @@ since those have their own release cadences. Authors of those
 packages can normalize on their own schedule; the dispatch table
 in `Glyph.lua` already accepts the variants they currently use.
 
+## Hold-Mode Scenes
+Consolidated tracker lives at
+[docs/planning/hold-mode-scenes-todos.md](docs/planning/hold-mode-scenes-todos.md).
+Open work and the shipped log both live there; do not duplicate
+entries in this file.
+
 ## Screensaver Polish
 - Forest screensaver: full-screen coverage
 - Rain screensaver: splash particles

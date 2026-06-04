@@ -218,6 +218,14 @@ function Header:doReplace()
 end
 
 function Header:doCommand(cmd)
+  -- Header sub-button shortcuts (Load / Save / Bypass / Delete /
+  -- Replace / Config / Edit / Rename) all mutate patch structure
+  -- or unit identity. Lock them during scene authoring.
+  local chain = self.parent and self.parent.chain
+  local root = chain and chain.getRootChain and chain:getRootChain()
+  if root and root.rejectSceneAuthoringEdit and root:rejectSceneAuthoringEdit() then
+    return
+  end
   if cmd == "Load" then
     local Persist = require "Persist"
     Persist.loadUnitPreset(self.parent)

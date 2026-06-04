@@ -261,6 +261,60 @@ function BranchMeter:subReleased(i, shifted)
   return true
 end
 
+-- Three-state scene display protocol; see Unit.ViewControl.Fader
+-- for the full convention. Mirror'd here because BranchMeter's
+-- audio Parameter binding is the same shape (single fader widget
+-- with no separate sub-display readout to swap).
+function BranchMeter:enterModulatedDisplay(audioParam, baseParam)
+  if self._modAudioParam then return end
+  self._modAudioParam = audioParam
+  self._modBaseParam  = baseParam
+  self.fader:setValueParameter(baseParam)
+  self.fader:setTargetParameter(audioParam)
+  self.fader:setControlParameter(baseParam)
+  self.fader:highlightValue()
+end
+
+function BranchMeter:exitModulatedDisplay()
+  if not self._modAudioParam then return end
+  self.fader:setParameter(self._modAudioParam)
+  self.fader:highlightTarget()
+  self._modAudioParam = nil
+  self._modBaseParam  = nil
+end
+
+function BranchMeter:enterSceneMode(sceneTargetParam)
+  if self._sceneTargetParam then return end
+  if not self._modAudioParam then return end
+  self._sceneTargetParam = sceneTargetParam
+  self.fader:setTargetParameter(sceneTargetParam)
+  self.fader:setControlParameter(sceneTargetParam)
+  self.fader:highlightTarget()
+end
+
+function BranchMeter:exitSceneMode()
+  if not self._sceneTargetParam then return end
+  self.fader:setTargetParameter(self._modAudioParam)
+  self.fader:setControlParameter(self._modBaseParam)
+  self.fader:highlightValue()
+  self._sceneTargetParam = nil
+end
+
+function BranchMeter:getSceneTargetValue()
+  if self._sceneTargetParam == nil then return 0 end
+  return self._sceneTargetParam:target()
+end
+
+function BranchMeter:getSceneBaseValue()
+  if self._modBaseParam then return self._modBaseParam:target() end
+  return self.fader:getValueParameter():target()
+end
+
+function BranchMeter:getSceneAudioParam()
+  if self._modAudioParam then return self._modAudioParam end
+  return self.fader:getValueParameter()
+end
+
 function BranchMeter:encoder(change, shifted)
   self.fader:encoder(change, shifted, self.encoderState == Encoder.Fine)
   return true

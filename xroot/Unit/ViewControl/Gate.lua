@@ -425,4 +425,50 @@ function Gate:encoder(change, shifted)
   return true
 end
 
+-- Three-state scene display. Gate's main visual is a
+-- ComparatorView (no Fader-style box/line caret indicators), so
+-- the only meaningful swap is on the threshold sub readout
+-- which is what the encoder edits.
+function Gate:enterModulatedDisplay(audioParam, baseParam)
+  if self._modAudioParam then return end
+  self._modAudioParam = audioParam
+  self._modBaseParam  = baseParam
+  self.threshold:setParameter(baseParam)
+end
+
+function Gate:exitModulatedDisplay()
+  if not self._modAudioParam then return end
+  self.threshold:setParameter(self._modAudioParam)
+  self._modAudioParam = nil
+  self._modBaseParam  = nil
+end
+
+function Gate:enterSceneMode(sceneTargetParam)
+  if self._sceneTargetParam then return end
+  if not self._modAudioParam then return end
+  self._sceneTargetParam = sceneTargetParam
+  self.threshold:setParameter(sceneTargetParam)
+end
+
+function Gate:exitSceneMode()
+  if not self._sceneTargetParam then return end
+  self.threshold:setParameter(self._modBaseParam)
+  self._sceneTargetParam = nil
+end
+
+function Gate:getSceneTargetValue()
+  if self._sceneTargetParam == nil then return 0 end
+  return self._sceneTargetParam:target()
+end
+
+function Gate:getSceneBaseValue()
+  if self._modBaseParam then return self._modBaseParam:target() end
+  return self.threshold:getParameter():target()
+end
+
+function Gate:getSceneAudioParam()
+  if self._modAudioParam then return self._modAudioParam end
+  return self.threshold:getParameter()
+end
+
 return Gate

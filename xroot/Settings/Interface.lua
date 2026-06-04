@@ -96,6 +96,10 @@ menuItems[#menuItems + 1] = {
   "pickerPinRecents"
 }
 menuItems[#menuItems + 1] = {
+  "addVariable",
+  "sceneMode"
+}
+menuItems[#menuItems + 1] = {
   "addCategory",
   "QuickSaves"
 }
@@ -190,6 +194,10 @@ menuItems[#menuItems + 1] = {
 menuItems[#menuItems + 1] = {
   "addVariable",
   "confirmClearFavorites"
+}
+menuItems[#menuItems + 1] = {
+  "addVariable",
+  "confirmSceneDelete"
 }
 menuItems[#menuItems + 1] = {
   "addVariable",

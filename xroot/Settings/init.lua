@@ -223,6 +223,15 @@ local defaults = {
       "no"
     }
   },
+  sceneMode = {
+    category = "Units",
+    description = "Scene mode (replaces hold mode):",
+    value = "off",
+    choices = {
+      "off",
+      "on"
+    }
+  },
   fileRecorderChannelCount = {
     category = "Multitrack Recorder",
     description = "Channel Count:",
@@ -343,6 +352,15 @@ local defaults = {
     category = "Confirmations",
     description = "When clearing all favorites...",
     value = true
+  },
+  confirmSceneDelete = {
+    category = "Confirmations",
+    description = "When deleting a scene...",
+    value = "yes",
+    choices = {
+      "yes",
+      "no"
+    }
   },
   confirmQuickSaveOverwrite = {
     category = "Confirmations",

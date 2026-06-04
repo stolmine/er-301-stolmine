@@ -323,6 +323,25 @@ namespace od
         mOpaque = value;
     }
 
+    void Graphic::setCursorOrientation(int orientation)
+    {
+        if (orientation >= 0 && orientation <= 3)
+        {
+            mCursorState.orientation = (CursorOrientation)orientation;
+        }
+    }
+
+    void Graphic::setCursorPosition(int x, int y)
+    {
+        mCursorState.x = x;
+        mCursorState.y = y;
+    }
+
+    void Graphic::setCursorShow(bool show)
+    {
+        mCursorState.show = show;
+    }
+
     void Graphic::setPosition(int left, int bottom)
     {
         mLeft = left;

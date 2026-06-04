@@ -56,6 +56,14 @@ function MultiBand:findByInstanceKey(key)
   end
 end
 
+function MultiBand:walkChildChains(callback)
+  Unit.walkChildChains(self, callback)
+  for i = 1, self.bandCount do
+    local band = self.bands[i]
+    if band then callback(band) end
+  end
+end
+
 function MultiBand:onLoadGraph(channelCount)
   self.bands = {}
   for i = 1, self.bandCount do

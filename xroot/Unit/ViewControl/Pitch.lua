@@ -459,4 +459,62 @@ function Pitch:encoder(change, shifted)
   return true
 end
 
+-- Three-state scene display. Pitch has TWO bindings to the fader
+-- param: the main fader graphic (cursor + bar) and the readout
+-- in the sub display (where encoder edits land). Both swap on
+-- each transition.
+function Pitch:enterModulatedDisplay(audioParam, baseParam)
+  if self._modAudioParam then return end
+  self._modAudioParam = audioParam
+  self._modBaseParam  = baseParam
+  self.fader:setValueParameter(baseParam)
+  self.fader:setTargetParameter(audioParam)
+  self.fader:setControlParameter(baseParam)
+  self.readout:setParameter(baseParam)
+  self.fader:highlightValue()
+end
+
+function Pitch:exitModulatedDisplay()
+  if not self._modAudioParam then return end
+  self.fader:setParameter(self._modAudioParam)
+  self.readout:setParameter(self._modAudioParam)
+  self.fader:highlightTarget()
+  self._modAudioParam = nil
+  self._modBaseParam  = nil
+end
+
+function Pitch:enterSceneMode(sceneTargetParam)
+  if self._sceneTargetParam then return end
+  if not self._modAudioParam then return end
+  self._sceneTargetParam = sceneTargetParam
+  self.fader:setTargetParameter(sceneTargetParam)
+  self.fader:setControlParameter(sceneTargetParam)
+  self.readout:setParameter(sceneTargetParam)
+  self.fader:highlightTarget()
+end
+
+function Pitch:exitSceneMode()
+  if not self._sceneTargetParam then return end
+  self.fader:setTargetParameter(self._modAudioParam)
+  self.fader:setControlParameter(self._modBaseParam)
+  self.readout:setParameter(self._modBaseParam)
+  self.fader:highlightValue()
+  self._sceneTargetParam = nil
+end
+
+function Pitch:getSceneTargetValue()
+  if self._sceneTargetParam == nil then return 0 end
+  return self._sceneTargetParam:target()
+end
+
+function Pitch:getSceneBaseValue()
+  if self._modBaseParam then return self._modBaseParam:target() end
+  return self.fader:getValueParameter():target()
+end
+
+function Pitch:getSceneAudioParam()
+  if self._modAudioParam then return self._modAudioParam end
+  return self.fader:getValueParameter()
+end
+
 return Pitch

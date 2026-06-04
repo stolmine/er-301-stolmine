@@ -632,7 +632,28 @@ function GainBias:getGainMap()
   return self.privateGainMap or self.defaults.gainMap
 end
 
+-- Scene authoring gates only the GAIN readout because gain is
+-- NOT scene-routed: enterSceneMode swaps self.bias to the per-
+-- scene target Parameter, but self.gain stays bound to the live
+-- audio gainParam. Editing gain while authoring would silently
+-- bypass the scene system and stick the change as a base-level
+-- edit. Defer to the same root.rejectSceneAuthoringEdit helper
+-- the other structural gates (EmptySection / InputControl /
+-- MonitorControl) use, so the user sees the uniform
+-- "Locked while editing scene." flash everywhere structural
+-- writes are blocked.
+function GainBias:_rejectGainEditWhileAuthoring()
+  local root = self:getRootChain()
+  if root and root.rejectSceneAuthoringEdit then
+    return root:rejectSceneAuthoringEdit()
+  end
+  return false
+end
+
 function GainBias:setFocusedReadout(readout)
+  if readout == self.gain and self:_rejectGainEditWhileAuthoring() then
+    return
+  end
   if readout then
     readout:save()
   end
@@ -703,6 +724,7 @@ function GainBias:onFocused()
 end
 
 function GainBias:doGainSet()
+  if self:_rejectGainEditWhileAuthoring() then return end
   local Decimal = require "Keyboard.Decimal"
   local desc = self.description:getText()
   local kb = Decimal {
@@ -790,6 +812,64 @@ function GainBias:encoder(change, shifted)
     self.bias:encoder(change, shifted, self.encoderState == Encoder.Fine)
   end
   return true
+end
+
+-- Three-state scene display. self.fader main widget plus self.bias
+-- sub readout both swap on each transition; the gain readout
+-- stays bound to gainParam in all states (getPinControl only
+-- exposes bias, so scenes never modulate gain).
+function GainBias:enterModulatedDisplay(audioParam, baseParam)
+  if self._modAudioParam then return end
+  self._modAudioParam = audioParam
+  self._modBaseParam  = baseParam
+  self.fader:setValueParameter(baseParam)
+  self.fader:setTargetParameter(audioParam)
+  self.fader:setControlParameter(baseParam)
+  self.bias:setParameter(baseParam)
+  self.fader:highlightValue()
+end
+
+function GainBias:exitModulatedDisplay()
+  if not self._modAudioParam then return end
+  self.fader:setParameter(self._modAudioParam)
+  self.bias:setParameter(self._modAudioParam)
+  self.fader:highlightTarget()
+  self._modAudioParam = nil
+  self._modBaseParam  = nil
+end
+
+function GainBias:enterSceneMode(sceneTargetParam)
+  if self._sceneTargetParam then return end
+  if not self._modAudioParam then return end
+  self._sceneTargetParam = sceneTargetParam
+  self.fader:setTargetParameter(sceneTargetParam)
+  self.fader:setControlParameter(sceneTargetParam)
+  self.bias:setParameter(sceneTargetParam)
+  self.fader:highlightTarget()
+end
+
+function GainBias:exitSceneMode()
+  if not self._sceneTargetParam then return end
+  self.fader:setTargetParameter(self._modAudioParam)
+  self.fader:setControlParameter(self._modBaseParam)
+  self.bias:setParameter(self._modBaseParam)
+  self.fader:highlightValue()
+  self._sceneTargetParam = nil
+end
+
+function GainBias:getSceneTargetValue()
+  if self._sceneTargetParam == nil then return 0 end
+  return self._sceneTargetParam:target()
+end
+
+function GainBias:getSceneBaseValue()
+  if self._modBaseParam then return self._modBaseParam:target() end
+  return self.fader:getValueParameter():target()
+end
+
+function GainBias:getSceneAudioParam()
+  if self._modAudioParam then return self._modAudioParam end
+  return self.fader:getValueParameter()
 end
 
 return GainBias

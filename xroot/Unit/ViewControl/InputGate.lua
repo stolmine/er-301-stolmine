@@ -232,4 +232,47 @@ function InputGate:encoder(change, shifted)
   return true
 end
 
+-- Three-state scene display (same shape as Gate).
+function InputGate:enterModulatedDisplay(audioParam, baseParam)
+  if self._modAudioParam then return end
+  self._modAudioParam = audioParam
+  self._modBaseParam  = baseParam
+  self.threshold:setParameter(baseParam)
+end
+
+function InputGate:exitModulatedDisplay()
+  if not self._modAudioParam then return end
+  self.threshold:setParameter(self._modAudioParam)
+  self._modAudioParam = nil
+  self._modBaseParam  = nil
+end
+
+function InputGate:enterSceneMode(sceneTargetParam)
+  if self._sceneTargetParam then return end
+  if not self._modAudioParam then return end
+  self._sceneTargetParam = sceneTargetParam
+  self.threshold:setParameter(sceneTargetParam)
+end
+
+function InputGate:exitSceneMode()
+  if not self._sceneTargetParam then return end
+  self.threshold:setParameter(self._modBaseParam)
+  self._sceneTargetParam = nil
+end
+
+function InputGate:getSceneTargetValue()
+  if self._sceneTargetParam == nil then return 0 end
+  return self._sceneTargetParam:target()
+end
+
+function InputGate:getSceneBaseValue()
+  if self._modBaseParam then return self._modBaseParam:target() end
+  return self.threshold:getParameter():target()
+end
+
+function InputGate:getSceneAudioParam()
+  if self._modAudioParam then return self._modAudioParam end
+  return self.threshold:getParameter()
+end
+
 return InputGate

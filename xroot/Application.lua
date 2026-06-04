@@ -406,6 +406,18 @@ local function resetToInitialState()
 end
 
 local function init()
+  -- Install the Lua error hook before anything else in init runs.
+  -- Crash.init was previously called at the top of Application.loop,
+  -- so any error raised inside Application.init (which is most of
+  -- the boot path) hit start.lua's silent emergency event loop with
+  -- no on-screen indication -- the device just froze on whatever
+  -- Busy banner was current. After this change, init errors produce
+  -- a real "Oops! Something went wrong." dialog with the report
+  -- written to crash.log.
+  app.logInfo("Application.init: crash hook")
+  local Crash = require "Crash"
+  Crash.init()
+
   app.logInfo("Application.init: usb")
   USB.init()
 
@@ -486,8 +498,9 @@ end
 -- event loop
 local function loop()
   app.logInfo("Application.loop: entering event loop.")
-  local Crash = require "Crash"
-  Crash.init()
+  -- Crash hook is now installed at the top of Application.init so
+  -- errors during boot get the same friendly dialog runtime errors
+  -- do; was previously here and missed everything pre-loop.
 
   local eventNone = app.EVENT_NONE
   local eventDisplayReady = app.EVENT_DISPLAY_READY

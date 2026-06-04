@@ -1,8 +1,10 @@
+local app = app
 local Class = require "Base.Class"
 local Chain = require "Chain"
 local ScopeView = require "Chain.ScopeView"
 local PinView = require "PinView"
 local SequencerView = require "Sequencer.GridView"
+local Branch = require "Chain.Branch"
 
 local Root = Class {}
 Root:include(Chain)
@@ -14,10 +16,44 @@ function Root:init(args)
   self.scopeView = ScopeView(self)
   self.pinView = PinView(self)
   self.sequencerView = SequencerView(self)
+  -- SceneView state container is created LAZILY (see getSceneView).
+  -- The scene mode rework is in-development; users with scene
+  -- mode never enabled pay zero boot cost from it. The state
+  -- container itself is cheap, but lazy avoids any chance of an
+  -- in-flight SceneView change side-effecting the chain init path.
+end
+
+function Root:getSceneView()
+  if self.sceneView == nil then
+    local SceneView = require "SceneView"
+    self.sceneView = SceneView(self)
+  end
+  return self.sceneView
 end
 
 function Root:getRootChain()
   return self
+end
+
+-- True while the chain is armed for scene authoring. Patch-state
+-- gestures (insert / paste / delete / bypass / move / rename /
+-- preset-replace) check this and refuse with a flash message;
+-- only parameter edits via encoder/readout are allowed in that
+-- mode. The scene delta map only tracks param values, so allowing
+-- structural edits would silently produce changes that survive
+-- exiting the scene (defeating the "scene as an editable preset
+-- of values" model).
+function Root:isLockedForSceneAuthoring()
+  return self.activeAuthoringScene ~= nil
+end
+
+-- Helper for the gated callsites. Shows a flash message and
+-- returns true when locked; callsites do `if ... then return end`.
+function Root:rejectSceneAuthoringEdit()
+  if self.activeAuthoringScene == nil then return false end
+  local Overlay = require "Overlay"
+  Overlay.flashMainMessage("Locked while editing scene.")
+  return true
 end
 
 function Root:addPinSet(name)
@@ -57,8 +93,56 @@ function Root:deserializePins(data)
 end
 
 function Root:serialize()
+  -- If scene mode is engaged, temporarily yank the morpher task
+  -- off the audio thread so it can't write audio = blend during
+  -- the unit-walk. Hard-restore audio Params to base, capture
+  -- state, then re-add the task. The audio thread's next pass
+  -- writes audio = blend(base, A, B) again.
+  --
+  -- An earlier (.30) version held _sceneTask:lock across the
+  -- whole serialize. That worked semantically but blocked the
+  -- audio thread at the task's mutex for the full unit-walk
+  -- duration -- watchdog kill / hard crash. removeTask /
+  -- addTask is the lighter-weight equivalent: the audio thread
+  -- just doesn't schedule the morpher for the window.
+  local snappedForSave = false
+  if self._sceneEngaged and self._sceneTask then
+    app.AudioThread.removeTask(self._sceneTask)
+    self:_hardRestoreAudioToBase()
+    snappedForSave = true
+  end
+
   local t = Chain.serialize(self)
   t.pinView = self.pinView:serialize()
+  -- Only serialize scene state if SceneView has actually been
+  -- created (user enabled scene mode at some point). Lazy init
+  -- means most users get nothing extra written to their presets.
+  if self.sceneView then
+    t.sceneView = self.sceneView:serialize()
+  end
+  -- Scene-CV pipeline state (M1 dive contents + bias/gain).
+  -- The scene-CV branch is a Branch held directly on Root, NOT
+  -- in self.units, so the standard Chain.serialize walk doesn't
+  -- reach it. We persist it here. Only present if scene mode has
+  -- been engaged at least once this session (the pipeline is
+  -- lazy-built by _getOrBuildSceneMorph).
+  if self._sceneCVBranch then
+    t.sceneCVBranch = self._sceneCVBranch:serialize()
+  end
+  if self._sceneCVGainBias then
+    t.sceneCVParams = {
+      bias = self._sceneCVGainBias:getParameter("Bias"):target(),
+      gain = self._sceneCVGainBias:getParameter("Gain"):target(),
+    }
+  end
+
+  if snappedForSave then
+    -- Re-add task; morpher's next apply writes audio = blend(
+    -- base, A, B), audio returns to its pre-snapshot blended
+    -- state. Audible glitch is one audio frame of "audio at
+    -- base" -- imperceptible unless bias was at an extreme.
+    app.AudioThread.addTask(self._sceneTask, 0)
+  end
   return t
 end
 
@@ -68,6 +152,29 @@ function Root:deserialize(t)
     self.pinView:deserialize(t.pinView)
   else
     self.pinView:removeAllPinSets()
+  end
+  if t.sceneView then
+    -- Force-create SceneView only if the preset actually carries
+    -- scene state. Restores the data verbatim.
+    self:getSceneView():deserialize(t.sceneView)
+  end
+  -- Scene-CV pipeline restore. Force-build the morpher + GainBias
+  -- + branch BEFORE restoring their state (same lazy entry point
+  -- the HOLD-press path takes). Bias / gain restored via hardSet
+  -- so the values land immediately without softSet ramp dynamics.
+  if t.sceneCVBranch or t.sceneCVParams then
+    self:_getOrBuildSceneMorph()
+    if t.sceneCVBranch then
+      self._sceneCVBranch:deserialize(t.sceneCVBranch)
+    end
+    if t.sceneCVParams then
+      if t.sceneCVParams.bias then
+        self._sceneCVGainBias:getParameter("Bias"):hardSet(t.sceneCVParams.bias)
+      end
+      if t.sceneCVParams.gain then
+        self._sceneCVGainBias:getParameter("Gain"):hardSet(t.sceneCVParams.gain)
+      end
+    end
   end
 end
 
@@ -83,6 +190,628 @@ function Root:enterHoldMode()
 end
 
 function Root:leaveHoldMode()
+end
+
+-- Recursively visit every unit reachable from a chain: the chain's
+-- own units, plus every unit inside any child chain each unit
+-- exposes via Unit:walkChildChains. The default walkChildChains
+-- visits self.branches (mod branches); CustomEffect/CustomSource
+-- also visit self.patch (the container interior); MultiBand also
+-- visits self.bands[1..N]. Adding a new container type only needs
+-- to override walkChildChains; the walker stays generic.
+--
+-- Used by the scene-authoring enter/exit walks. The delta map's
+-- unit-instance keys are globally unique inside the root chain, so
+-- nested units land in the same flat storage table with no clash.
+local function _walkAllUnits(chain, callback)
+  for i = 1, chain:length() do
+    local unit = chain:getUnit(i)
+    if unit then
+      callback(unit)
+      if unit.walkChildChains then
+        unit:walkChildChains(function(childChain)
+          _walkAllUnits(childChain, callback)
+        end)
+      end
+    end
+  end
+end
+
+-- Parallel walker that visits the root chain and every reachable
+-- sub-chain (via Unit:walkChildChains). Used for the scene
+-- subtitle propagation so the "editing Sn" indicator shows on
+-- every chain header the user can dive into, not just the root.
+local function _walkAllChains(chain, callback)
+  callback(chain)
+  for i = 1, chain:length() do
+    local unit = chain:getUnit(i)
+    if unit and unit.walkChildChains then
+      unit:walkChildChains(function(childChain)
+        _walkAllChains(childChain, callback)
+      end)
+    end
+  end
+end
+
+-- Hard-restore every audio Parameter that the morpher writes to,
+-- back to its user-edit base value. Used at disengage and at
+-- save time so the audio Param matches the user's pre-scene
+-- value rather than the morpher's last blend output.
+--
+-- Without the save-time call, persisting while scene mode is
+-- engaged would capture audio = blend(base, sceneA, sceneB) into
+-- the preset. On reload, re-engaging snapshots base from
+-- audio.target -- so the *blended* value becomes the new base,
+-- permanently baking in whatever scene contribution was active
+-- at save time.
+--
+-- Lives AFTER _walkAllUnits / _walkAllChains so the closure
+-- captures them as locals. An earlier (.29 - .31) placement
+-- before the walker definitions made `_walkAllUnits` resolve to
+-- the nil global, hard-crashing the .30 quicksave
+-- (Chain.Root.lua:109: attempt to call a nil value).
+function Root:_hardRestoreAudioToBase()
+  if self._sceneBaseParams == nil then return end
+  _walkAllUnits(self, function(unit)
+    if not unit.controls then return end
+    local unitKey = unit:getInstanceKey()
+    local perUnit = self._sceneBaseParams[unitKey]
+    if not perUnit then return end
+    for ctrlId, control in pairs(unit.controls) do
+      if control.getSceneAudioParam then
+        local baseParam = perUnit[ctrlId]
+        if baseParam then
+          local audioParam = control:getSceneAudioParam()
+          if audioParam then
+            audioParam:hardSet(baseParam:target())
+          end
+        end
+      end
+    end
+  end)
+end
+
+-- Arm every delta-able control reachable from the root chain for
+-- scene authoring. The walk descends through mod branches AND
+-- Custom-Unit interiors so a tweak inside, say, a Reverb's wet
+-- gain (which lives in a CustomEffect's self.patch) is captured
+-- in the scene like any top-level fader.
+--
+-- For each control that exposes enterSceneMode, builds a per-scene
+-- target parameter (initialized to the scene's existing delta if
+-- one exists, else to the control's current live value) and tells
+-- the control to swap its widget's control parameter to that
+-- target. Audio doesn't change; the live value parameter still
+-- holds the base value. The user's encoder edits inside scene
+-- authoring write to the per-scene target.
+function Root:enterSceneAuthoring(sceneView, sceneIdx)
+  if self.activeAuthoringScene then return end  -- already armed
+  local scene = sceneView:getScene(sceneIdx)
+  if scene == nil then return end
+  self.activeAuthoringScene = scene
+  self.activeAuthoringIdx   = sceneIdx
+  -- Header indicator so the user knows they're editing scene N,
+  -- not making live audio-path changes. Propagated to every
+  -- sub-chain so the cue survives a branch-dive. Previous
+  -- subtitle on each chain (e.g. "muted") is saved and restored
+  -- on exit so scene authoring doesn't clobber other indicators.
+  local label = "editing " .. (scene.name or string.format("S%d", sceneIdx))
+  self._scenePrevSubtitles = {}
+  _walkAllChains(self, function(c)
+    self._scenePrevSubtitles[#self._scenePrevSubtitles + 1] =
+      { chain = c, prev = c.subTitle }
+    c:setSubTitle(label)
+  end)
+
+  -- Corner dog-ear on the main display (page-fold metaphor:
+  -- you're on the underside of the page, editing scene state).
+  -- Flipped on every reachable chain so the cue survives a
+  -- sub-chain dive at any depth -- the indicator graphic lives
+  -- on each chain's mainGraphic, the walk just toggles them.
+  _walkAllChains(self, function(c)
+    if c._setSceneAuthoringIndicator then
+      c:_setSceneAuthoringIndicator(true)
+    end
+  end)
+
+  -- Arm any control not already in modulated display BEFORE
+  -- swapping to scene-editing. enterSceneMode early-returns on
+  -- _modAudioParam==nil so a unit added since the last
+  -- engage/rebuild would otherwise have its widget stay bound
+  -- to the live audio param: encoder writes during authoring
+  -- would hard-edit audio (airlock break) and the widget's
+  -- highlight would never transition, leaving it at the C++
+  -- default mHighlightTarget=true which visually matches the
+  -- scene-editing look. Funneling through _armAllControlsModulated
+  -- guarantees every reachable delta-able control is in the
+  -- expected pre-condition (modulated, baseParam holding the
+  -- live audio value) before enterSceneMode swaps to editing.
+  if self._sceneEngaged then
+    self:_armAllControlsModulated()
+  end
+
+  _walkAllUnits(self, function(unit)
+    if not unit.controls then return end
+    local unitKey = unit:getInstanceKey()
+    for ctrlId, control in pairs(unit.controls) do
+      if control.enterSceneMode then
+        local baseVal = control:getSceneBaseValue()
+        -- Persistent per-scene Parameter (4.3). Same instance
+        -- referenced by morpher items (4.5), so encoder writes
+        -- here track audio live during authoring without
+        -- requiring a morpher rebuild on every keystroke.
+        local targetParam = scene:getOrCreateParam(unitKey, ctrlId, baseVal)
+        control:enterSceneMode(targetParam)
+      end
+    end
+  end)
+end
+
+-- Restore every armed control to its pre-scene state and capture
+-- each per-scene target value back into the scene's delta map.
+-- Only values that differ from the live base become deltas;
+-- equal-to-base targets are cleared so the scene's delta count
+-- stays meaningful (no-op deltas don't clutter the map).
+function Root:exitSceneAuthoring()
+  if self.activeAuthoringScene == nil then return end
+  local scene = self.activeAuthoringScene
+
+  _walkAllUnits(self, function(unit)
+    if not unit.controls then return end
+    local unitKey = unit:getInstanceKey()
+    for ctrlId, control in pairs(unit.controls) do
+      if control.exitSceneMode and control.getSceneTargetValue then
+        -- Only controls that actually entered scene-editing
+        -- (_sceneTargetParam non-nil) contribute a delta. With
+        -- the _armAllControlsModulated pre-condition in
+        -- enterSceneAuthoring this should be every delta-able
+        -- control; the guard exists for safety so any future
+        -- skipped path (a control without enterModulatedDisplay,
+        -- a structural-lock corner case) can't pollute the scene
+        -- with a spurious 0-delta from getSceneTargetValue's
+        -- "return 0 when not editing" fallback.
+        if control._sceneTargetParam then
+          local targetVal = control:getSceneTargetValue()
+          local baseVal   = control:getSceneBaseValue()
+          if math.abs(targetVal - baseVal) > 1e-6 then
+            scene:setDelta(unitKey, ctrlId, targetVal)
+          else
+            scene:setDelta(unitKey, ctrlId, nil)
+            -- Drop the scene's persistent Parameter too. Without
+            -- this the morpher's next rebuild would still see the
+            -- (no-op) delta via scene.params and bind to it instead
+            -- of falling back to the base Parameter. C++ refcount
+            -- keeps the Parameter alive until the morpher releases
+            -- its handle on next clear/rebuild.
+            if scene.params[unitKey] then
+              scene.params[unitKey][ctrlId] = nil
+              if next(scene.params[unitKey]) == nil then
+                scene.params[unitKey] = nil
+              end
+            end
+          end
+        end
+        control:exitSceneMode()
+      end
+    end
+  end)
+
+  self.activeAuthoringScene = nil
+  self.activeAuthoringIdx   = nil
+  -- Restore each chain's pre-authoring subtitle (nil = clear).
+  -- Chains added or removed during authoring are blocked by the
+  -- structural-edit lock, so the saved list always matches.
+  if self._scenePrevSubtitles then
+    for _, entry in ipairs(self._scenePrevSubtitles) do
+      if entry.prev then
+        entry.chain:setSubTitle(entry.prev)
+      else
+        entry.chain:clearSubTitle()
+      end
+    end
+    self._scenePrevSubtitles = nil
+  end
+
+  -- Newly-added deltas (first edits in this authoring session)
+  -- and newly-pruned no-op deltas both change which endpoint
+  -- Parameter the morpher should bind for the just-authored
+  -- scene. Rebuild items so the Performance view sees the
+  -- update on return. Idempotent / cheap; skipped if morpher
+  -- isn't engaged (shouldn't be reachable: scene authoring is
+  -- only entered from Performance which engages the morpher).
+  if self._sceneEngaged then
+    self:rebuildSceneMorph()
+  end
+
+  _walkAllChains(self, function(c)
+    if c._setSceneAuthoringIndicator then
+      c:_setSceneAuthoringIndicator(false)
+    end
+  end)
+end
+
+------------------------------------------------------
+-- Scene crossfader engine.
+--
+-- A single per-Root ParamSetMorph (with the 4.1 3-Parameter Item
+-- variant) interpolates every delta-able control's audio
+-- Parameter between scene A's and scene B's stored Parameters,
+-- weighted by the output of a chain-owned app.GainBias whose
+-- bias is the manual weight (M1 encoder in Performance view) and
+-- whose input branch is user-extensible (M1 dive in Performance
+-- view; users drop CV sources / LFOs / S&H / whatever).
+--
+-- Lazy created on first engage; survives until the chain is
+-- destroyed. Per-control base Parameter snapshots refreshed each
+-- engage from each audio param's current target().
+
+-- Lazy: build the morpher, the scene-cv GainBias + its mod
+-- branch, the audio-rate task that runs them, and wire the
+-- GainBias.Out -> morpher.mCV connection. Idempotent.
+function Root:_getOrBuildSceneMorph()
+  if self._sceneMorph then return self._sceneMorph end
+
+  local morph = app.ParamSetMorph()
+  morph:setName(self.title .. ".SceneMorph")
+  -- Pin Vee semantics for the scene-cv pipeline. Without this the
+  -- morpher's mVeeMode auto-flag only flips true once at least one
+  -- VEE Item has been added, so a fresh chain with no scene deltas
+  -- runs in the legacy linear (1-cv)/2 remap and the live "Weight"
+  -- Parameter that views read for indicators reports the wrong
+  -- semantics (halfway at 0, reversed at extremes).
+  morph:setVeeMode(true)
+  self._sceneMorph = morph
+
+  local gb = app.GainBias()
+  gb:setName(self.title .. ".SceneCV")
+  self._sceneCVGainBias = gb
+
+  -- MinMax tracks the live range of gb.Out so the Performance M1
+  -- fader can render its range bar (the gain indicator the user
+  -- sees to the right of the bias slot). Same wiring pattern as
+  -- a unit's GainBias control: input the modulated output, expose
+  -- Min/Max parameters.
+  local range = app.MinMax()
+  range:setName(self.title .. ".SceneCVRange")
+  self._sceneCVRange = range
+
+  -- Branch wrapping the GainBias input. Used by Performance view
+  -- M1 dive so user can insert CV-source units (LFO, S&H, etc.).
+  -- Output flows: branch units -> gb.In -> gb.Out -> morpher.mCV.
+  self._sceneCVBranch = Branch {
+    title = self.title,
+    subTitle = "scene-cv",
+    depth = self.depth + 1,
+    channelCount = 1,
+    leftDestination = gb:getInput("In"),
+    leftOutObject = gb,
+    leftOutletName = "Out",
+    unit = self,  -- Branch uses this for getRootChain
+  }
+
+  -- Wire GainBias.Out into both the morpher's CV inlet (drives
+  -- the weight) and the MinMax range tracker (drives the fader's
+  -- range indicator).
+  app.AudioThread.connect(gb:getOutput("Out"), morph:getInput("CV"))
+  app.AudioThread.connect(gb:getOutput("Out"), range:getInput("In"))
+
+  -- Per-control base Parameter snapshots, refreshed every engage.
+  -- Map: [unitKey][ctrlId] = app.Parameter holding the user-mode
+  -- value at the moment scene mode was engaged.
+  self._sceneBaseParams = {}
+
+  -- Audio-rate task that processes the GainBias then the morpher
+  -- (process order = insertion order). Add/remove from
+  -- AudioThread on engage/disengage.
+  self._sceneTask = app.ObjectList(self.title .. ".SceneTask")
+
+  return self._sceneMorph
+end
+
+function Root:getSceneCVBranch()
+  self:_getOrBuildSceneMorph()
+  return self._sceneCVBranch
+end
+
+function Root:getSceneCVGainBias()
+  self:_getOrBuildSceneMorph()
+  return self._sceneCVGainBias
+end
+
+-- Expose the morpher itself so views can subscribe to its live
+-- "Weight" Parameter (post-CV crossfade weight, [-1, +1]).
+-- Performance view's per-slot bias-fill indicator reads this each
+-- frame to animate. Built lazily like the rest of the scene-cv
+-- chain so callers can hit this before scene mode is engaged.
+function Root:getSceneMorph()
+  self:_getOrBuildSceneMorph()
+  return self._sceneMorph
+end
+
+function Root:getSceneCVRange()
+  self:_getOrBuildSceneMorph()
+  return self._sceneCVRange
+end
+
+function Root:_getOrCreateBaseParam(unitKey, ctrlId)
+  local u = self._sceneBaseParams[unitKey]
+  if u == nil then
+    u = {}
+    self._sceneBaseParams[unitKey] = u
+  end
+  local p = u[ctrlId]
+  if p == nil then
+    p = app.Parameter(string.format("scene-base/%s/%s",
+                                    tostring(unitKey), ctrlId), 0)
+    u[ctrlId] = p
+  end
+  return p
+end
+
+-- Arm a single control's modulated-display state. Idempotent.
+-- Already-modulated controls: no-op (don't re-snapshot base, the
+-- user has been editing it since the original engage).
+-- New controls: snapshot base from the live audio target, then
+-- swap the widget into modulated display so subsequent encoder
+-- writes go to base.
+--
+-- Centralized because three entry points have to guarantee
+-- "every delta-able control is armed before the next scene
+-- operation touches it":
+--   - engageSceneMorph: initial bulk arm.
+--   - rebuildSceneMorph: defensive re-arm on scene assignment
+--     changes (catches units added since engage).
+--   - enterSceneAuthoring: defensive re-arm before swapping
+--     widgets into scene-editing. Without this, a unit added
+--     between the most recent rebuild and authoring entry would
+--     hit enterSceneMode's "if not _modAudioParam then return"
+--     guard and stay in normal-display state. Authoring's
+--     encoder writes would then hit the live audio param
+--     directly -- "airlock break" -- and exiting authoring
+--     could leave the widget at the wrong highlight (C++
+--     default mHighlightTarget=true reads as "scene-editing
+--     look" because it was never transitioned).
+function Root:_armControlModulated(unitKey, ctrlId, control)
+  if not (control.enterModulatedDisplay and control.getSceneAudioParam) then
+    return
+  end
+  if control._modAudioParam then return end
+  local audioParam = control:getSceneAudioParam()
+  if not audioParam then return end
+  local baseParam = self:_getOrCreateBaseParam(unitKey, ctrlId)
+  baseParam:hardSet(audioParam:target())
+  control:enterModulatedDisplay(audioParam, baseParam)
+end
+
+-- Walk every delta-able control reachable from the root chain
+-- and arm any that aren't already in modulated display. Used by
+-- every scene-operation entry point so newly-added units never
+-- slip through.
+function Root:_armAllControlsModulated()
+  _walkAllUnits(self, function(unit)
+    if not unit.controls then return end
+    local unitKey = unit:getInstanceKey()
+    for ctrlId, control in pairs(unit.controls) do
+      self:_armControlModulated(unitKey, ctrlId, control)
+    end
+  end)
+end
+
+-- Walk every delta-able control and add a 4-Parameter VEE morpher
+-- item per (audio target, base, sceneA endpoint, sceneB endpoint).
+-- The VEE blend keeps the live audio param at the user's pre-scene
+-- value (base) when the bias is at center, and only pulls toward
+-- a scene's stored value as the user moves bias to that side.
+--
+-- Unassigned endpoints pass baseParam as the "scene" so the
+-- per-side multiplier collapses to (1-w)*base + w*base = base
+-- and the side has no audible effect.
+function Root:_buildSceneMorphItems()
+  if self.sceneView == nil then return end
+  local morph = self._sceneMorph
+  if morph == nil then return end
+
+  local aIdx = self.sceneView:getCrossfaderA()
+  local bIdx = self.sceneView:getCrossfaderB()
+  local sceneA = (aIdx and aIdx > 0) and self.sceneView:getScene(aIdx) or nil
+  local sceneB = (bIdx and bIdx > 0) and self.sceneView:getScene(bIdx) or nil
+
+  _walkAllUnits(self, function(unit)
+    if not unit.controls then return end
+    local unitKey = unit:getInstanceKey()
+    for ctrlId, control in pairs(unit.controls) do
+      if control.getSceneAudioParam then
+        local audioParam = control:getSceneAudioParam()
+        local baseParam  = self:_getOrCreateBaseParam(unitKey, ctrlId)
+        local baseVal    = control:getSceneBaseValue()
+
+        local aParam = baseParam
+        if sceneA and sceneA:hasDelta(unitKey, ctrlId) then
+          aParam = sceneA:getOrCreateParam(unitKey, ctrlId, baseVal)
+        end
+
+        local bParam = baseParam
+        if sceneB and sceneB:hasDelta(unitKey, ctrlId) then
+          bParam = sceneB:getOrCreateParam(unitKey, ctrlId, baseVal)
+        end
+
+        morph:addVee(audioParam, baseParam, aParam, bParam)
+      end
+    end
+  end)
+end
+
+-- Engage. Refresh base snapshots from current user-mode values,
+-- build morpher items per the crossfader A/B assignments, and
+-- schedule the audio-rate task. Idempotent.
+function Root:engageSceneMorph()
+  if self._sceneEngaged then return end
+  if self.sceneView == nil then return end  -- no scenes ever created
+
+  self:_getOrBuildSceneMorph()
+
+  -- Refresh base snapshots from audio params. This is the user's
+  -- pre-scene-mode value captured into baseParam; once engaged,
+  -- the morpher writes audio = base + scene_offset, the user's
+  -- encoder writes go to baseParam (via the modulated-display
+  -- widget swap below), and audio drifts no longer affect base.
+  _walkAllUnits(self, function(unit)
+    if not unit.controls then return end
+    local unitKey = unit:getInstanceKey()
+    for ctrlId, control in pairs(unit.controls) do
+      if control.getSceneBaseValue then
+        local baseParam = self:_getOrCreateBaseParam(unitKey, ctrlId)
+        baseParam:hardSet(control:getSceneBaseValue())
+      end
+    end
+  end)
+
+  -- Swap every delta-able ViewControl into modulated display:
+  -- box (hollow rectangle) shows the user-set base; line (grey)
+  -- shows the audio param's morphed output. Encoder writes go
+  -- to baseParam, never to the audio param. Mirrors the
+  -- per-control state-machine spec in
+  -- docs/planning/scene-modulation-in-user-edit.md.
+  self:_armAllControlsModulated()
+
+  self._sceneTask:lock()
+  self._sceneTask:clear()
+  self._sceneMorph:clear()
+  self:_buildSceneMorphItems()
+  -- Order matters: GainBias writes its Out, then range reads it,
+  -- then morpher reads it (via its mCV inlet). All three must be
+  -- in the same task and in this order so the morpher and range
+  -- see fresh data each frame.
+  self._sceneTask:add(self._sceneCVGainBias)
+  if self._sceneCVRange then
+    self._sceneTask:add(self._sceneCVRange)
+  end
+  self._sceneTask:add(self._sceneMorph)
+  self._sceneTask:unlock()
+
+  app.AudioThread.addTask(self._sceneTask, 0)
+  -- Start the scene-cv branch so any CV-source units the user
+  -- has inserted there get scheduled by AudioThread. start() is
+  -- refcounted (stopCount) -- safe to call across engages.
+  if self._sceneCVBranch then
+    self._sceneCVBranch:start()
+  end
+  self._sceneEngaged = true
+end
+
+-- Disengage. Tear down the audio-rate scheduling and drop the
+-- live Parameters from each scene (the on-disk float deltas
+-- survive). Base Parameters stay -- cheap, reused next engage.
+function Root:disengageSceneMorph()
+  if not self._sceneEngaged then return end
+
+  -- Stop the scene-cv branch first so its units stop processing
+  -- before we tear down the GainBias they feed into.
+  if self._sceneCVBranch then
+    self._sceneCVBranch:stop()
+  end
+
+  app.AudioThread.removeTask(self._sceneTask)
+
+  self._sceneTask:lock()
+  self._sceneTask:clear()
+  self._sceneTask:unlock()
+
+  if self._sceneMorph then
+    self._sceneMorph:clear()
+  end
+
+  -- Hard-restore every audio param to its user-edit base. With
+  -- the modulated-display swap during engage, baseParam holds
+  -- the user's authoritative value -- the encoder has been
+  -- writing here, not to the audio param. The morpher's softSet
+  -- has been driving the audio param (= base + offset); we now
+  -- need to snap the audio param back to base before we swap
+  -- the widget back to "audio param drives everything" via
+  -- exitModulatedDisplay.
+  self:_hardRestoreAudioToBase()
+
+  -- Exit modulated display on every delta-able control: widgets
+  -- snap back to single-param (audio) binding. After this point
+  -- the user-edit view is indistinguishable from a chain that
+  -- never had scene mode active.
+  _walkAllUnits(self, function(unit)
+    if not unit.controls then return end
+    for _, control in pairs(unit.controls) do
+      if control.exitModulatedDisplay then
+        control:exitModulatedDisplay()
+      end
+    end
+  end)
+
+  if self.sceneView then
+    for i = 1, self.sceneView:getSceneCount() do
+      local scene = self.sceneView:getScene(i)
+      if scene and scene.releaseParams then
+        scene:releaseParams()
+      end
+    end
+  end
+
+  self._sceneEngaged = false
+end
+
+-- Rebuild items without disengaging. Called when the user cycles
+-- A/B roles or adds/removes a scene.
+--
+-- Walks every delta-able control to make sure baseParam and the
+-- modulated-display widget swap are correctly armed BEFORE the
+-- morpher items reference them. Controls that engaged at the
+-- start of scene mode are already correct (no-op); controls
+-- added since (e.g. a freshly-inserted unit) get a base
+-- snapshot from their live audio target and the modulated swap
+-- now. Without this defensive walk, a unit added mid-session
+-- would have baseParam at the default-zero value and the
+-- morpher would softSet its audio to 0 every frame.
+function Root:rebuildSceneMorph()
+  if not self._sceneEngaged then return end
+  self._sceneTask:lock()
+  -- Catch any units added since engage / last rebuild.
+  -- Already-modulated controls are no-op here; baseParam tracks
+  -- the user's encoder edits and stays correct.
+  self:_armAllControlsModulated()
+  self._sceneMorph:clear()
+  self:_buildSceneMorphItems()
+  self._sceneTask:unlock()
+end
+
+-- Egress gestures from inside scene authoring. When the chain is
+-- armed for scene editing, UP / shift+HOME / CANCEL all return to
+-- the Performance overview (same destination as the HOLD panel
+-- button bounce in ChannelGroup.setMode). When not in authoring,
+-- the handlers return nothing so the default chain navigation runs.
+--
+-- Routes through the Channels module so the per-channel-group
+-- context switch happens (chain:exitSceneAuthoring alone wouldn't
+-- activate sceneHoldContext).
+local function _leaveAuthoringIfArmed(self)
+  if self.activeAuthoringScene == nil then return false end
+  local Channels = require "Channels"
+  Channels.leaveSceneAuthoring()
+  return true
+end
+
+-- Egress mappings (revised after hardware bench 2026-06-01):
+--   plain UP at Root  -> leave authoring (no sub-chain above to
+--                        pop into, so UP would otherwise no-op;
+--                        repurposing for "back out to Performance"
+--                        matches user-edit semantics where UP at
+--                        root leaves the edit view)
+--   shift+UP from any -> leave authoring (escape hatch from any
+--                        sub-chain depth; Patch/Branch don't see
+--                        this because their unshifted UP pops
+--                        them up first)
+-- CANCEL is intentionally NOT mapped here: it is owned by the
+-- focused control's readout::restore (the "revert this value to
+-- where it was when I entered focus" gesture) and is absolutely
+-- needed during authoring. Same logic for ZERO.
+function Root:upReleased(shifted)
+  if _leaveAuthoringIfArmed(self) then return true end
 end
 
 function Root:enterScopeView()
@@ -102,6 +831,9 @@ end
 
 function Root:releaseResources()
   self.pinView:releaseResources()
+  if self.sceneView then
+    self.sceneView:releaseResources()
+  end
   self.scopeView:releaseResources()
   Chain.releaseResources(self)
 end
