@@ -16,87 +16,30 @@ SWIG render no-op flags, multi-entry state machines).
 ### v1.1: CV-controllable A / B scene selection (3-ply layout)
 
 Bench-feedback request from `shellfritsch` (post-`.37` Discord
-2026-06-04). The current model has CV on the morph weight but no CV
-on A / B scene assignment — manual chip taps are the only writer.
+2026-06-04). Current model has CV on the morph weight but no CV
+on A / B scene assignment; manual chip taps are the only writer.
 Teletype / sequencer / external CV can't drive scene selection.
 
-**Direction (chosen):** keep A / B as separate concepts (don't
-collapse to crumb's linear-sweep — losing any-two-scene parallel
-mixing isn't worth it). Promote A and B to first-class controls
-at M2 / M3 so they get their own CV input subchain, same way M1
-already gets one for the morph weight.
+**Canonical plan:** [hold-mode-scenes-v1-1-plan.md](hold-mode-scenes-v1-1-plan.md).
+Design locked 2026-06-04. Phases 5.1 through 5.7 documented there.
 
-**Layout (chosen):**
+Headline shape:
 
-```
-M1  M2  M3  M4  M5  M6
-morph A  B  scene scene scene
-            1     2     3   ... scroll for scenes 4..16
-```
+- M1 morph fader and continuous A↔B blend preserved unchanged.
+- A and B get their own M2 / M3 controls, each with a CV-input
+  subchain. Bank shrinks 5 → 3 visible plies.
+- A and B use a new `SceneIndexArbiter` C++ object, not GainBias.
+  Two-state machine (Tracking-Manual / Tracking-CV), 0.5-step
+  Schmitt threshold, no idle decay. Avoids the GainBias trap where
+  a manual tap permanently shifts the CV operating window.
+- Three writers per role (CV / encoder / chip tap) arbitrated by
+  the state machine. Bias and Gain Parameters with the familiar
+  301 idiom; Gain cap lifted to ±32 so a sub-volt CV source can
+  traverse a 16-scene bank.
+- Box / line / scope visual reuses the v1.0 modulated-display
+  idiom. Custom scene-name readout under A/B faders.
 
-Three plies for the crossfader controls; bank shrinks from 5
-visible to 3 visible. Scroll model extends naturally — the
-existing per-scene `scrollOffset` keeps integer semantics over
-the bank; M1-M3 don't participate in scroll.
-
-**Semantics (chosen): bidirectional, "user decides" wins**
-
-A and B become GainBias-style faders backed by their own scene-CV
-subchain (same plumbing M1's morph weight uses). The fader's value
-quantizes to a scene index (0 = unassigned/base, 1..N = scene N).
-Two writers compete for the value:
-
-- CV in the subchain (when patched) writes every frame.
-- Manual tap on `asgn A` / `asgn B` on a scene's S-display (the
-  existing 1.0 gesture) hard-sets the fader's value.
-
-This matches the existing 301 convention everywhere else (any
-fader: CV writes target, encoder writes target, last writer
-wins). No new rules; users already understand the dynamic-CV-
-dominates-static-manual story from every other CV-modulated
-fader. The bank's S1/S2 chip taps stay as the manual override
-path, so users with no CV patched have the same affordance as
-1.0.
-
-**Open implementation questions** (resolve during build):
-
-- Quantize CV → discrete scene index vs allow continuous
-  inter-scene blend on the A/B selector? Probably quantize
-  (the morph fader still provides the continuous A↔B blend).
-- Skip-include toggle per scene for CV reachability (a CV sweep
-  through all 16 scenes is rarely musical without a skip mask).
-  Could ship without it, add when bench shows it's needed.
-- Visual treatment of A/B faders: vertical fader with index
-  readout? Tick marks at each scene boundary? Adaptive labels
-  showing the scene name at the current value (like Plaits)?
-- Does A/B fader respect the SceneSlotIndicator math? The slot
-  bias-fill indicator currently reads morph Weight; under the
-  new model it'd also need to know which scene is currently A
-  vs B (which now changes dynamically via CV).
-- M1 morph dive currently has a single CV-source subchain.
-  A and B will need their own subchains — that's three scene-CV
-  branches per chain instead of one. Persistence path
-  (`Chain.Root._sceneCVBranch` serialize/deserialize from .29+)
-  generalizes to a `_sceneCVBranches` map keyed by role
-  ("morph", "A", "B").
-
-**Implementation order (sketch):**
-
-1. Plan doc covering quantization decision, skip-include
-   semantics, persistence schema change.
-2. New `ASelectorControl` / `BSelectorControl` (or one generic
-   `SceneSelectorControl` parameterized by role).
-3. `Chain.Root._sceneCVBranches` map. Migrate `_sceneCVBranch`
-   to be the morph role; add A and B roles.
-4. SceneSlotControl: A/B chip display now driven by
-   `morph._sceneCVGainBiasA.target()` and `B.target()` (or
-   wherever the quantized index lands).
-5. Bench iteration.
-6. Skip-include toggle if needed.
-
-**Defer:** until bench-validation of 1.0 settles for a few
-weeks. The shellfritsch request is the strongest concrete signal,
-but other requests may surface that change the layout calculus.
+**Defer:** until bench-validation of 1.0 settles for a few weeks.
 
 ---
 
