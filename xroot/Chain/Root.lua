@@ -725,10 +725,19 @@ function Root:_buildSceneMorphItems()
   local morph = self._sceneMorph
   if morph == nil then return end
 
-  local aIdx = self.sceneView:getCrossfaderA()
-  local bIdx = self.sceneView:getCrossfaderB()
-  local sceneA = (aIdx and aIdx > 0) and self.sceneView:getScene(aIdx) or nil
-  local sceneB = (bIdx and bIdx > 0) and self.sceneView:getScene(bIdx) or nil
+  -- v1.1: emit kVeeIndexed items with the full per-scene Parameter
+  -- list. apply() reads IndexA/IndexB Inlets each frame (driven
+  -- by the A/B SceneIndexArbiter Outlets) and picks the
+  -- corresponding scene Parameters from this table; index 0 maps
+  -- to baseParam (the "unassigned" semantic v1.0 also used).
+  -- Scenes that have no delta for a given control fall back to
+  -- baseParam so a sweep through them reveals the user's
+  -- pre-scene base value.
+  local n = self.sceneView:getSceneCount()
+  local scenes = {}
+  for i = 1, n do
+    scenes[i] = self.sceneView:getScene(i)
+  end
 
   _walkAllUnits(self, function(unit)
     if not unit.controls then return end
@@ -739,17 +748,17 @@ function Root:_buildSceneMorphItems()
         local baseParam  = self:_getOrCreateBaseParam(unitKey, ctrlId)
         local baseVal    = control:getSceneBaseValue()
 
-        local aParam = baseParam
-        if sceneA and sceneA:hasDelta(unitKey, ctrlId) then
-          aParam = sceneA:getOrCreateParam(unitKey, ctrlId, baseVal)
+        local perScene = {}
+        for i = 1, n do
+          local scene = scenes[i]
+          if scene and scene:hasDelta(unitKey, ctrlId) then
+            perScene[i] = scene:getOrCreateParam(unitKey, ctrlId, baseVal)
+          else
+            perScene[i] = baseParam
+          end
         end
 
-        local bParam = baseParam
-        if sceneB and sceneB:hasDelta(unitKey, ctrlId) then
-          bParam = sceneB:getOrCreateParam(unitKey, ctrlId, baseVal)
-        end
-
-        morph:addVee(audioParam, baseParam, aParam, bParam)
+        morph:addVeeIndexed(audioParam, baseParam, perScene)
       end
     end
   end)
