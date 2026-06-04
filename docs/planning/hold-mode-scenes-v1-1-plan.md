@@ -119,24 +119,53 @@ scene authoring:
   the arbiter integer-transition signal in addition to user-input
   events, so CV-driven moves refresh the readout too.
 
-### Integer-transition watcher and morpher rebuild
+### Live-index morpher consumption (no rebuild on integer transitions)
 
 The ParamSetMorph today is built once at engage with sceneA / sceneB
 resolved as Lua ints from `SceneView:getCrossfaderA/B()`. v1.1 makes
-A and B live values that change at audio rate. Re-resolving the
-morpher every frame is too expensive; pre-building N×N pairs is too
-much memory. The path that works: rebuild the morpher only when
-the *integer* output of arbiter A or arbiter B crosses.
+A and B live values that change at audio rate, and the audio
+thread must own the entire scene-switch path so that UI starvation
+(which happens under heavy load) does not introduce switching
+latency.
 
-- Per-arbiter integer-transition signal emitted from inside the
-  arbiter's `process()`. Cheap; the arbiter is already running
-  per-frame and tracking the rounded value.
-- On edge: schedule `Chain.Root:_buildSceneMorphItems()` for safe
-  execution. Whether sync on the audio thread or deferred to Lua
-  post-frame is a phase 5.3 investigation; ParamSetMorph `:clear()`
-  mid-process safety is the gating question.
-- Same edge signal drives the bank UI rewire (chip + bias-fill on
-  SceneSlotControl). One signal, two consumers.
+Path: extend `ParamSetMorph` to consume live A/B indices through
+two new Inlets (`IndexA`, `IndexB`) wired to the arbiter Outlets.
+At engage, each delta-able control's item is built with the *full
+per-scene Parameter list*, not just a resolved A and B endpoint.
+In `apply()`, the morpher reads the last sample of each index
+Inlet, clips to `[0, N]`, picks the right scene Parameters from
+the per-item table, and runs the existing wA/wB linear blend.
+
+- **No rebuild on integer transitions.** A/B index changes are a
+  per-frame Inlet read. Latency = 1 audio frame.
+- **Lua-side rebuild reserved for structural events.** Engage,
+  scene add, scene delete, scene authoring changes. Those are all
+  Lua events, safe to mutate `mItems` from Lua.
+- **Audio thread is fully autonomous** for scene switching. UI
+  starvation has zero effect on switching latency. Matches the
+  301's audio-preserved-under-load invariant.
+- **Bank UI updates (chip + bias-fill)** still consume an
+  integer-transition signal from the arbiter for redraw. UI poll
+  is acceptable here because the path is cosmetic: starved UI =
+  stale visual, but audio is correct. The arbiter sets a
+  transition-pending flag; SceneSlotControl reads it on its
+  existing UI frame handler.
+
+### ParamSetMorph extension shape
+
+- Two new Inlets: `IndexA`, `IndexB`. Unconnected → ZeroOutput →
+  last sample = 0 → resolves to baseParam (the "unassigned"
+  semantic v1.0 already uses).
+- New Item kind `kVeeIndexed` holding `target`, `baseParam`, and
+  `std::vector<Parameter*> scenes` of length N+1 (index 0 =
+  baseParam, indices 1..N = each scene's stored Parameter if it
+  has a delta on this control, else baseParam).
+- New `addVeeIndexed(target, baseParam, scenes)` builder, called
+  by `_buildSceneMorphItems()` instead of the existing `addVee`.
+- `apply()` switch handles `kVeeIndexed`: read IndexA/IndexB
+  Inlets, clip, select scenes[A_idx] and scenes[B_idx], blend.
+- Existing `addVee` and `kVee4` paths stay in the codebase for
+  back-compat but are no longer emitted by the scene crossfader.
 
 ---
 
@@ -162,9 +191,10 @@ A.arbiter → A.range → B.arbiter → B.range → morph.gainBias →
 morph.range → morph
 ```
 
-A and B integer-transition signals get latched on the Lua side and
-processed before the morpher consumes its inlets next frame, so the
-morpher sees consistent A/B/Weight in any given frame.
+A and B Outlets feed the morpher's IndexA/IndexB Inlets directly.
+Morpher reads them per frame; consistent A/B/Weight per frame
+follows automatically from task ordering (arbiters run before
+morpher).
 
 ### Persistence
 
@@ -179,9 +209,11 @@ transient, not saved. State machine state is transient, not saved
 
 - SceneSlotControl's A/B chip + bias-fill side stop coming from
   `SceneView:getCrossfaderA/B()` (Lua int) and start coming from
-  the arbiter integer-transition signal.
-- Performance subscribes to the per-role transition signal and
-  re-runs `_refreshSlotRoles()` on edge. Cheap.
+  the arbiter integer-transition signal (UI-side poll, cosmetic).
+- Performance polls the per-role transition flag on its existing
+  UI frame handler and re-runs `_refreshSlotRoles()` on edge.
+  Audio path does NOT depend on this; if UI stalls, the chips
+  stop animating but audio scene switching is unaffected.
 - `toggleEndpoint` (chip-tap S-key) rewires from
   `SceneView:setCrossfaderA(idx)` to `arbiterA:hardSetBias(idx)`.
   Forces Tracking-Manual via the standard manual-write path.
@@ -203,14 +235,15 @@ new endpoints on next morpher rebuild.
 Mirrors the v1.0 numbering. Each phase ends bench-stable before the
 next starts.
 
-### 5.1 Plan doc + arbiter spec
+### 5.1 Plan doc + arbiter spec + ParamSetMorph extension shape
 
-- This document, plus a separate `SceneIndexArbiter` interface spec
-  (header sketch + state machine table).
-- Confirm Schmitt = 0.5 scene step in output space.
-- Confirm Gain cap = ±32.
-- Settle whether the morpher rebuild can run on the audio thread or
-  needs Lua-side scheduling. (Investigation, not implementation.)
+- This document, plus the `SceneIndexArbiter` interface spec
+  (`hold-mode-scenes-v1-1-arbiter-spec.md`).
+- Schmitt = 0.5 scene step in output space (locked).
+- Gain cap = ±32 (locked).
+- Audio-thread autonomy for scene switching: arbiter Outlet feeds
+  morpher Inlet, morpher consumes live A/B indices in `apply()`,
+  no rebuild on integer transitions. UI poll is cosmetic-only.
 
 ### 5.2 Multi-role branch map refactor in Chain.Root
 
@@ -220,17 +253,23 @@ next starts.
   in new format.
 - Bench: v1.0 behavior identical on existing saves and new saves.
 
-### 5.3 SceneIndexArbiter + integer-transition + morpher rebuild
+### 5.3 SceneIndexArbiter + ParamSetMorph live-index extension
 
-- New C++ object under `od/objects/`. Header + impl + SWIG
-  registration.
-- 2-state machine, Schmitt detection, integer-transition signal.
-- Wire `Chain.Root:_buildSceneMorphItems()` to fire on either A or
-  B transition edge, with safe scheduling per the 5.1 investigation
-  outcome.
-- Test in isolation before wiring to any UI: instantiate an arbiter,
-  drive CV programmatically, verify state transitions and edge
-  signals.
+- New `SceneIndexArbiter` C++ object under `od/objects/control/`.
+  Header + impl + SWIG registration. 2-state machine, Schmitt
+  detection, integer-transition flag (UI-only consumer).
+- ParamSetMorph extension: add `IndexA` / `IndexB` Inlets, new
+  `kVeeIndexed` Item kind, new `addVeeIndexed(target, baseParam,
+  scenes)` builder. `apply()` switch case for kVeeIndexed reads
+  Inlets, clips, selects, blends.
+- Engage path: `_buildSceneMorphItems()` emits `addVeeIndexed`
+  with full per-scene Parameter list per delta-able control.
+  Audio thread reads A/B indices live; no rebuild triggered by
+  arbiter transitions.
+- Wire arbiter Outlets to morpher Inlets via `AudioThread.connect`.
+- Test in isolation before wiring to UI: instantiate arbiter +
+  morpher, drive CV programmatically, verify A/B index changes
+  produce correct morph output without any Lua-side calls.
 
 ### 5.4 SceneSelectorControl (shared M2/M3 class)
 
@@ -272,6 +311,10 @@ Coverage:
 - Stereo link/unlink (TODO #57): three-role case fails the same way
   one-role case fails today; no new corruption mode introduced.
 - CPU profile vs v1.0 on a unit-dense chain.
+- **UI-starvation test:** force a heavy UI workload (long
+  paint, blocking Lua) and confirm CV-driven scene switching
+  remains audibly clean and prompt. Audio path must be
+  fully autonomous.
 
 ### 5.7 (deferred) Skip-include mask
 

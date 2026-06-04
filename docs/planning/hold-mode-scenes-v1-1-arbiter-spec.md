@@ -4,6 +4,16 @@ Phase 5.1 deliverable. C++ header sketch + state machine table +
 threading model for the per-role A/B selector primitive introduced
 in `hold-mode-scenes-v1-1-plan.md`.
 
+**Design contract:** the audio thread owns scene switching end-to-end.
+The arbiter's `mOutput` Outlet feeds the morpher's IndexA/IndexB
+Inlets directly; the morpher consumes live indices in `apply()`
+and selects scene Parameters from pre-built per-item tables. No
+Lua-side path participates in the switch latency. UI starvation
+under heavy DSP load is irrelevant to audio switching, matching
+the 301's audio-preserved-under-load invariant. The
+`mTransitionPending` flag described below is a *UI-only* consumer
+for bank chip + slot indicator redraw.
+
 ## Header sketch
 
 Lands at `od/objects/control/SceneIndexArbiter.{h,cpp}` and is
@@ -24,14 +34,15 @@ namespace od
   // chip tap via mBias hardSet) using a 2-state machine.
   //
   // Output (mOutput) is the effective scene index as a float
-  // (post-round, clipped to [0, mSceneCount]). The morpher reads
-  // round(mOutput.value()) on rebuild; the fader's "line" reads
+  // (post-round, clipped to [0, mSceneCount]). The morpher's
+  // IndexA/IndexB Inlets connect to this Outlet directly and read
+  // the last-sample integer per frame. The fader's "line" reads
   // mOutput continuously for animation.
   //
-  // Integer-transition signaling is via mTransitionPending flag.
-  // Lua-side Chain.Root polls this each UI frame and, when set,
-  // clears it and schedules _buildSceneMorphItems(). Threading
-  // model details in the spec doc.
+  // mTransitionPending is a UI-only signal: when the integer
+  // output changes, the audio thread sets it; SceneSlotControl's
+  // UI frame handler polls it to redraw the A/B chip + bias-fill
+  // side. Audio switching does NOT consume this flag.
   class SceneIndexArbiter : public Object
   {
   public:
@@ -147,18 +158,24 @@ Sampling only the last frame sample is sufficient: scene transitions are deliber
 ```
 SceneIndexArbiter::hardSetBias(value):
   mBias.hardSet(clip(value, 0, mSceneCount))
-  mCVInputAtEntry = last_known_cvIn   // see note below
+  mCVInputAtEntry = mLastCVSample   // cached by process()
   mGainAtEntry = mGain.value()
   mState = kTrackingManual
   new_index = computeEffectiveIndex(mCVInputAtEntry, mGainAtEntry, mBias.value())
   if new_index != mLastFiredIndex:
     mLastFiredIndex = new_index
-    mTransitionPending = true
+    mTransitionPending = true   // UI redraw signal only
 ```
 
-Lua chip-tap handler also calls `Chain.Root:_buildSceneMorphItems()` synchronously on the same Lua call, so the audio thread sees both new mBias and new morpher items on its next frame. No polling latency for manual gestures.
+No morpher rebuild call needed. The morpher consumes the live
+index from `mOutput` via its IndexA/IndexB Inlets on its next
+process() call, picks the new scene Parameters from its pre-built
+table, and blends. Switch latency = 1 audio frame.
 
-Note on `last_known_cvIn`: arbiter caches `mInput.buffer()[FRAMELENGTH - 1]` into a member each `process()` call so `hardSetBias()` (which runs on Lua thread without an Inlet buffer guarantee) has a stable value for the Schmitt baseline.
+Note on `mLastCVSample`: arbiter caches
+`mInput.buffer()[FRAMELENGTH - 1]` into a member each `process()`
+call so `hardSetBias()` (which runs on Lua thread without an Inlet
+buffer guarantee) has a stable value for the Schmitt baseline.
 
 ## Threading model
 
@@ -204,31 +221,62 @@ shouldYieldToCV(cvIn):
 
 0.5 output-space units = ½ a scene step. With Gain = 1 and a CV source delivering values in scene-index units directly, this is "CV moved by half a scene." With Gain = 16 (1V source covering 16 scenes), input-space threshold is 0.03125V; tiny CV jitter won't trip it but a deliberate sweep will.
 
-## Lua wiring (Chain.Root side)
+## Lua wiring
 
-`Chain.Root` owns one arbiter per role A/B. Per UI frame:
+`Chain.Root` owns one arbiter per role A/B, wires
+`arbiter.Out → morpher.IndexA` (and same for B) via
+`AudioThread.connect` at engage. After that, Lua is uninvolved
+in the audio switching path.
+
+UI side: SceneSlotControl polls its source arbiter's transition
+flag on its existing UI frame handler to refresh the A/B chip and
+bias-fill side:
 
 ```lua
-function Root:_pollSceneArbiters()
-  if not self._sceneCVBranches then return end
-  local rebuild = false
+function SceneSlotControl:_pollArbiterRedraw()
   for _, role in ipairs({"A", "B"}) do
-    local arb = self._sceneArbiters and self._sceneArbiters[role]
+    local arb = self.chain._sceneArbiters and self.chain._sceneArbiters[role]
     if arb and arb:consumeTransitionFlag() then
-      rebuild = true
+      self:_refreshChipFromArbiters()
     end
-  end
-  if rebuild then
-    self:_buildSceneMorphItems()
   end
 end
 ```
 
-Hook point: the existing per-frame UI handler that already runs for Performance view animation. Adding one bool-read per role per frame is negligible.
+The poll cost is two bool reads per slot per UI frame. UI
+starvation means the chip stops animating; audio switching is
+unaffected.
+
+## ParamSetMorph extension
+
+Sibling deliverable of 5.3. Documented in the plan doc; summary
+for cross-reference:
+
+- Add Inlets `IndexA`, `IndexB` to `ParamSetMorph`. Default Zero
+  on unconnected.
+- Add Item kind `kVeeIndexed` holding `target`, `baseParam`, and
+  `std::vector<Parameter*> scenes` of length N+1 (index 0 =
+  baseParam, indices 1..N = scene Parameter or baseParam if no
+  delta).
+- Add `addVeeIndexed(target, baseParam, scenes)` builder.
+- `apply()` switch on kVeeIndexed: read IndexA/IndexB last
+  samples, clip to `[0, N]`, select scenes[A] and scenes[B],
+  blend with existing wA/wB linear formula.
+- `_buildSceneMorphItems()` swaps from `addVee(...)` to
+  `addVeeIndexed(...)`.
+- Existing `addVee` / `kVee4` stay in the codebase but become
+  unused by the scene crossfader.
 
 ## Open implementation items deferred to 5.3
 
-- Choice of poll hook (Performance view's frame handler vs Chain.Root direct vs UIThread global tick). Cheapest is whichever already runs at UI frame rate without adding a new loop.
-- Whether `mTransitionPending` needs `std::atomic<bool>` or plain bool suffices on AM335x + Pi targets. Plain bool is correct on ARMv7+ with appropriate compiler ordering; lean plain until profiling says otherwise.
-- Whether the audio-thread `mTransitionPending = true` write should be moved inside `simd_set` so the compiler can't reorder the store ahead of the index update. Probably not necessary at -O2 but worth a glance at the generated asm.
-- Whether `hardSetBias()` should immediately call `Chain.Root:_buildSceneMorphItems()` from C++ side (callback) or whether the Lua caller does it explicitly. Lean Lua-caller-explicit so the C++ object stays UI-agnostic.
+- Choice of UI poll hook for chip redraw (SceneSlotControl frame
+  handler vs Performance batched poll). Probably per-slot is
+  simplest; cost is trivial.
+- Whether `mTransitionPending` needs `std::atomic<bool>` or plain
+  bool suffices on AM335x + Pi targets. Plain bool is correct on
+  ARMv7+ with appropriate compiler ordering; lean plain until
+  profiling says otherwise. UI-only consumer means worst-case
+  consequence is a missed redraw, self-corrected on next frame.
+- Whether the audio-thread `mTransitionPending = true` write
+  needs explicit fence/release semantics. Same answer: UI-only,
+  lean plain.
