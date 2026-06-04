@@ -120,20 +120,25 @@ function Root:serialize()
   if self.sceneView then
     t.sceneView = self.sceneView:serialize()
   end
-  -- Scene-CV pipeline state (M1 dive contents + bias/gain).
-  -- The scene-CV branch is a Branch held directly on Root, NOT
-  -- in self.units, so the standard Chain.serialize walk doesn't
-  -- reach it. We persist it here. Only present if scene mode has
-  -- been engaged at least once this session (the pipeline is
-  -- lazy-built by _getOrBuildSceneMorph).
-  if self._sceneCVBranch then
-    t.sceneCVBranch = self._sceneCVBranch:serialize()
-  end
-  if self._sceneCVGainBias then
-    t.sceneCVParams = {
-      bias = self._sceneCVGainBias:getParameter("Bias"):target(),
-      gain = self._sceneCVGainBias:getParameter("Gain"):target(),
-    }
+  -- Scene-CV pipeline state per role (M1 dive contents + bias/
+  -- gain for "morph"; v1.1 adds "A" / "B" with their own dive +
+  -- arbiter params). Branches are held directly on Root, NOT in
+  -- self.units, so the standard Chain.serialize walk doesn't reach
+  -- them. Only written if scene mode has been engaged at least
+  -- once this session (the pipeline is lazy-built by
+  -- _getOrBuildSceneMorph). Legacy single-role saves are read back
+  -- under role "morph" in deserialize.
+  if self._sceneCVBranches and next(self._sceneCVBranches) then
+    t.sceneCVBranches = {}
+    for role, entry in pairs(self._sceneCVBranches) do
+      t.sceneCVBranches[role] = {
+        branch = entry.branch:serialize(),
+        params = {
+          bias = entry.gainBias:getParameter("Bias"):target(),
+          gain = entry.gainBias:getParameter("Gain"):target(),
+        },
+      }
+    end
   end
 
   if snappedForSave then
@@ -158,21 +163,48 @@ function Root:deserialize(t)
     -- scene state. Restores the data verbatim.
     self:getSceneView():deserialize(t.sceneView)
   end
-  -- Scene-CV pipeline restore. Force-build the morpher + GainBias
-  -- + branch BEFORE restoring their state (same lazy entry point
-  -- the HOLD-press path takes). Bias / gain restored via hardSet
-  -- so the values land immediately without softSet ramp dynamics.
-  if t.sceneCVBranch or t.sceneCVParams then
+  -- Scene-CV pipeline restore. Force-build the morpher + per-role
+  -- GainBias / branch BEFORE restoring state (same lazy entry
+  -- point the HOLD-press path takes). Bias / gain restored via
+  -- hardSet so values land immediately without softSet ramp
+  -- dynamics.
+  --
+  -- v1.1 reads the new sceneCVBranches map keyed by role; legacy
+  -- v1.0 saves carry sceneCVBranch + sceneCVParams (single morph
+  -- role) and migrate transparently. v1.1 phase 5.3 will add
+  -- "A" and "B" roles; for now only "morph" is built so unknown
+  -- roles in a preset (none should exist yet) are ignored.
+  if t.sceneCVBranches then
     self:_getOrBuildSceneMorph()
+    for role, entry in pairs(t.sceneCVBranches) do
+      local target = self._sceneCVBranches[role]
+      if target then
+        if entry.branch then
+          target.branch:deserialize(entry.branch)
+        end
+        if entry.params then
+          if entry.params.bias then
+            target.gainBias:getParameter("Bias"):hardSet(entry.params.bias)
+          end
+          if entry.params.gain then
+            target.gainBias:getParameter("Gain"):hardSet(entry.params.gain)
+          end
+        end
+      end
+    end
+  elseif t.sceneCVBranch or t.sceneCVParams then
+    -- Legacy v1.0 single-role format.
+    self:_getOrBuildSceneMorph()
+    local morph = self._sceneCVBranches.morph
     if t.sceneCVBranch then
-      self._sceneCVBranch:deserialize(t.sceneCVBranch)
+      morph.branch:deserialize(t.sceneCVBranch)
     end
     if t.sceneCVParams then
       if t.sceneCVParams.bias then
-        self._sceneCVGainBias:getParameter("Bias"):hardSet(t.sceneCVParams.bias)
+        morph.gainBias:getParameter("Bias"):hardSet(t.sceneCVParams.bias)
       end
       if t.sceneCVParams.gain then
-        self._sceneCVGainBias:getParameter("Gain"):hardSet(t.sceneCVParams.gain)
+        morph.gainBias:getParameter("Gain"):hardSet(t.sceneCVParams.gain)
       end
     end
   end
@@ -462,38 +494,13 @@ function Root:_getOrBuildSceneMorph()
   morph:setVeeMode(true)
   self._sceneMorph = morph
 
-  local gb = app.GainBias()
-  gb:setName(self.title .. ".SceneCV")
-  self._sceneCVGainBias = gb
-
-  -- MinMax tracks the live range of gb.Out so the Performance M1
-  -- fader can render its range bar (the gain indicator the user
-  -- sees to the right of the bias slot). Same wiring pattern as
-  -- a unit's GainBias control: input the modulated output, expose
-  -- Min/Max parameters.
-  local range = app.MinMax()
-  range:setName(self.title .. ".SceneCVRange")
-  self._sceneCVRange = range
-
-  -- Branch wrapping the GainBias input. Used by Performance view
-  -- M1 dive so user can insert CV-source units (LFO, S&H, etc.).
-  -- Output flows: branch units -> gb.In -> gb.Out -> morpher.mCV.
-  self._sceneCVBranch = Branch {
-    title = self.title,
-    subTitle = "scene-cv",
-    depth = self.depth + 1,
-    channelCount = 1,
-    leftDestination = gb:getInput("In"),
-    leftOutObject = gb,
-    leftOutletName = "Out",
-    unit = self,  -- Branch uses this for getRootChain
-  }
-
-  -- Wire GainBias.Out into both the morpher's CV inlet (drives
-  -- the weight) and the MinMax range tracker (drives the fader's
-  -- range indicator).
-  app.AudioThread.connect(gb:getOutput("Out"), morph:getInput("CV"))
-  app.AudioThread.connect(gb:getOutput("Out"), range:getInput("In"))
+  -- Multi-role scene-CV map (v1.1 phase 5.2). Role -> {branch,
+  -- gainBias, range}. v1.0 had a single _sceneCVBranch /
+  -- _sceneCVGainBias / _sceneCVRange for the morph weight; that
+  -- now lives under role "morph". Phase 5.3 will add "A" and "B"
+  -- roles whose entries hold an arbiter instead of a gainBias.
+  self._sceneCVBranches = {}
+  self:_buildSceneCVRole("morph", morph:getInput("CV"))
 
   -- Per-control base Parameter snapshots, refreshed every engage.
   -- Map: [unitKey][ctrlId] = app.Parameter holding the user-mode
@@ -508,14 +515,48 @@ function Root:_getOrBuildSceneMorph()
   return self._sceneMorph
 end
 
-function Root:getSceneCVBranch()
-  self:_getOrBuildSceneMorph()
-  return self._sceneCVBranch
+-- Build a single role's scene-CV chain: GainBias + MinMax range +
+-- Branch wrapping the GainBias input. Wires GainBias.Out into the
+-- consumer inlet (morpher CV for "morph"; future arbiter index
+-- inlets for "A" / "B"). Result stored in self._sceneCVBranches[role].
+function Root:_buildSceneCVRole(role, consumerInlet)
+  local gb = app.GainBias()
+  gb:setName(self.title .. ".SceneCV." .. role)
+
+  local range = app.MinMax()
+  range:setName(self.title .. ".SceneCVRange." .. role)
+
+  local branch = Branch {
+    title = self.title,
+    subTitle = "scene-cv " .. role,
+    depth = self.depth + 1,
+    channelCount = 1,
+    leftDestination = gb:getInput("In"),
+    leftOutObject = gb,
+    leftOutletName = "Out",
+    unit = self,  -- Branch uses this for getRootChain
+  }
+
+  app.AudioThread.connect(gb:getOutput("Out"), consumerInlet)
+  app.AudioThread.connect(gb:getOutput("Out"), range:getInput("In"))
+
+  self._sceneCVBranches[role] = {
+    branch = branch,
+    gainBias = gb,
+    range = range,
+  }
 end
 
-function Root:getSceneCVGainBias()
+function Root:getSceneCVBranch(role)
   self:_getOrBuildSceneMorph()
-  return self._sceneCVGainBias
+  local entry = self._sceneCVBranches[role or "morph"]
+  return entry and entry.branch
+end
+
+function Root:getSceneCVGainBias(role)
+  self:_getOrBuildSceneMorph()
+  local entry = self._sceneCVBranches[role or "morph"]
+  return entry and entry.gainBias
 end
 
 -- Expose the morpher itself so views can subscribe to its live
@@ -528,9 +569,10 @@ function Root:getSceneMorph()
   return self._sceneMorph
 end
 
-function Root:getSceneCVRange()
+function Root:getSceneCVRange(role)
   self:_getOrBuildSceneMorph()
-  return self._sceneCVRange
+  local entry = self._sceneCVBranches[role or "morph"]
+  return entry and entry.range
 end
 
 function Root:_getOrCreateBaseParam(unitKey, ctrlId)
@@ -678,23 +720,26 @@ function Root:engageSceneMorph()
   self._sceneTask:clear()
   self._sceneMorph:clear()
   self:_buildSceneMorphItems()
-  -- Order matters: GainBias writes its Out, then range reads it,
-  -- then morpher reads it (via its mCV inlet). All three must be
-  -- in the same task and in this order so the morpher and range
+  -- Order matters: each role's GainBias writes its Out, then its
+  -- range reads it, then the morpher reads from each role's Out
+  -- (morph -> mCV; future A/B -> arbiter index inlets). All must
+  -- be in the same task in this order so the morpher and ranges
   -- see fresh data each frame.
-  self._sceneTask:add(self._sceneCVGainBias)
-  if self._sceneCVRange then
-    self._sceneTask:add(self._sceneCVRange)
+  for _, entry in pairs(self._sceneCVBranches) do
+    self._sceneTask:add(entry.gainBias)
+    if entry.range then
+      self._sceneTask:add(entry.range)
+    end
   end
   self._sceneTask:add(self._sceneMorph)
   self._sceneTask:unlock()
 
   app.AudioThread.addTask(self._sceneTask, 0)
-  -- Start the scene-cv branch so any CV-source units the user
-  -- has inserted there get scheduled by AudioThread. start() is
+  -- Start every role's scene-cv branch so any CV-source units the
+  -- user has inserted gets scheduled by AudioThread. start() is
   -- refcounted (stopCount) -- safe to call across engages.
-  if self._sceneCVBranch then
-    self._sceneCVBranch:start()
+  for _, entry in pairs(self._sceneCVBranches) do
+    entry.branch:start()
   end
   self._sceneEngaged = true
 end
@@ -705,10 +750,12 @@ end
 function Root:disengageSceneMorph()
   if not self._sceneEngaged then return end
 
-  -- Stop the scene-cv branch first so its units stop processing
-  -- before we tear down the GainBias they feed into.
-  if self._sceneCVBranch then
-    self._sceneCVBranch:stop()
+  -- Stop every role's scene-cv branch first so its units stop
+  -- processing before we tear down the GainBias they feed into.
+  if self._sceneCVBranches then
+    for _, entry in pairs(self._sceneCVBranches) do
+      entry.branch:stop()
+    end
   end
 
   app.AudioThread.removeTask(self._sceneTask)
