@@ -10,6 +10,8 @@ namespace od
     {
         addParameter(mWeight);
         addInput(mCV);
+        addInput(mIndexA);
+        addInput(mIndexB);
     }
 
     ParamSetMorph::~ParamSetMorph()
@@ -110,6 +112,52 @@ namespace od
                     float sceneB = isDB
                         ? toDecibels(item.endParam->target())
                         : item.endParam->target();
+                    float wA = (w2 + 1.0f) * 0.5f;
+                    float wB = 1.0f - wA;
+                    float x = wA * sceneA + wB * sceneB;
+                    item.param->hardSet(isDB ? fromDecibels(x) : x);
+                    continue;
+                }
+
+                if (item.kind == Item::kVeeIndexed)
+                {
+                    // v1.1 live A/B selection. Same wA/wB blend as
+                    // kVee4 but A and B endpoints are resolved per
+                    // frame from the IndexA/IndexB Inlets.
+                    //
+                    // Index 0 = unassigned (baseParam). Indices
+                    // 1..N pick scenes[idx-1] which was wired by
+                    // Chain.Root._buildSceneMorphItems to the
+                    // scene's stored Parameter (or to baseParam if
+                    // that scene has no delta on this control).
+                    //
+                    // Unconnected IndexA / IndexB Inlets return
+                    // ZeroOutput -> sample 0 -> baseParam, matching
+                    // the v1.0 "unassigned A or B leaves audio at
+                    // base on that side" semantic.
+                    int N = (int)item.scenes.size();
+                    float aSample = mIndexA.buffer()[FRAMELENGTH - 1];
+                    float bSample = mIndexB.buffer()[FRAMELENGTH - 1];
+                    int idxA = (int)floorf(aSample + 0.5f);
+                    int idxB = (int)floorf(bSample + 0.5f);
+                    if (idxA < 0) idxA = 0;
+                    else if (idxA > N) idxA = N;
+                    if (idxB < 0) idxB = 0;
+                    else if (idxB > N) idxB = N;
+
+                    Parameter *paramA = (idxA == 0)
+                        ? item.baseParam
+                        : item.scenes[idxA - 1];
+                    Parameter *paramB = (idxB == 0)
+                        ? item.baseParam
+                        : item.scenes[idxB - 1];
+
+                    float sceneA = isDB
+                        ? toDecibels(paramA->target())
+                        : paramA->target();
+                    float sceneB = isDB
+                        ? toDecibels(paramB->target())
+                        : paramB->target();
                     float wA = (w2 + 1.0f) * 0.5f;
                     float wB = 1.0f - wA;
                     float x = wA * sceneA + wB * sceneB;
@@ -227,6 +275,23 @@ namespace od
         if (endParam != nullptr) endParam->attach();
     }
 
+    // v1.1 indexed-VEE ctor: per-scene Parameter vector + base.
+    // apply picks scene endpoints per-frame from IndexA/IndexB
+    // Inlets. attach()/release() lifecycle on every stored
+    // Parameter pointer matches the other kinds.
+    ParamSetMorph::Item::Item(Parameter *_target, Parameter *_baseParam,
+                              std::vector<Parameter *> _scenes)
+        : param(_target), baseParam(_baseParam), scenes(std::move(_scenes))
+    {
+        kind = kVeeIndexed;
+        if (param != nullptr) param->attach();
+        if (baseParam != nullptr) baseParam->attach();
+        for (Parameter *p : scenes)
+        {
+            if (p != nullptr) p->attach();
+        }
+    }
+
     ParamSetMorph::Item::Item(ParamSetMorph::Item &&other)
         : kind(other.kind),
           param(other.param),
@@ -234,12 +299,14 @@ namespace od
           endParam(other.endParam),
           baseParam(other.baseParam),
           startValue(other.startValue),
-          endValue(other.endValue)
+          endValue(other.endValue),
+          scenes(std::move(other.scenes))
     {
         other.param = nullptr;
         other.startParam = nullptr;
         other.endParam = nullptr;
         other.baseParam = nullptr;
+        // moved-from vector is empty; no double-release in ~other
     }
 
     ParamSetMorph::Item::~Item()
@@ -248,6 +315,10 @@ namespace od
         if (startParam != nullptr) startParam->release();
         if (endParam != nullptr) endParam->release();
         if (baseParam != nullptr) baseParam->release();
+        for (Parameter *p : scenes)
+        {
+            if (p != nullptr) p->release();
+        }
     }
 
     bool ParamSetMorph::Item::operator==(const Parameter *x)
@@ -264,6 +335,10 @@ namespace od
             if (startParam != nullptr) startParam->release();
             if (endParam != nullptr) endParam->release();
             if (baseParam != nullptr) baseParam->release();
+            for (Parameter *p : scenes)
+            {
+                if (p != nullptr) p->release();
+            }
 
             kind = other.kind;
             param = other.param;
@@ -272,6 +347,7 @@ namespace od
             baseParam = other.baseParam;
             startValue = other.startValue;
             endValue = other.endValue;
+            scenes = std::move(other.scenes);
 
             other.param = nullptr;
             other.startParam = nullptr;
@@ -316,6 +392,19 @@ namespace od
         }
     }
 
+    void ParamSetMorph::addVeeIndexed(Parameter *target, Parameter *baseParam,
+                                       std::vector<Parameter *> scenes)
+    {
+        auto i = std::find(mItems.begin(), mItems.end(), target);
+        if (i == mItems.end())
+        {
+            mItems.emplace_back(target, baseParam, std::move(scenes));
+            mUpdateNeeded = true;
+            mHasLiveItems = true;
+            mVeeMode = true;
+        }
+    }
+
     void ParamSetMorph::remove(Parameter *param)
     {
         auto i = std::find(mItems.begin(), mItems.end(), param);
@@ -336,7 +425,9 @@ namespace od
             mHasLiveItems = false;
             for (Item &item : mItems)
             {
-                if (item.kind == Item::kLive3 || item.kind == Item::kVee4)
+                if (item.kind == Item::kLive3 ||
+                    item.kind == Item::kVee4 ||
+                    item.kind == Item::kVeeIndexed)
                 {
                     mHasLiveItems = true;
                 }

@@ -25,6 +25,15 @@ namespace od
         // historically didn't need it) gets a no-op since it never
         // connects this inlet.
         Inlet mCV{"CV"};
+        // v1.1 live A/B scene-index inputs for kVeeIndexed items.
+        // Each connects to a SceneIndexArbiter's mOutput; apply()
+        // reads buffer[FRAMELENGTH-1], rounds, and clips to the
+        // item's scenes vector size. Unconnected -> ZeroOutput ->
+        // index 0 -> baseParam (= "unassigned" semantic, matching
+        // v1.0's behavior for an unassigned crossfader endpoint).
+        // Non-kVeeIndexed items ignore these inlets entirely.
+        Inlet mIndexA{"IndexA"};
+        Inlet mIndexB{"IndexB"};
 #endif
 
         void add(Parameter *param, float endValue);
@@ -49,6 +58,21 @@ namespace od
         // stability but no longer consulted in apply().
         void addVee(Parameter *target, Parameter *baseParam,
                     Parameter *sceneA, Parameter *sceneB);
+        // v1.1 live-indexed VEE: scenes vector holds N Parameters
+        // (one per scene in the bank, in index order 1..N). apply()
+        // reads mIndexA / mIndexB Inlets each frame, rounds, clips
+        // to [0, N], selects baseParam for idx==0 (unassigned) or
+        // scenes[idx-1] otherwise, and runs the same wA/wB blend
+        // as addVee. Lets A/B scene assignment be driven live by
+        // CV through SceneIndexArbiter without per-transition
+        // morpher rebuilds.
+        //
+        // _scenes is moved-from (cheap pointer-vector move). Each
+        // scene Parameter is attach()'d in the Item ctor and
+        // released in ~Item, same lifecycle as the other endpoint
+        // fields.
+        void addVeeIndexed(Parameter *target, Parameter *baseParam,
+                            std::vector<Parameter *> scenes);
         void remove(Parameter *param);
         void clear();
         int size();
@@ -80,6 +104,11 @@ namespace od
             // Active scene picked per-frame from weight sign.
             Item(Parameter *target, Parameter *baseParam,
                  Parameter *sceneA, Parameter *sceneB);
+            // v1.1 indexed-VEE ctor: base + per-scene Parameter
+            // vector. Active scene pair picked per-frame from
+            // IndexA/IndexB Inlets in apply().
+            Item(Parameter *target, Parameter *baseParam,
+                 std::vector<Parameter *> _scenes);
             Item(Item &&other); // move ctor
             virtual ~Item();
             bool operator==(const Parameter *param);
@@ -88,15 +117,20 @@ namespace od
             // Kind tag for the apply() branch. Cheap enum so we
             // don't have to keep null-checking three pointer
             // combinations.
-            enum Kind { kCached2, kLive3, kVee4 };
+            enum Kind { kCached2, kLive3, kVee4, kVeeIndexed };
             Kind kind = kCached2;
 
             Parameter *param;        // target -- the param softSet by apply
             Parameter *startParam = 0; // live-start (3-arg) or nullptr (2-arg)
             Parameter *endParam = 0;   // live-end (3-arg) or nullptr (2-arg)
-            Parameter *baseParam = 0;  // base (4-arg VEE) or nullptr
+            Parameter *baseParam = 0;  // base (4-arg VEE / indexed) or nullptr
             float startValue;          // used when startParam == 0
             float endValue;            // used when endParam == 0
+            // kVeeIndexed only: per-scene Parameters in index
+            // order. Length = current bank size N; index 0 in the
+            // Inlet value maps to baseParam (unassigned), indices
+            // 1..N map to scenes[idx-1]. Empty for other kinds.
+            std::vector<Parameter *> scenes;
         };
         std::vector<Item> mItems;
         float mPreviousWeight = 0.0f;
