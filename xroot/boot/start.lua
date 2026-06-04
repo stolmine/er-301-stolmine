@@ -48,6 +48,8 @@ local function start()
   dofile(app.roots.x .. "/boot/app-setup.lua")
   -- Step-1 sequencer bench harness (TODO: remove once Step 1 ships)
   dofile(app.roots.x .. "/sandbox/sequencer_bench.lua")
+  -- v1.1 scene arbiter isolation bench (TODO: remove once 5.3 ships)
+  dofile(app.roots.x .. "/sandbox/scene_arbiter_bench.lua")
   -- local Debug = require "Debug"
   -- Debug.traceRequires()
   app.logInfo("Entering Application")

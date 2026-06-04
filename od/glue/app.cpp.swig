@@ -113,6 +113,7 @@
 
 #include <od/objects/adapters/ParameterAdapter.h>
 #include <od/objects/control/ParamSetMorph.h>
+#include <od/objects/control/SceneIndexArbiter.h>
 
 #include <od/objects/TestOscillator.h>
 
@@ -339,6 +340,7 @@ bool Uart_isEnabled();
 
 %include <od/objects/adapters/ParameterAdapter.h>
 %include <od/objects/control/ParamSetMorph.h>
+%include <od/objects/control/SceneIndexArbiter.h>
 
 %include <od/objects/TestOscillator.h>
 
