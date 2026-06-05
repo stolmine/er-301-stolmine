@@ -268,30 +268,37 @@ function Performance:duplicateScene(sceneIdx)
 end
 
 function Performance:toggleEndpoint(sceneIdx, role)
-  local a = self.sceneView:getCrossfaderA()
-  local b = self.sceneView:getCrossfaderB()
+  local oldA = self.sceneView:getCrossfaderA()
+  local oldB = self.sceneView:getCrossfaderB()
   if role == "A" then
-    if a == sceneIdx then
+    if oldA == sceneIdx then
       self.sceneView:setCrossfaderA(0)
     else
-      if b == sceneIdx then self.sceneView:setCrossfaderB(0) end
+      if oldB == sceneIdx then self.sceneView:setCrossfaderB(0) end
       self.sceneView:setCrossfaderA(sceneIdx)
     end
   else
-    if b == sceneIdx then
+    if oldB == sceneIdx then
       self.sceneView:setCrossfaderB(0)
     else
-      if a == sceneIdx then self.sceneView:setCrossfaderA(0) end
+      if oldA == sceneIdx then self.sceneView:setCrossfaderA(0) end
       self.sceneView:setCrossfaderB(sceneIdx)
     end
   end
   self:_rebuildSceneMorph()
   self:_refreshSlotRoles()
   -- 5.4 mirror chip-tap writes into the arbiter Bias so M2/M3
-  -- faders track. Dropped in 5.5 when the chip tap will write
-  -- the arbiter directly and the SceneView crossfader becomes
-  -- a computed read.
-  self:_syncArbitersFromCrossfaders()
+  -- faders track. Only sync the role(s) whose crossfader value
+  -- actually changed in this gesture -- a blanket sync of both
+  -- arbiters would force any role currently in Tracking-CV back
+  -- into Tracking-Manual, freezing its CV-driven swing. (That
+  -- was the .51 bench bug where tapping a B chip while A's CV
+  -- was driving made A's range bar peg.) Dropped in 5.5 when
+  -- chip taps will write the arbiter directly.
+  local newA = self.sceneView:getCrossfaderA()
+  local newB = self.sceneView:getCrossfaderB()
+  if newA ~= oldA then self:_syncArbiterFromCrossfader("A") end
+  if newB ~= oldB then self:_syncArbiterFromCrossfader("B") end
   return true
 end
 
@@ -395,27 +402,23 @@ function Performance:onDisplayFrame()
   end
 end
 
--- Push the v1.0 SceneView crossfader integer into the arbiter
--- Bias for each role, so M2/M3 faders track the chip-tap path
--- during 5.4. With kIndex semantics the arbiter Bias is
--- normalized [0, 1], so divide the integer crossfader idx by N
--- to get the matching fractional position. Also refreshes the
--- selector scene-name labels.
-function Performance:_syncArbitersFromCrossfaders()
-  if not self.selectorControls then return end
+-- Push the v1.0 SceneView crossfader integer for ONE role into
+-- the matching arbiter Bias, so M2/M3 faders track the chip-tap
+-- path during 5.4. Per-role rather than blanket because
+-- hardSetBias forces Tracking-Manual + relatches the Schmitt
+-- baseline -- syncing the other role would clobber its
+-- Tracking-CV state if CV is driving it. Caller (toggleEndpoint)
+-- only invokes this for roles whose crossfader value actually
+-- changed in the current gesture.
+function Performance:_syncArbiterFromCrossfader(role)
   if not (self.chain and self.chain.getSceneArbiter) then return end
+  local arb = self.chain:getSceneArbiter(role)
+  if not arb then return end
   local n = self.sceneView:getSceneCount()
-  local values = {
-    A = self.sceneView:getCrossfaderA(),
-    B = self.sceneView:getCrossfaderB(),
-  }
-  for role, idx in pairs(values) do
-    local arb = self.chain:getSceneArbiter(role)
-    if arb then
-      local bias = (n > 0) and (idx / n) or 0.0
-      arb:hardSetBias(bias)
-    end
-  end
+  local idx = (role == "A") and self.sceneView:getCrossfaderA()
+                              or self.sceneView:getCrossfaderB()
+  local bias = (n > 0) and (idx / n) or 0.0
+  arb:hardSetBias(bias)
   self:_refreshSelectorLabels()
 end
 
