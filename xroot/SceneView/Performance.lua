@@ -390,7 +390,19 @@ end
 -- live each audio frame); this UI path catches up at UI rate so
 -- the chip + fill animation tracks the audible selection without
 -- stalling audio if UI starves.
+--
+-- Bank-size drift detection: ChannelGroup caches the
+-- sceneHoldContext (which wraps this Performance view) once, so
+-- nilling SceneView.performanceView on reset doesn't free the
+-- view -- the cached context still holds it. Detect drift here
+-- (slotControls count vs live SceneView count) and rebuild the
+-- bank in place. Self-corrects within one UI frame regardless of
+-- who mutated the scene list (reset, link/unlink wipe, external
+-- deserialize, etc.).
 function Performance:onDisplayFrame()
+  if self.sceneView and self:_countSlots() ~= self.sceneView:getSceneCount() then
+    self:_rebuildBank()
+  end
   if not (self.chain and self.chain.getSceneArbiter) then return end
   local arbA = self.chain:getSceneArbiter("A")
   local arbB = self.chain:getSceneArbiter("B")
@@ -400,6 +412,47 @@ function Performance:onDisplayFrame()
   if refresh then
     self:_refreshSlotRoles()
   end
+end
+
+function Performance:_countSlots()
+  local n = 0
+  for _ in pairs(self.slotControls) do n = n + 1 end
+  return n
+end
+
+-- Drop every existing slotControl + PlusControl from the section,
+-- then re-add fresh ones from the current SceneView. Mirrors the
+-- bank-init block of Performance:init. Selection falls back to
+-- M1 since the spot that was focused may no longer exist.
+function Performance:_rebuildBank()
+  self:disableSelection()
+  local view = self.section:getView("default")
+  for _, slot in pairs(self.slotControls) do
+    view:removeControl(slot)
+    self.section:unregisterControl(slot)
+  end
+  self.slotControls = {}
+  if self._plusInSection and self.plusControl then
+    view:removeControl(self.plusControl)
+    self.section:unregisterControl(self.plusControl)
+    self._plusInSection = false
+  end
+
+  for i = 1, self.sceneView:getSceneCount() do
+    local scene = self.sceneView:getScene(i)
+    local slot  = SceneSlotControl(i, scene, self._weightParam)
+    self.section:addControl("default", slot)
+    self.slotControls[i] = slot
+  end
+  if self.sceneView:getSceneCount() < self.sceneView:getMaxScenes() then
+    self.section:addControl("default", self.plusControl)
+    self._plusInSection = true
+  end
+  self.section:rebuildView("default")
+  self:_refreshSlotRoles()
+  self:setSelection(self.section, "default",
+                    self.m1Control:getSpotValue(1, "handle"))
+  self:enableSelection()
 end
 
 -- Push the v1.0 SceneView crossfader integer for ONE role into

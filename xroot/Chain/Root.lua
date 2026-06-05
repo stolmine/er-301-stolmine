@@ -956,6 +956,38 @@ function Root:engageSceneMorph()
     entry.branch:start()
   end
   self._sceneEngaged = true
+
+  -- Kickstart pass. Without this, a quicksave reload required
+  -- the user to nudge a control before scene-mode audio
+  -- behavior took effect. Re-hardSetBias each arbiter with its
+  -- current Bias target value (no value change, just side
+  -- effects: relatch mGainAtEntry/mCVInputAtEntry baseline,
+  -- recompute mLastFiredIndex, fire transition flag so the
+  -- next onDisplayFrame poll runs _refreshSlotRoles). Also
+  -- nudge the morpher's Weight to force an apply() pass on the
+  -- next audio frame (mHasLiveItems is true for kVeeIndexed so
+  -- it'd apply anyway, but the hardSet sets mUpdateNeeded which
+  -- the apply short-circuit also reads).
+  self:_kickstartSceneMode()
+end
+
+-- Force the state machine and morpher to re-emit their first-
+-- frame output as though the user had just touched a control.
+-- Called at the end of engageSceneMorph so post-quicksave entry
+-- doesn't require a manual nudge.
+function Root:_kickstartSceneMode()
+  if self._sceneCVBranches then
+    for _, entry in pairs(self._sceneCVBranches) do
+      if entry.arbiter then
+        local b = entry.arbiter:getParameter("Bias"):target()
+        entry.arbiter:hardSetBias(b)
+      end
+    end
+  end
+  if self._sceneMorph then
+    local w = self._sceneMorph:getParameter("Weight"):target()
+    self._sceneMorph:hardSet(w)
+  end
 end
 
 -- Disengage. Tear down the audio-rate scheduling and drop the
