@@ -111,6 +111,10 @@ menuItems[#menuItems + 1] = {
   "sceneMode"
 }
 menuItems[#menuItems + 1] = {
+  "addAction",
+  "Reset scene mode"
+}
+menuItems[#menuItems + 1] = {
   "addCategory",
   "QuickSaves"
 }
@@ -417,7 +421,12 @@ function Interface:enterReleased()
     local mainList = self.mainList
     local name = mainList:getSelectedData()
     if name and name:sub(1, 7) == "action:" then
-      app.UIThread.activateScreenSaver()
+      local action = name:sub(8)
+      if action == "Preview Screen Saver" then
+        app.UIThread.activateScreenSaver()
+      elseif action == "Reset scene mode" then
+        self:_resetSceneMode()
+      end
       return true
     end
     local var = Settings.variable(name)
@@ -476,6 +485,32 @@ function Interface:subReleased(i, shifted)
     self:commit()
   end
   return true
+end
+
+-- Settings menu action: nuke scene mode state on every channel.
+-- Disengages cleanly, drops all scenes, clears CV subchains, and
+-- resets arbiter Bias/Gain to defaults. Confirmation-gated since
+-- it destroys scene data. Linked channel pairs share the same
+-- Chain.Root, so dedupe before calling to avoid double-clearing.
+function Interface:_resetSceneMode()
+  local Channels = require "Channels"
+  local Verification = require "Verification"
+  local dlg = Verification.Main("Reset scene mode on all channels?",
+                                  "Drops all scenes + CV.")
+  dlg:subscribe("done", function(ans)
+    if not ans then return end
+    local seen = {}
+    for i = 1, 4 do
+      local chain = Channels.getChain(i)
+      if chain and not seen[chain] then
+        seen[chain] = true
+        if chain.resetSceneMode then
+          chain:resetSceneMode()
+        end
+      end
+    end
+  end)
+  dlg:show()
 end
 
 function Interface:onHide()

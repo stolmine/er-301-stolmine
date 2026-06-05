@@ -269,6 +269,58 @@ function Root:_migrateLegacyCrossfaders()
   end
 end
 
+-- Reset all scene-mode state on this chain to "user has never
+-- touched scene mode for this chain" equivalent. Used by the
+-- admin menu's "Reset scene mode" action and by the Channels
+-- link/unlink path (which strips scene state from the cross-
+-- chain snapshot, so the destination chain inherits no scene
+-- data from the source). Idempotent.
+--
+-- Order matters: disengage first so the modulated-display swap
+-- is undone and audio Parameters get restored to their base
+-- values BEFORE we drop the scene Parameters those values came
+-- from. Otherwise the audio could glitch to whatever sample-
+-- accurate junk the morpher last computed.
+function Root:resetSceneMode()
+  -- Bail early if scene mode infrastructure was never built;
+  -- nothing to reset.
+  if not (self._sceneMorph or self.sceneView) then return end
+
+  if self._sceneEngaged then
+    self:disengageSceneMorph()
+  end
+
+  if self.sceneView then
+    self.sceneView:removeAllScenes()
+  end
+
+  if self._sceneCVBranches then
+    for _, entry in pairs(self._sceneCVBranches) do
+      -- Clear any user-inserted modulation source units from
+      -- the role's CV subchain.
+      if entry.branch and entry.branch.clear then
+        entry.branch:clear()
+      end
+      -- Reset value-source Parameters to defaults: Bias = 0
+      -- (cold-start manual home), Gain = 0 (cold-start CV
+      -- inert until user re-enables).
+      if entry.valueSource then
+        local bias = entry.valueSource:getParameter("Bias")
+        local gain = entry.valueSource:getParameter("Gain")
+        if bias then bias:hardSet(0) end
+        if gain then gain:hardSet(0) end
+      end
+      -- Relatch arbiter state machines so mGainAtEntry /
+      -- mCVInputAtEntry track the reset Bias/Gain. Same logic
+      -- as the deserialize-side _relatchSceneArbiters; matches
+      -- the cold-start contract for fresh chains.
+      if entry.arbiter then
+        entry.arbiter:hardSetBias(0)
+      end
+    end
+  end
+end
+
 function Root:pin(control, pinSetName)
   self.pinView:pin(control, pinSetName)
 end

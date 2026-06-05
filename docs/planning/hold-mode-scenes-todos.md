@@ -43,77 +43,28 @@ Headline shape:
 
 ---
 
-### Preserve scenes across stereo link / unlink
+### Link / unlink: reset scene mode state (CLOSED in .53)
 
-Today: stereo-link or unlink on a channel pair destroys the existing
-Chain.Root objects and constructs new ones (per the broader
-[Chain-Reference Invalidation on Stereo Link/Unlink](../../TODO.md)
-TODO). Each chain's SceneView dies with it. If the user has scenes
-authored and then accidentally toggles a link, their entire scene
-bank is gone. Has to be reconstructed from scratch.
+Originally framed as "preserve scenes across stereo link / unlink"
+with snapshot-and-replay through the destroy/recreate cycle.
+Resolved 2026-06-04 with the opposite stance per user feedback:
+link / unlink intentionally wipes scene-mode state on the affected
+chain(s) because unit instance keys aren't stable across the
+topology change and partial-preservation UX is more confusing
+than a clean reset.
 
-Goal: scenes survive the destroy/recreate cycle when topology
-allows, with a clear story for the topology cases that can't map
-cleanly.
-
-The simple version that works most of the time:
-
-1. Before the destroy, snapshot `SceneView:serialize()` from the
-   doomed chain plus `_sceneCVBranch:serialize()` and the M1
-   `bias` / `gain` Param values — the same shape `Chain.Root:serialize`
-   already produces in `.29+`. Hold the snapshot on the
-   `ChannelGroup` (which survives the chain swap, per
-   `Channels/Group.lua`).
-2. After the new chain is constructed and its units have settled
-   into their new instance keys, replay the snapshot via
-   `SceneView:deserialize` + scene-CV branch deserialize + bias /
-   gain hardSet.
-3. For unit instance keys that didn't survive (e.g. link merged
-   two formerly-separate units, or unlink split a unit into one
-   pair where only one side has the key), the corresponding delta
-   entries either drop silently or — better — get logged so the
-   user knows what was lost.
-
-Hard cases worth thinking about:
-
-- **Link of two chains each with their own scenes.** Whose scenes
-  win? Probably the left chain's, with right's silently dropped
-  (the right chain ceases to exist as a discrete entity). Could
-  alternatively merge: keep left's scenes 1..N, append right's
-  scenes 1..M as scenes N+1..N+M, but unit-key collision risk.
-- **Unlink of a linked pair with shared scenes.** The single
-  SceneView splits into two. Each new chain gets a copy. Deltas
-  whose unitKey lives in one half of the split-apart units stay
-  with that chain; deltas whose key lives in the other half get
-  dropped from this chain (and added to the other chain's copy).
-- **A/B assignment under split**: if scene 1 was A on the linked
-  chain and lives on the left after split, scene 1 stays A on
-  the left and is dropped from the right (or kept but unassigned).
-
-Implementation hooks:
-
-- `Channels.link` / `Channels.unlink` (the dispatch in
-  `xroot/Channels/init.lua` lines ~34-87) are the natural snapshot
-  + replay points.
-- `ChannelGroup` already carries `Context` objects across mode
-  toggles; adding a transient `lastSceneSnapshot` field on the
-  group is the cheapest place to stash it.
-- `Signal.weakRegister("channelsModified", ...)` is the pattern
-  the broader Chain-Reference Invalidation TODO recommends — for
-  scenes specifically, that's likely the wrong layer because
-  we want to snapshot BEFORE destroy and replay AFTER construct,
-  not just notify-and-reseed.
-- Reuse the .29+ serialize/deserialize shape verbatim. Don't
-  reinvent the schema.
-
-Touch points: `Channels/init.lua`, `Channels/Group.lua`,
-`Chain/Root.lua` (snapshot helpers), `SceneView/init.lua`. Plus
-the [Chain-Reference Invalidation](../../TODO.md) item is
-adjacent work — they could land together.
-
-This is a longer-term project. The simple snapshot-and-replay
-case (no topology surprises) is maybe a day. Handling the
-merge / split cases cleanly is a separate planning pass.
+Implementation:
+- `Channels/init.lua` `unlinkAndKeep` / `linkAndKeep` strip
+  `sceneView` + `sceneCVBranches` (+ legacy keys) from the
+  serialized snapshot before re-deserializing into the new chain.
+- Plain `link()` / `unlink()` (no keep) already produced a fresh
+  chain so they need no extra work.
+- `Chain.Root:resetSceneMode()` is the cleanup primitive: drops
+  all scenes, clears each CV subchain, resets arbiter Bias/Gain
+  to defaults, disengages cleanly.
+- Settings menu admin action "Reset scene mode" (under the
+  Scenes category) calls the primitive on every channel pair
+  for explicit user-driven cleanup.
 
 ---
 
