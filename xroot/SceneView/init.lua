@@ -168,6 +168,13 @@ function SceneView:removeAllScenes()
   self.scenes      = {}
   self.crossfaderA = kEndpointBase
   self.crossfaderB = kEndpointBase
+  -- Drop any cached Performance view so the next
+  -- enterPerformanceView lazy-rebuilds slotControls from the
+  -- now-empty scene list. Without this, the cached view's
+  -- per-slot widgets still hold dangling refs to released
+  -- Scene objects and render as empty plies with stale name /
+  -- indicator. Weak ref in onDisplayFrame Signal lets GC reclaim.
+  self.performanceView = nil
 end
 
 -- Constants exposed for callers that need to compare against

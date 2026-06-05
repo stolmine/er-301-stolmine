@@ -317,6 +317,20 @@ function Root:resetSceneMode()
       if entry.arbiter then
         entry.arbiter:hardSetBias(0)
       end
+      -- Reset MinMax range tracker visual state. The disengage
+      -- above stops the arbiter's process, so MinMax never gets
+      -- a fresh frame to recompute min/max -- the fader's swing
+      -- bar would otherwise stay at whatever range modulation
+      -- last drove it to. Hard-set all three Parameters to 0
+      -- so the visual snaps to centered/closed immediately.
+      if entry.range then
+        local mn = entry.range:getParameter("Min")
+        local mx = entry.range:getParameter("Max")
+        local ct = entry.range:getParameter("Center")
+        if mn then mn:hardSet(0) end
+        if mx then mx:hardSet(0) end
+        if ct then ct:hardSet(0) end
+      end
     end
   end
 end
