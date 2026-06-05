@@ -170,22 +170,22 @@ end
 -- refreshes (scene add / rename / delete).
 
 function SceneSelectorControl:_updateLabel()
-  if not (self.cvFader and self._biasParam) then return end
-  if self.sceneView == nil then
+  if not (self.cvFader and self.arbiter) then return end
+  -- Read the arbiter's live integer index directly: this is the
+  -- audibly-effective scene (Tracking-Manual: round(Bias * N);
+  -- Tracking-CV: round(Gain * cvIn * N)). Reading Bias would
+  -- only reflect manual writes, leaving CV-driven sweeps stuck
+  -- on the last manual selection visually.
+  local idx = self.arbiter:getCurrentIndex()
+  -- idx == 0 is the bottom-of-range "null / no scene" state --
+  -- the morpher's IndexA/IndexB 0 maps to baseParam (unassigned),
+  -- so the slot is audibly inactive. Show the role label rather
+  -- than reaching into scenes[1].
+  if idx < 1 then
     self.cvFader:setLabel(self.role)
     return
   end
-  -- kIndex: Bias is [0, 1]. Output position is the same math the
-  -- arbiter does -- round(bias * N) with bank-clip on either end.
-  local n = self.sceneView:getSceneCount()
-  if n <= 0 then
-    self.cvFader:setLabel(self.role)
-    return
-  end
-  local idx = math.floor(self._biasParam:value() * n + 0.5)
-  if idx < 1 then idx = 1
-  elseif idx > n then idx = n end
-  local scene = self.sceneView:getScene(idx)
+  local scene = self.sceneView and self.sceneView:getScene(idx)
   if scene then
     self.cvFader:setLabel(scene:getName() or self.role)
   else
