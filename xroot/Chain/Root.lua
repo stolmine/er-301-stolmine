@@ -174,6 +174,7 @@ function Root:deserialize(t)
   -- role) and migrate transparently. v1.1 phase 5.3 will add
   -- "A" and "B" roles; for now only "morph" is built so unknown
   -- roles in a preset (none should exist yet) are ignored.
+  local hadLegacySceneCV = false
   if t.sceneCVBranches then
     self:_getOrBuildSceneMorph()
     for role, entry in pairs(t.sceneCVBranches) do
@@ -194,6 +195,7 @@ function Root:deserialize(t)
     end
   elseif t.sceneCVBranch or t.sceneCVParams then
     -- Legacy v1.0 single-role format.
+    hadLegacySceneCV = true
     self:_getOrBuildSceneMorph()
     local morph = self._sceneCVBranches.morph
     if t.sceneCVBranch then
@@ -206,6 +208,63 @@ function Root:deserialize(t)
       if t.sceneCVParams.gain then
         morph.valueSource:getParameter("Gain"):hardSet(t.sceneCVParams.gain)
       end
+    end
+  end
+
+  -- Post-restore arbiter wakeup. Parameter:hardSet above bypasses
+  -- arbiter:hardSetBias, so each A/B arbiter's state-machine
+  -- baseline (mGainAtEntry / mCVInputAtEntry) is still at the
+  -- cold-start default of 0 -- the Schmitt comparison evaluates
+  -- to 0 and CV input is inert until the user manually nudges a
+  -- control. Relatch the baseline from the just-restored
+  -- Gain/Bias so CV is responsive on the first audio frame
+  -- after reboot. v1.0 saves additionally need crossfaderA/B ints
+  -- migrated into the arbiters because the legacy format didn't
+  -- carry per-role Bias values.
+  if self._sceneCVBranches then
+    if hadLegacySceneCV then
+      self:_migrateLegacyCrossfaders()
+    end
+    self:_relatchSceneArbiters()
+  end
+end
+
+-- Post-deserialize: call arbiter:hardSetBias on each A/B arbiter
+-- so the state machine latches mGainAtEntry / mCVInputAtEntry
+-- from current Gain.target and the cached last CV sample. Bias
+-- value itself is preserved (we pass its current target back in).
+-- Without this, Schmitt math degenerates to 0 * delta = 0 and
+-- CV-driven scene selection can never trip until the user
+-- manually nudges Bias / Gain via encoder or chip tap.
+function Root:_relatchSceneArbiters()
+  if not self._sceneCVBranches then return end
+  for _, entry in pairs(self._sceneCVBranches) do
+    if entry.arbiter then
+      local biasTarget = entry.arbiter:getParameter("Bias"):target()
+      entry.arbiter:hardSetBias(biasTarget)
+    end
+  end
+end
+
+-- Migration helper for legacy v1.0 saves that carry A/B
+-- assignment only in SceneView.crossfaderA/B integers (no
+-- arbiter Bias in the persisted state). Populate each arbiter's
+-- Bias from idx / N so the audible assignment survives the
+-- upgrade. Only runs on the legacy-path elseif branch in
+-- deserialize; modern saves have arbiter Bias restored directly
+-- and don't need this.
+function Root:_migrateLegacyCrossfaders()
+  if not (self.sceneView and self._sceneCVBranches) then return end
+  local n = self.sceneView:getSceneCount()
+  if n <= 0 then return end
+  local roleToIdx = {
+    A = self.sceneView:getCrossfaderA(),
+    B = self.sceneView:getCrossfaderB(),
+  }
+  for role, idx in pairs(roleToIdx) do
+    local entry = self._sceneCVBranches[role]
+    if entry and entry.arbiter and idx and idx > 0 then
+      entry.arbiter:hardSetBias(idx / n)
     end
   end
 end
