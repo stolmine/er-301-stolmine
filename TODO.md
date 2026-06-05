@@ -194,6 +194,49 @@ Consolidated tracker lives at
 Open work and the shipped log both live there; do not duplicate
 entries in this file.
 
+## Settings Menu: Picker + Scene Mode Categorization
+`xroot/Settings/Interface.lua` currently lumps every unit-picker
+setting under the catch-all "Units" category alongside unrelated
+entries (`unitDisableOnBypass`, `unitControlReadoutSource`,
+`unitBrowserDefault`, `containerUnitNameGen`). The result: picker
+prefs that only apply to one of the two layouts (dense vs Mondrian)
+are indistinguishable from prefs that apply to both, and the
+single `sceneMode` toggle has no home of its own.
+
+Tasks:
+
+- **New "Unit Picker" category** between "Units" and "QuickSaves".
+  Move into it: `showFavorites`, `pickerStyle`,
+  `pickerSectionDividers`, `pickerDefaultSort`, `pickerPinFavorites`,
+  `pickerPinRecents`.
+- **Mark layout-specific entries** in the description text so the
+  user knows which apply when. The dense picker has the type
+  glyphs, sort cycle, section dividers, pin behavior. The Mondrian
+  (OG) picker has the favorites toggle and not much else.
+  - `pickerStyle`: both (it IS the layout switch).
+  - `showFavorites`: both.
+  - `pickerDefaultSort`, `pickerSectionDividers`, `pickerPinFavorites`,
+    `pickerPinRecents`: dense-only. Append `(dense)` to the
+    description text.
+- Long-term: gray-out / hide dense-only entries when
+  `pickerStyle == "classic"` (Mondrian), and the reverse if any
+  classic-only setting ever materializes. Skip for v1 if it
+  requires `Settings.Interface` refactoring; the description
+  suffix is enough signal for now.
+- **New "Scenes" category** containing `sceneMode`. Even with one
+  entry, putting it in its own section keeps the menu navigable
+  as scene mode accumulates settings (`confirmSceneDelete` already
+  lives under Confirmations; future v1.1 entries -- skip-include
+  mask, default A/B selector mode, etc. -- will land here).
+
+Touch points: `xroot/Settings/Interface.lua` (menuItems table) and
+the per-variable `description` strings in `xroot/Settings/init.lua`
+for the `(dense)` suffixing. Variable definitions stay put; only
+the menu category placement and descriptions change.
+
+Out of scope: no functional change to any existing setting. This
+is pure menu reorganization plus description suffixes.
+
 ## Screensaver Polish
 - Forest screensaver: full-screen coverage
 - Rain screensaver: splash particles
