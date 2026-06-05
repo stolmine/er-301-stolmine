@@ -586,7 +586,12 @@ function Root:_buildSceneCVArbiterRole(role, consumerInlet)
   }
 
   app.AudioThread.connect(arb:getOutput("Out"), consumerInlet)
-  app.AudioThread.connect(arb:getOutput("Out"), range:getInput("In"))
+  -- Range bar reads the normalized [0, 1] effective position so
+  -- the M2/M3 fader's swing visualization sits in the fader's
+  -- coord system (Bias is normalized too). Wiring the integer
+  -- "Out" here would push values 0..N which clip outside the
+  -- fader's 0..1 map.
+  app.AudioThread.connect(arb:getOutput("OutNorm"), range:getInput("In"))
 
   self._sceneCVBranches[role] = {
     branch = branch,

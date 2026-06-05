@@ -56,25 +56,29 @@ namespace od
     // moves the fader.
     float bias = mpBias ? mpBias->value() : 0.0f;
     float fillFrac = 0.0f;
-    bool hasFill = (mSide != kSideNone) && mpBias != 0;
+    bool hasFill = (mSide != kSideNone) && (mSide == kSideAB || mpBias != 0);
     if (hasFill)
     {
       if (bias < -1.0f) bias = -1.0f;
       else if (bias > 1.0f) bias = 1.0f;
       if (mSide == kSideA) fillFrac = (bias + 1.0f) * 0.5f;
-      else                 fillFrac = (1.0f - bias) * 0.5f;
+      else if (mSide == kSideB) fillFrac = (1.0f - bias) * 0.5f;
+      else /* kSideAB */ fillFrac = 1.0f;
       if (fillFrac <= 0.0f) hasFill = false;
     }
 
     // Wipe boundary in pixel space (the moving edge of the fill).
     // A-side: x <= wipeBoundary is filled.
     // B-side: x >= wipeBoundary is filled.
+    // AB:     entire diameter filled (wipeBoundary irrelevant; the
+    //         A-side wipe with fillFrac=1.0 collapses to x <= cx+r
+    //         which covers the whole circle).
     float wipeBoundary = 0.0f;
     if (hasFill)
     {
       float w = 2.0f * r * fillFrac;
-      if (mSide == kSideA) wipeBoundary = (float)cx - r + w;
-      else                 wipeBoundary = (float)cx + r - w;
+      if (mSide == kSideB) wipeBoundary = (float)cx + r - w;
+      else                 wipeBoundary = (float)cx - r + w;
     }
 
     // Per-pixel coverage. Bounding box extends one pixel past the
@@ -111,8 +115,8 @@ namespace od
           // perimeter -- otherwise the moving wipe edge would
           // show staircase artifacts every other frame).
           float wipeCov;
-          if (mSide == kSideA) wipeCov = saturate(wipeBoundary - (float)x + 0.5f);
-          else                 wipeCov = saturate((float)x - wipeBoundary + 0.5f);
+          if (mSide == kSideB) wipeCov = saturate((float)x - wipeBoundary + 0.5f);
+          else                 wipeCov = saturate(wipeBoundary - (float)x + 0.5f);
 
           fillCov = insideCircle * wipeCov;
         }

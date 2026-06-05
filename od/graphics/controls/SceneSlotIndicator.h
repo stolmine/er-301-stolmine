@@ -25,10 +25,15 @@ namespace od
   {
   public:
     // Side constants exposed as ints (no enum) so Lua can pass them
-    // directly without SWIG enum wrapping.
+    // directly without SWIG enum wrapping. kSideAB = both
+    // crossfader endpoints land on this slot (v1.1 arbiter-driven
+    // A and B happened to round to the same scene); renders as a
+    // full-fill circle since the morpher's wA*x + wB*x collapses
+    // to x regardless of weight.
     static const int kSideNone = 0;
     static const int kSideA    = 1;
     static const int kSideB    = 2;
+    static const int kSideAB   = 3;
 
     SceneSlotIndicator(int left, int bottom, int radius);
     virtual ~SceneSlotIndicator();

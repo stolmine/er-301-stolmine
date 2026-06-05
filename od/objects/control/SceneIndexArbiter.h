@@ -51,9 +51,15 @@ namespace od
     // cold-start Gain=0 this leaves the arbiter inert until the
     // user enables Gain.
     Inlet mInput{"In"};
-    // Output as float (integer scene index); morpher reads
+    // Integer scene index output (0..N as float). Morpher reads
     // last-sample via its IndexA/IndexB Inlets.
     Outlet mOutput{"Out"};
+    // Normalized [0, 1] effective position output, pre-round.
+    // Drives the M2/M3 fader's MinMax range bar so the swing
+    // visualization is in the same coord system as the fader.
+    // Tracking-Manual: equals Bias. Tracking-CV: clamp(Gain *
+    // cvIn, 0, 1).
+    Outlet mOutputNorm{"OutNorm"};
 #endif
 
     // User-facing Parameters. Both saved by the chain.

@@ -96,8 +96,16 @@ function Performance:init(sceneView)
                     self.m1Control:getSpotValue(1, "handle"))
   self:enableSelection()
 
-  -- A/B chip + bias-fill role per slot.
+  -- A/B chip + bias-fill role per slot. Reads live arbiter
+  -- indices via getCurrentIndex, so this same path covers all
+  -- three writer sources (chip-tap, M2/M3 encoder, CV).
   self:_refreshSlotRoles()
+
+  -- onDisplayFrame poll (55 Hz, weak ref): catch CV-driven
+  -- arbiter integer transitions and refresh slot chips. Audio
+  -- stays autonomous; this purely follows the audible state for
+  -- visual feedback.
+  Signal.weakRegister("onDisplayFrame", self)
 
   -- Subscribe to each role's scene-CV branch contentChanged so
   -- the dive owners' mod button + scope outlet update when the
@@ -340,18 +348,51 @@ function Performance:_doDeleteScene(sceneIdx)
   self:_removeSlotControlForScene(sceneIdx)
 end
 
--- Reset every slot control's A/B chip + bias-fill side from the
--- SceneView's current crossfader assignments.
+-- Reset every slot control's A/B chip + bias-fill side. Source of
+-- truth is the live arbiter integer index per role: chip-tap, M2/M3
+-- encoder, and CV-driven transitions all converge on the arbiter
+-- output, so one read path serves all three writer sources. If both
+-- A and B happen to land on the same slot (e.g. both biases round
+-- to the same scene under modulation), the slot gets the combined
+-- "AB" role -- the morpher's wA*x + wB*x collapses to x, so a
+-- full-fill circle reads as "this is fully active."
 function Performance:_refreshSlotRoles()
-  local a = self.sceneView:getCrossfaderA()
-  local b = self.sceneView:getCrossfaderB()
+  local arbA = self.chain and self.chain.getSceneArbiter
+                and self.chain:getSceneArbiter("A")
+  local arbB = self.chain and self.chain.getSceneArbiter
+                and self.chain:getSceneArbiter("B")
+  local a = arbA and arbA:getCurrentIndex() or 0
+  local b = arbB and arbB:getCurrentIndex() or 0
   for i, slot in pairs(self.slotControls) do
     local role
-    if a == i then role = "A"
-    elseif b == i then role = "B" end
+    if a == i and b == i then
+      role = "AB"
+    elseif a == i then
+      role = "A"
+    elseif b == i then
+      role = "B"
+    end
     slot:setScene(self.sceneView:getScene(i), role)
   end
   self:_refreshSelectorLabels()
+end
+
+-- onDisplayFrame poll: scan the A/B arbiter transition flags and
+-- refresh slot graphics when either fires. CV-driven scene
+-- transitions are audible immediately (morpher reads arbiter Out
+-- live each audio frame); this UI path catches up at UI rate so
+-- the chip + fill animation tracks the audible selection without
+-- stalling audio if UI starves.
+function Performance:onDisplayFrame()
+  if not (self.chain and self.chain.getSceneArbiter) then return end
+  local arbA = self.chain:getSceneArbiter("A")
+  local arbB = self.chain:getSceneArbiter("B")
+  local refresh = false
+  if arbA and arbA:consumeTransitionFlag() then refresh = true end
+  if arbB and arbB:consumeTransitionFlag() then refresh = true end
+  if refresh then
+    self:_refreshSlotRoles()
+  end
 end
 
 -- Push the v1.0 SceneView crossfader integer into the arbiter

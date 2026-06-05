@@ -38,6 +38,7 @@ local kSlotS3     = app.SubButton
 local kSideNone = 0
 local kSideA    = 1
 local kSideB    = 2
+local kSideAB   = 3
 
 local SceneSlotControl = Class {}
 SceneSlotControl:include(SpottedControl)
@@ -124,7 +125,10 @@ function SceneSlotControl:setScene(scene, crossfaderRole)
   else
     self.panel:setText("")
   end
-  if crossfaderRole == "A" then
+  if crossfaderRole == "AB" then
+    self.chip:setText("AB")
+    self.indicator:setSide(kSideAB)
+  elseif crossfaderRole == "A" then
     self.chip:setText("A")
     self.indicator:setSide(kSideA)
   elseif crossfaderRole == "B" then

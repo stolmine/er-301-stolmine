@@ -16,6 +16,7 @@ namespace od
   {
     addInput(mInput);
     addOutput(mOutput);
+    addOutput(mOutputNorm);
     addParameter(mGain);
     addParameter(mBias);
   }
@@ -84,12 +85,29 @@ namespace od
       mTransitionPending = true;
     }
 
-    // Fill output buffer with float index for downstream Inlets
-    // (morpher IndexA/IndexB) and for fader animation. Constant
-    // across the frame: scene transitions are step changes, not
-    // per-sample modulation.
+    // Integer-index output for the morpher.
     simd_set(mOutput.buffer(), FRAMELENGTH, (float)idx);
     mOutput.mIsConstant = true;
+
+    // Normalized effective position [0, 1] for the M2/M3 fader's
+    // range-bar visualization (MinMax reads this Out instead of
+    // the integer Out so the swing renders in the fader's coord
+    // system). Manual: bias is the effective position. CV: the
+    // gain * cvIn product, clamped, mirrors what the integer
+    // output computation rounds.
+    float effectiveNorm;
+    if (mState == kTrackingCV)
+    {
+      effectiveNorm = gain * cvIn;
+    }
+    else
+    {
+      effectiveNorm = bias;
+    }
+    if (effectiveNorm < 0.0f) effectiveNorm = 0.0f;
+    else if (effectiveNorm > 1.0f) effectiveNorm = 1.0f;
+    simd_set(mOutputNorm.buffer(), FRAMELENGTH, effectiveNorm);
+    mOutputNorm.mIsConstant = true;
   }
 
   void SceneIndexArbiter::hardSetBias(float value)
