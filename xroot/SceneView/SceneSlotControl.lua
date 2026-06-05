@@ -38,6 +38,7 @@ local kSlotS3     = app.SubButton
 local kSideNone = 0
 local kSideA    = 1
 local kSideB    = 2
+local kSideAB   = 3
 
 local SceneSlotControl = Class {}
 SceneSlotControl:include(SpottedControl)
@@ -71,12 +72,20 @@ function SceneSlotControl:init(sceneIdx, scene, weightParam)
   -- the latter caused the 1 px right-drift the user spotted
   -- in .25.
   local panelCenterX = 20
-  -- A/B chip: kChipInset px left of the panel's right edge.
-  local kChipInset = 7
   local panelRightX = panelCenterX + math.floor(ply / 2)
+  -- A/B chip. Right-justified inside a fixed-width Label so the
+  -- "AB" combined state (both arbiters land on this slot) grows
+  -- leftward from the same right edge that single "A"/"B"
+  -- occupied -- the right margin to the panel edge stays fixed
+  -- as the chip's content widens. kChipWidth fits "AB" at font
+  -- size 9 with a couple px of headroom.
+  local kChipMargin = 4
+  local kChipWidth = 14
+  local kChipRightX = panelRightX - kChipMargin
   self.chip = app.Label("", kFontChip)
-  self.chip:setJustification(app.justifyCenter)
-  self.chip:setCenter(panelRightX - kChipInset, kChipY)
+  self.chip:setJustification(app.justifyRight)
+  self.chip:setSize(kChipWidth, kFontChip + 2)
+  self.chip:setCenter(kChipRightX - kChipWidth / 2, kChipY)
   self.chip:setForegroundColor(app.WHITE)
   graphic:addChild(self.chip)
 
@@ -124,7 +133,10 @@ function SceneSlotControl:setScene(scene, crossfaderRole)
   else
     self.panel:setText("")
   end
-  if crossfaderRole == "A" then
+  if crossfaderRole == "AB" then
+    self.chip:setText("AB")
+    self.indicator:setSide(kSideAB)
+  elseif crossfaderRole == "A" then
     self.chip:setText("A")
     self.indicator:setSide(kSideA)
   elseif crossfaderRole == "B" then

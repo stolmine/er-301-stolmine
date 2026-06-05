@@ -6,6 +6,42 @@
 	SWIG_arg++;
 %}
 
+// v1.1 hold-mode scenes: ParamSetMorph::addVeeIndexed takes a
+// per-scene Parameter list. Lua callers pass a sequence-style
+// table of Parameter userdata; this typemap walks it and builds
+// the std::vector<Parameter*> the C++ side expects.
+%typemap(in) std::vector<od::Parameter *>
+%{
+	{
+		if (!lua_istable(L, $input)) {
+			SWIG_fail_arg("$symname", $argnum,
+			              "table of od::Parameter* expected");
+		}
+		size_t _n = lua_rawlen(L, $input);
+		std::vector<od::Parameter *> _vec;
+		_vec.reserve(_n);
+		for (size_t _i = 1; _i <= _n; ++_i) {
+			lua_rawgeti(L, $input, _i);
+			od::Parameter *_p = 0;
+			if (SWIG_ConvertPtr(L, -1, (void **)&_p,
+			                    SWIGTYPE_p_od__Parameter, 0) != SWIG_OK) {
+				lua_pop(L, 1);
+				SWIG_fail_arg("$symname", $argnum,
+				              "table of od::Parameter* expected "
+				              "(non-Parameter entry)");
+			}
+			_vec.push_back(_p);
+			lua_pop(L, 1);
+		}
+		$1 = _vec;
+	}
+%}
+
+%typemap(typecheck) std::vector<od::Parameter *>
+%{
+	$1 = lua_istable(L, $input);
+%}
+
 %{
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 
@@ -113,6 +149,7 @@
 
 #include <od/objects/adapters/ParameterAdapter.h>
 #include <od/objects/control/ParamSetMorph.h>
+#include <od/objects/control/SceneIndexArbiter.h>
 
 #include <od/objects/TestOscillator.h>
 
@@ -339,6 +376,7 @@ bool Uart_isEnabled();
 
 %include <od/objects/adapters/ParameterAdapter.h>
 %include <od/objects/control/ParamSetMorph.h>
+%include <od/objects/control/SceneIndexArbiter.h>
 
 %include <od/objects/TestOscillator.h>
 

@@ -120,20 +120,25 @@ function Root:serialize()
   if self.sceneView then
     t.sceneView = self.sceneView:serialize()
   end
-  -- Scene-CV pipeline state (M1 dive contents + bias/gain).
-  -- The scene-CV branch is a Branch held directly on Root, NOT
-  -- in self.units, so the standard Chain.serialize walk doesn't
-  -- reach it. We persist it here. Only present if scene mode has
-  -- been engaged at least once this session (the pipeline is
-  -- lazy-built by _getOrBuildSceneMorph).
-  if self._sceneCVBranch then
-    t.sceneCVBranch = self._sceneCVBranch:serialize()
-  end
-  if self._sceneCVGainBias then
-    t.sceneCVParams = {
-      bias = self._sceneCVGainBias:getParameter("Bias"):target(),
-      gain = self._sceneCVGainBias:getParameter("Gain"):target(),
-    }
+  -- Scene-CV pipeline state per role (M1 dive contents + bias/
+  -- gain for "morph"; v1.1 adds "A" / "B" with their own dive +
+  -- arbiter params). Branches are held directly on Root, NOT in
+  -- self.units, so the standard Chain.serialize walk doesn't reach
+  -- them. Only written if scene mode has been engaged at least
+  -- once this session (the pipeline is lazy-built by
+  -- _getOrBuildSceneMorph). Legacy single-role saves are read back
+  -- under role "morph" in deserialize.
+  if self._sceneCVBranches and next(self._sceneCVBranches) then
+    t.sceneCVBranches = {}
+    for role, entry in pairs(self._sceneCVBranches) do
+      t.sceneCVBranches[role] = {
+        branch = entry.branch:serialize(),
+        params = {
+          bias = entry.valueSource:getParameter("Bias"):target(),
+          gain = entry.valueSource:getParameter("Gain"):target(),
+        },
+      }
+    end
   end
 
   if snappedForSave then
@@ -158,21 +163,173 @@ function Root:deserialize(t)
     -- scene state. Restores the data verbatim.
     self:getSceneView():deserialize(t.sceneView)
   end
-  -- Scene-CV pipeline restore. Force-build the morpher + GainBias
-  -- + branch BEFORE restoring their state (same lazy entry point
-  -- the HOLD-press path takes). Bias / gain restored via hardSet
-  -- so the values land immediately without softSet ramp dynamics.
-  if t.sceneCVBranch or t.sceneCVParams then
+  -- Scene-CV pipeline restore. Force-build the morpher + per-role
+  -- GainBias / branch BEFORE restoring state (same lazy entry
+  -- point the HOLD-press path takes). Bias / gain restored via
+  -- hardSet so values land immediately without softSet ramp
+  -- dynamics.
+  --
+  -- v1.1 reads the new sceneCVBranches map keyed by role; legacy
+  -- v1.0 saves carry sceneCVBranch + sceneCVParams (single morph
+  -- role) and migrate transparently. v1.1 phase 5.3 will add
+  -- "A" and "B" roles; for now only "morph" is built so unknown
+  -- roles in a preset (none should exist yet) are ignored.
+  local hadLegacySceneCV = false
+  if t.sceneCVBranches then
     self:_getOrBuildSceneMorph()
+    for role, entry in pairs(t.sceneCVBranches) do
+      local target = self._sceneCVBranches[role]
+      if target then
+        if entry.branch then
+          target.branch:deserialize(entry.branch)
+        end
+        if entry.params then
+          if entry.params.bias then
+            target.valueSource:getParameter("Bias"):hardSet(entry.params.bias)
+          end
+          if entry.params.gain then
+            target.valueSource:getParameter("Gain"):hardSet(entry.params.gain)
+          end
+        end
+      end
+    end
+  elseif t.sceneCVBranch or t.sceneCVParams then
+    -- Legacy v1.0 single-role format.
+    hadLegacySceneCV = true
+    self:_getOrBuildSceneMorph()
+    local morph = self._sceneCVBranches.morph
     if t.sceneCVBranch then
-      self._sceneCVBranch:deserialize(t.sceneCVBranch)
+      morph.branch:deserialize(t.sceneCVBranch)
     end
     if t.sceneCVParams then
       if t.sceneCVParams.bias then
-        self._sceneCVGainBias:getParameter("Bias"):hardSet(t.sceneCVParams.bias)
+        morph.valueSource:getParameter("Bias"):hardSet(t.sceneCVParams.bias)
       end
       if t.sceneCVParams.gain then
-        self._sceneCVGainBias:getParameter("Gain"):hardSet(t.sceneCVParams.gain)
+        morph.valueSource:getParameter("Gain"):hardSet(t.sceneCVParams.gain)
+      end
+    end
+  end
+
+  -- Post-restore arbiter wakeup. Parameter:hardSet above bypasses
+  -- arbiter:hardSetBias, so each A/B arbiter's state-machine
+  -- baseline (mGainAtEntry / mCVInputAtEntry) is still at the
+  -- cold-start default of 0 -- the Schmitt comparison evaluates
+  -- to 0 and CV input is inert until the user manually nudges a
+  -- control. Relatch the baseline from the just-restored
+  -- Gain/Bias so CV is responsive on the first audio frame
+  -- after reboot. v1.0 saves additionally need crossfaderA/B ints
+  -- migrated into the arbiters because the legacy format didn't
+  -- carry per-role Bias values.
+  if self._sceneCVBranches then
+    if hadLegacySceneCV then
+      self:_migrateLegacyCrossfaders()
+    end
+    self:_relatchSceneArbiters()
+  end
+end
+
+-- Post-deserialize: call arbiter:hardSetBias on each A/B arbiter
+-- so the state machine latches mGainAtEntry / mCVInputAtEntry
+-- from current Gain.target and the cached last CV sample. Bias
+-- value itself is preserved (we pass its current target back in).
+-- Without this, Schmitt math degenerates to 0 * delta = 0 and
+-- CV-driven scene selection can never trip until the user
+-- manually nudges Bias / Gain via encoder or chip tap.
+function Root:_relatchSceneArbiters()
+  if not self._sceneCVBranches then return end
+  for _, entry in pairs(self._sceneCVBranches) do
+    if entry.arbiter then
+      local biasTarget = entry.arbiter:getParameter("Bias"):target()
+      entry.arbiter:hardSetBias(biasTarget)
+    end
+  end
+end
+
+-- Migration helper for legacy v1.0 saves that carry A/B
+-- assignment only in SceneView.crossfaderA/B integers (no
+-- arbiter Bias in the persisted state). Populate each arbiter's
+-- Bias from idx / N so the audible assignment survives the
+-- upgrade. Only runs on the legacy-path elseif branch in
+-- deserialize; modern saves have arbiter Bias restored directly
+-- and don't need this.
+function Root:_migrateLegacyCrossfaders()
+  if not (self.sceneView and self._sceneCVBranches) then return end
+  local n = self.sceneView:getSceneCount()
+  if n <= 0 then return end
+  local roleToIdx = {
+    A = self.sceneView:getCrossfaderA(),
+    B = self.sceneView:getCrossfaderB(),
+  }
+  for role, idx in pairs(roleToIdx) do
+    local entry = self._sceneCVBranches[role]
+    if entry and entry.arbiter and idx and idx > 0 then
+      entry.arbiter:hardSetBias(idx / n)
+    end
+  end
+end
+
+-- Reset all scene-mode state on this chain to "user has never
+-- touched scene mode for this chain" equivalent. Used by the
+-- admin menu's "Reset scene mode" action and by the Channels
+-- link/unlink path (which strips scene state from the cross-
+-- chain snapshot, so the destination chain inherits no scene
+-- data from the source). Idempotent.
+--
+-- Order matters: disengage first so the modulated-display swap
+-- is undone and audio Parameters get restored to their base
+-- values BEFORE we drop the scene Parameters those values came
+-- from. Otherwise the audio could glitch to whatever sample-
+-- accurate junk the morpher last computed.
+function Root:resetSceneMode()
+  -- Bail early if scene mode infrastructure was never built;
+  -- nothing to reset.
+  if not (self._sceneMorph or self.sceneView) then return end
+
+  if self._sceneEngaged then
+    self:disengageSceneMorph()
+  end
+
+  if self.sceneView then
+    self.sceneView:removeAllScenes()
+  end
+
+  if self._sceneCVBranches then
+    for _, entry in pairs(self._sceneCVBranches) do
+      -- Clear any user-inserted modulation source units from
+      -- the role's CV subchain.
+      if entry.branch and entry.branch.clear then
+        entry.branch:clear()
+      end
+      -- Reset value-source Parameters to defaults: Bias = 0
+      -- (cold-start manual home), Gain = 0 (cold-start CV
+      -- inert until user re-enables).
+      if entry.valueSource then
+        local bias = entry.valueSource:getParameter("Bias")
+        local gain = entry.valueSource:getParameter("Gain")
+        if bias then bias:hardSet(0) end
+        if gain then gain:hardSet(0) end
+      end
+      -- Relatch arbiter state machines so mGainAtEntry /
+      -- mCVInputAtEntry track the reset Bias/Gain. Same logic
+      -- as the deserialize-side _relatchSceneArbiters; matches
+      -- the cold-start contract for fresh chains.
+      if entry.arbiter then
+        entry.arbiter:hardSetBias(0)
+      end
+      -- Reset MinMax range tracker visual state. The disengage
+      -- above stops the arbiter's process, so MinMax never gets
+      -- a fresh frame to recompute min/max -- the fader's swing
+      -- bar would otherwise stay at whatever range modulation
+      -- last drove it to. Hard-set all three Parameters to 0
+      -- so the visual snaps to centered/closed immediately.
+      if entry.range then
+        local mn = entry.range:getParameter("Min")
+        local mx = entry.range:getParameter("Max")
+        local ct = entry.range:getParameter("Center")
+        if mn then mn:hardSet(0) end
+        if mx then mx:hardSet(0) end
+        if ct then ct:hardSet(0) end
       end
     end
   end
@@ -462,38 +619,20 @@ function Root:_getOrBuildSceneMorph()
   morph:setVeeMode(true)
   self._sceneMorph = morph
 
-  local gb = app.GainBias()
-  gb:setName(self.title .. ".SceneCV")
-  self._sceneCVGainBias = gb
-
-  -- MinMax tracks the live range of gb.Out so the Performance M1
-  -- fader can render its range bar (the gain indicator the user
-  -- sees to the right of the bias slot). Same wiring pattern as
-  -- a unit's GainBias control: input the modulated output, expose
-  -- Min/Max parameters.
-  local range = app.MinMax()
-  range:setName(self.title .. ".SceneCVRange")
-  self._sceneCVRange = range
-
-  -- Branch wrapping the GainBias input. Used by Performance view
-  -- M1 dive so user can insert CV-source units (LFO, S&H, etc.).
-  -- Output flows: branch units -> gb.In -> gb.Out -> morpher.mCV.
-  self._sceneCVBranch = Branch {
-    title = self.title,
-    subTitle = "scene-cv",
-    depth = self.depth + 1,
-    channelCount = 1,
-    leftDestination = gb:getInput("In"),
-    leftOutObject = gb,
-    leftOutletName = "Out",
-    unit = self,  -- Branch uses this for getRootChain
-  }
-
-  -- Wire GainBias.Out into both the morpher's CV inlet (drives
-  -- the weight) and the MinMax range tracker (drives the fader's
-  -- range indicator).
-  app.AudioThread.connect(gb:getOutput("Out"), morph:getInput("CV"))
-  app.AudioThread.connect(gb:getOutput("Out"), range:getInput("In"))
+  -- Multi-role scene-CV map. Role -> {branch, gainBias|arbiter,
+  -- valueSource, range}. "morph" carries a GainBias whose Out
+  -- drives the morpher's CV inlet (continuous A<->B blend
+  -- weight in [-1, +1]). "A" / "B" carry a SceneIndexArbiter
+  -- whose Out drives the morpher's IndexA / IndexB inlets
+  -- (integer scene index). The morpher consumes the index inlets
+  -- only for kVeeIndexed items (added in phase 5.5); until then
+  -- the arbiter outputs are wired but ignored, so the M2/M3 dive
+  -- controls can render the arbiter state independent of the
+  -- morpher's selection path.
+  self._sceneCVBranches = {}
+  self:_buildSceneCVMorphRole(morph:getInput("CV"))
+  self:_buildSceneCVArbiterRole("A", morph:getInput("IndexA"))
+  self:_buildSceneCVArbiterRole("B", morph:getInput("IndexB"))
 
   -- Per-control base Parameter snapshots, refreshed every engage.
   -- Map: [unitKey][ctrlId] = app.Parameter holding the user-mode
@@ -505,17 +644,121 @@ function Root:_getOrBuildSceneMorph()
   -- AudioThread on engage/disengage.
   self._sceneTask = app.ObjectList(self.title .. ".SceneTask")
 
+  -- Seed arbiter scene-count from current SceneView if one exists.
+  self:_syncSceneArbiterCounts()
+
   return self._sceneMorph
 end
 
-function Root:getSceneCVBranch()
-  self:_getOrBuildSceneMorph()
-  return self._sceneCVBranch
+-- Build the morph role: GainBias (linear sum, additive CV) +
+-- MinMax range + Branch wrapping the GainBias input. Stored under
+-- role "morph". GainBias.Out -> morpher.CV drives the continuous
+-- A<->B weight in [-1, +1].
+function Root:_buildSceneCVMorphRole(consumerInlet)
+  local gb = app.GainBias()
+  gb:setName(self.title .. ".SceneCV.morph")
+
+  local range = app.MinMax()
+  range:setName(self.title .. ".SceneCVRange.morph")
+
+  local branch = Branch {
+    title = self.title,
+    subTitle = "scene-cv morph",
+    depth = self.depth + 1,
+    channelCount = 1,
+    leftDestination = gb:getInput("In"),
+    leftOutObject = gb,
+    leftOutletName = "Out",
+    unit = self,
+  }
+
+  app.AudioThread.connect(gb:getOutput("Out"), consumerInlet)
+  app.AudioThread.connect(gb:getOutput("Out"), range:getInput("In"))
+
+  self._sceneCVBranches["morph"] = {
+    branch = branch,
+    gainBias = gb,
+    valueSource = gb,  -- uniform key for engage/serialize loops
+    range = range,
+  }
 end
 
-function Root:getSceneCVGainBias()
+-- Build an A/B role: SceneIndexArbiter (2-state machine, last-
+-- writer-wins between CV input and manual writes) + MinMax range
+-- + Branch wrapping the arbiter input. Arbiter.Out drives the
+-- morpher's IndexA or IndexB inlet for live scene-index
+-- selection in kVeeIndexed items. Until the engage path emits
+-- addVeeIndexed (phase 5.5), the morpher ignores these inlets;
+-- the arbiter still runs each frame so M2/M3 dive controls can
+-- render its state independent of the morpher's actual
+-- selection path.
+function Root:_buildSceneCVArbiterRole(role, consumerInlet)
+  local arb = app.SceneIndexArbiter()
+  arb:setName(self.title .. ".SceneCV." .. role)
+
+  local range = app.MinMax()
+  range:setName(self.title .. ".SceneCVRange." .. role)
+
+  local branch = Branch {
+    title = self.title,
+    subTitle = "scene-cv " .. role,
+    depth = self.depth + 1,
+    channelCount = 1,
+    leftDestination = arb:getInput("In"),
+    leftOutObject = arb,
+    leftOutletName = "Out",
+    unit = self,
+  }
+
+  app.AudioThread.connect(arb:getOutput("Out"), consumerInlet)
+  -- Range bar reads the normalized [0, 1] effective position so
+  -- the M2/M3 fader's swing visualization sits in the fader's
+  -- coord system (Bias is normalized too). Wiring the integer
+  -- "Out" here would push values 0..N which clip outside the
+  -- fader's 0..1 map.
+  app.AudioThread.connect(arb:getOutput("OutNorm"), range:getInput("In"))
+
+  self._sceneCVBranches[role] = {
+    branch = branch,
+    arbiter = arb,
+    valueSource = arb,  -- uniform key for engage/serialize loops
+    range = range,
+  }
+end
+
+function Root:getSceneCVBranch(role)
   self:_getOrBuildSceneMorph()
-  return self._sceneCVGainBias
+  local entry = self._sceneCVBranches[role or "morph"]
+  return entry and entry.branch
+end
+
+function Root:getSceneCVGainBias(role)
+  self:_getOrBuildSceneMorph()
+  local entry = self._sceneCVBranches[role or "morph"]
+  return entry and entry.gainBias
+end
+
+-- A / B role accessor. Returns the SceneIndexArbiter for the
+-- given role, or nil for "morph" (which has a GainBias instead).
+-- SceneSelectorControl uses this to bind its Bias/Gain readouts
+-- and to route chip-tap / encoder writes to hardSetBias.
+function Root:getSceneArbiter(role)
+  self:_getOrBuildSceneMorph()
+  local entry = self._sceneCVBranches[role]
+  return entry and entry.arbiter
+end
+
+-- Push the current SceneView count into every A/B arbiter so
+-- Bias clips correctly and the morpher's IndexA/B Inlets see
+-- valid index ranges. Called after build, on engage, and after
+-- any scene add/delete (rebuildSceneMorph). No-op for the morph
+-- role (no arbiter there).
+function Root:_syncSceneArbiterCounts()
+  if not self._sceneCVBranches then return end
+  local n = self.sceneView and self.sceneView:getSceneCount() or 0
+  for _, entry in pairs(self._sceneCVBranches) do
+    if entry.arbiter then entry.arbiter:setSceneCount(n) end
+  end
 end
 
 -- Expose the morpher itself so views can subscribe to its live
@@ -528,9 +771,10 @@ function Root:getSceneMorph()
   return self._sceneMorph
 end
 
-function Root:getSceneCVRange()
+function Root:getSceneCVRange(role)
   self:_getOrBuildSceneMorph()
-  return self._sceneCVRange
+  local entry = self._sceneCVBranches[role or "morph"]
+  return entry and entry.range
 end
 
 function Root:_getOrCreateBaseParam(unitKey, ctrlId)
@@ -611,10 +855,19 @@ function Root:_buildSceneMorphItems()
   local morph = self._sceneMorph
   if morph == nil then return end
 
-  local aIdx = self.sceneView:getCrossfaderA()
-  local bIdx = self.sceneView:getCrossfaderB()
-  local sceneA = (aIdx and aIdx > 0) and self.sceneView:getScene(aIdx) or nil
-  local sceneB = (bIdx and bIdx > 0) and self.sceneView:getScene(bIdx) or nil
+  -- v1.1: emit kVeeIndexed items with the full per-scene Parameter
+  -- list. apply() reads IndexA/IndexB Inlets each frame (driven
+  -- by the A/B SceneIndexArbiter Outlets) and picks the
+  -- corresponding scene Parameters from this table; index 0 maps
+  -- to baseParam (the "unassigned" semantic v1.0 also used).
+  -- Scenes that have no delta for a given control fall back to
+  -- baseParam so a sweep through them reveals the user's
+  -- pre-scene base value.
+  local n = self.sceneView:getSceneCount()
+  local scenes = {}
+  for i = 1, n do
+    scenes[i] = self.sceneView:getScene(i)
+  end
 
   _walkAllUnits(self, function(unit)
     if not unit.controls then return end
@@ -625,17 +878,17 @@ function Root:_buildSceneMorphItems()
         local baseParam  = self:_getOrCreateBaseParam(unitKey, ctrlId)
         local baseVal    = control:getSceneBaseValue()
 
-        local aParam = baseParam
-        if sceneA and sceneA:hasDelta(unitKey, ctrlId) then
-          aParam = sceneA:getOrCreateParam(unitKey, ctrlId, baseVal)
+        local perScene = {}
+        for i = 1, n do
+          local scene = scenes[i]
+          if scene and scene:hasDelta(unitKey, ctrlId) then
+            perScene[i] = scene:getOrCreateParam(unitKey, ctrlId, baseVal)
+          else
+            perScene[i] = baseParam
+          end
         end
 
-        local bParam = baseParam
-        if sceneB and sceneB:hasDelta(unitKey, ctrlId) then
-          bParam = sceneB:getOrCreateParam(unitKey, ctrlId, baseVal)
-        end
-
-        morph:addVee(audioParam, baseParam, aParam, bParam)
+        morph:addVeeIndexed(audioParam, baseParam, perScene)
       end
     end
   end)
@@ -649,6 +902,9 @@ function Root:engageSceneMorph()
   if self.sceneView == nil then return end  -- no scenes ever created
 
   self:_getOrBuildSceneMorph()
+  -- Sync arbiter scene-counts before any audio starts so Bias
+  -- clamps line up with the current bank size.
+  self:_syncSceneArbiterCounts()
 
   -- Refresh base snapshots from audio params. This is the user's
   -- pre-scene-mode value captured into baseParam; once engaged,
@@ -678,25 +934,60 @@ function Root:engageSceneMorph()
   self._sceneTask:clear()
   self._sceneMorph:clear()
   self:_buildSceneMorphItems()
-  -- Order matters: GainBias writes its Out, then range reads it,
-  -- then morpher reads it (via its mCV inlet). All three must be
-  -- in the same task and in this order so the morpher and range
+  -- Order matters: each role's GainBias writes its Out, then its
+  -- range reads it, then the morpher reads from each role's Out
+  -- (morph -> mCV; future A/B -> arbiter index inlets). All must
+  -- be in the same task in this order so the morpher and ranges
   -- see fresh data each frame.
-  self._sceneTask:add(self._sceneCVGainBias)
-  if self._sceneCVRange then
-    self._sceneTask:add(self._sceneCVRange)
+  for _, entry in pairs(self._sceneCVBranches) do
+    self._sceneTask:add(entry.valueSource)
+    if entry.range then
+      self._sceneTask:add(entry.range)
+    end
   end
   self._sceneTask:add(self._sceneMorph)
   self._sceneTask:unlock()
 
   app.AudioThread.addTask(self._sceneTask, 0)
-  -- Start the scene-cv branch so any CV-source units the user
-  -- has inserted there get scheduled by AudioThread. start() is
+  -- Start every role's scene-cv branch so any CV-source units the
+  -- user has inserted gets scheduled by AudioThread. start() is
   -- refcounted (stopCount) -- safe to call across engages.
-  if self._sceneCVBranch then
-    self._sceneCVBranch:start()
+  for _, entry in pairs(self._sceneCVBranches) do
+    entry.branch:start()
   end
   self._sceneEngaged = true
+
+  -- Kickstart pass. Without this, a quicksave reload required
+  -- the user to nudge a control before scene-mode audio
+  -- behavior took effect. Re-hardSetBias each arbiter with its
+  -- current Bias target value (no value change, just side
+  -- effects: relatch mGainAtEntry/mCVInputAtEntry baseline,
+  -- recompute mLastFiredIndex, fire transition flag so the
+  -- next onDisplayFrame poll runs _refreshSlotRoles). Also
+  -- nudge the morpher's Weight to force an apply() pass on the
+  -- next audio frame (mHasLiveItems is true for kVeeIndexed so
+  -- it'd apply anyway, but the hardSet sets mUpdateNeeded which
+  -- the apply short-circuit also reads).
+  self:_kickstartSceneMode()
+end
+
+-- Force the state machine and morpher to re-emit their first-
+-- frame output as though the user had just touched a control.
+-- Called at the end of engageSceneMorph so post-quicksave entry
+-- doesn't require a manual nudge.
+function Root:_kickstartSceneMode()
+  if self._sceneCVBranches then
+    for _, entry in pairs(self._sceneCVBranches) do
+      if entry.arbiter then
+        local b = entry.arbiter:getParameter("Bias"):target()
+        entry.arbiter:hardSetBias(b)
+      end
+    end
+  end
+  if self._sceneMorph then
+    local w = self._sceneMorph:getParameter("Weight"):target()
+    self._sceneMorph:hardSet(w)
+  end
 end
 
 -- Disengage. Tear down the audio-rate scheduling and drop the
@@ -705,10 +996,12 @@ end
 function Root:disengageSceneMorph()
   if not self._sceneEngaged then return end
 
-  -- Stop the scene-cv branch first so its units stop processing
-  -- before we tear down the GainBias they feed into.
-  if self._sceneCVBranch then
-    self._sceneCVBranch:stop()
+  -- Stop every role's scene-cv branch first so its units stop
+  -- processing before we tear down the GainBias they feed into.
+  if self._sceneCVBranches then
+    for _, entry in pairs(self._sceneCVBranches) do
+      entry.branch:stop()
+    end
   end
 
   app.AudioThread.removeTask(self._sceneTask)
@@ -778,6 +1071,9 @@ function Root:rebuildSceneMorph()
   self._sceneMorph:clear()
   self:_buildSceneMorphItems()
   self._sceneTask:unlock()
+  -- Bank may have grown / shrunk since last rebuild; refresh
+  -- the arbiters' clip ranges so Bias values stay in-bounds.
+  self:_syncSceneArbiterCounts()
 end
 
 -- Egress gestures from inside scene authoring. When the chain is

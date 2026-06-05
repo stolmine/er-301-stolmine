@@ -141,9 +141,27 @@ local function unlink(i, continued)
   return true
 end
 
+-- Strip scene-mode state from a serialized chain snapshot before
+-- cross-chain restore. Link/unlink destroys the source Chain.Root
+-- and builds a fresh one; preserving units / sources is desired,
+-- but scene state -- per-control deltas keyed by unit instance,
+-- crossfader assignments, CV subchain contents, arbiter Bias /
+-- Gain -- is intentionally NOT carried over because unit instance
+-- keys aren't stable across the topology change and the user has
+-- asked for "reset everything in scene mode" semantics here.
+-- Both modern (sceneCVBranches) and legacy (sceneCVBranch /
+-- sceneCVParams) keys are nilled.
+local function stripSceneState(data)
+  data.sceneView      = nil
+  data.sceneCVBranches = nil
+  data.sceneCVBranch   = nil
+  data.sceneCVParams   = nil
+end
+
 local function unlinkAndKeep(i)
   local chain = getChain(i)
   local data = chain:serialize()
+  stripSceneState(data)
   unlink(i)
   local left = getChain(i)
   left:deserialize(data)
@@ -156,6 +174,7 @@ end
 local function linkAndKeep(i)
   local left = getChain(i)
   local data = left:serialize()
+  stripSceneState(data)
   if link(i) then
     local chain = getChain(i)
     chain:deserialize(data)
