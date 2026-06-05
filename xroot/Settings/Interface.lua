@@ -72,13 +72,20 @@ menuItems[#menuItems + 1] = {
   "containerUnitNameGen"
 }
 menuItems[#menuItems + 1] = {
-  "addVariable",
-  "showFavorites"
+  "addCategory",
+  "Unit Picker"
 }
 menuItems[#menuItems + 1] = {
   "addVariable",
   "pickerStyle"
 }
+menuItems[#menuItems + 1] = {
+  "addVariable",
+  "showFavorites"
+}
+-- Dense-only entries below. Their descriptions already qualify
+-- ("Dense picker..." / "...in dense picker?"), so no suffix
+-- needed for layout-applicability signal.
 menuItems[#menuItems + 1] = {
   "addVariable",
   "pickerSectionDividers"
@@ -94,6 +101,10 @@ menuItems[#menuItems + 1] = {
 menuItems[#menuItems + 1] = {
   "addVariable",
   "pickerPinRecents"
+}
+menuItems[#menuItems + 1] = {
+  "addCategory",
+  "Scenes"
 }
 menuItems[#menuItems + 1] = {
   "addVariable",

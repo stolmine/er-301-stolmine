@@ -38,6 +38,15 @@ namespace od
     // output space. Bias is the user's normalized manual position;
     // gain * cvIn is the normalized CV-driven offset (Gain stays
     // a unitless input scaler so default 0 leaves CV inert).
+    //
+    // Null-vs-first-scene boundary falls out of the round() math:
+    // idx == 0 (null) for normalized * N < 0.5, idx == 1 for
+    // normalized * N >= 0.5. So the null region's fader width is
+    // 0.5 / N -- proportional to bank size, no hardcoded cutoff.
+    // N=8: null occupies [0, 0.0625) of the fader; N=16: [0,
+    // 0.03125). Lua-side label check tests idx < 1 against this
+    // same integer, so the visual fallback ("show role label not
+    // scene 1") tracks the same boundary.
     float normalized;
     if (mState == kTrackingCV)
     {

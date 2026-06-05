@@ -170,12 +170,12 @@ local defaults = {
     }
   },
   showFavorites = {
-    category = "Units",
+    category = "Unit Picker",
     description = "Show favorites in unit browser?",
     value = true
   },
   pickerStyle = {
-    category = "Units",
+    category = "Unit Picker",
     description = "Unit picker style:",
     value = "dense",
     choices = {
@@ -184,7 +184,7 @@ local defaults = {
     }
   },
   pickerSectionDividers = {
-    category = "Units",
+    category = "Unit Picker",
     description = "Show section dividers in dense picker?",
     value = "yes",
     choices = {
@@ -193,7 +193,7 @@ local defaults = {
     }
   },
   pickerDefaultSort = {
-    category = "Units",
+    category = "Unit Picker",
     description = "Dense picker default sort:",
     value = "recents",
     choices = {
@@ -206,7 +206,7 @@ local defaults = {
     }
   },
   pickerPinFavorites = {
-    category = "Units",
+    category = "Unit Picker",
     description = "Pin favorites to top of dense picker?",
     value = "no",
     choices = {
@@ -215,7 +215,7 @@ local defaults = {
     }
   },
   pickerPinRecents = {
-    category = "Units",
+    category = "Unit Picker",
     description = "Pin recents to top of dense picker?",
     value = "no",
     choices = {
@@ -224,7 +224,7 @@ local defaults = {
     }
   },
   sceneMode = {
-    category = "Units",
+    category = "Scenes",
     description = "Scene mode (replaces hold mode):",
     value = "off",
     choices = {
