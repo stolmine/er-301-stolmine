@@ -12,11 +12,12 @@ namespace od
   // Arbitrates among three writers (CV input, encoder via mBias,
   // chip tap via hardSetBias) using a 2-state machine.
   //
-  // Output (mOutput) is the effective scene index as a float
-  // (post-round, clipped to [0, mSceneCount]). The morpher's
-  // IndexA/IndexB Inlets connect to this Outlet directly and read
-  // the last-sample integer per frame; no Lua-side rebuild path
-  // participates in scene-switch latency.
+  // kIndex semantics: Bias and CV input live in a normalized [0,
+  // 1] domain (a fraction-of-bank position). Output index is
+  // round(... * mSceneCount), clipped to [0, mSceneCount]. Same
+  // input always selects the same fractional position regardless
+  // of bank size, so the fader's encoder feel and the CV mapping
+  // don't change when scenes are added or removed.
   //
   // mTransitionPending is a UI-only signal: when the integer
   // output changes, the audio thread sets it; SceneSlotControl's
@@ -25,12 +26,16 @@ namespace od
   // consume this flag.
   //
   // State machine:
-  //   Tracking-Manual (cold-start): out = clip(round(bias))
-  //     yields to Tracking-CV when |gain_at_entry * (cvIn -
-  //     cv_at_entry)| > 0.5 in output-space units.
-  //   Tracking-CV: out = clip(round(gain * cvIn))
-  //     yields to Tracking-Manual on any hardSetBias() call.
+  //   Tracking-Manual (cold-start): out = round(Bias * N), clipped.
+  //     Yields to Tracking-CV when |GainAtEntry * (cvIn -
+  //     CVAtEntry) * N| > 0.5 (Schmitt in scene-index space).
+  //   Tracking-CV: out = round(Gain * cvIn * N), clipped.
+  //     Yields to Tracking-Manual on any hardSetBias() call.
   //   No idle decay; only CV movement releases Tracking-Manual.
+  //   Cold-start Gain = 0 means CV is inert until the user dials
+  //   Gain up -- the Schmitt comparison evaluates to 0 and never
+  //   trips, so patching a CV source has no effect on the audible
+  //   selection until Gain is enabled.
   class SceneIndexArbiter : public Object
   {
   public:
@@ -40,21 +45,36 @@ namespace od
 #ifndef SWIGLUA
     virtual void process();
 
-    // CV input. Scaled internally by mGain to produce candidate
-    // index = round(mGain * cvIn). When unpatched, buffer is
-    // ZeroOutput and arbiter sits in Tracking-Manual at startup.
+    // CV input. Treated as a normalized [0, 1] selection (last
+    // sample read per frame). Scaled internally to bank-relative
+    // position. When unpatched, buffer is ZeroOutput; with the
+    // cold-start Gain=0 this leaves the arbiter inert until the
+    // user enables Gain.
     Inlet mInput{"In"};
-    // Output as float for fader animation; round() to int for
-    // morpher consumption.
+    // Output as float (integer scene index); morpher reads
+    // last-sample via its IndexA/IndexB Inlets.
     Outlet mOutput{"Out"};
 #endif
 
     // User-facing Parameters. Both saved by the chain.
-    Parameter mGain{"Gain", 1.0f};  // range +-32 (clamped at write)
-    Parameter mBias{"Bias", 0.0f};  // range [0, mSceneCount]
+    //
+    // Gain: CV input scaler. Default 0 = CV inert. Standard 301
+    // gain map (+-10) is wide enough -- with input normalized to
+    // [0, 1] domain, Gain=1 means "full input swing = full bank";
+    // Gain=2 means "half input swing = full bank" (good for LFOs
+    // that only swing +-0.5). Larger Gain not musically useful.
+    //
+    // Bias: normalized [0, 1] manual home position. Encoder + chip
+    // tap write here. Output in Tracking-Manual = round(Bias * N).
+    Parameter mGain{"Gain", 0.0f};
+    Parameter mBias{"Bias", 0.0f};
 
-    // Bank size in scenes. Clips mBias and mOutput. Lua sets this
-    // from Chain.Root after SceneView add/delete.
+    // Bank size in scenes. Used to scale Bias / CV to integer
+    // output and to clip the output to [0, N]. Lua sets this from
+    // Chain.Root after SceneView add/delete. Bias is normalized
+    // and bank-independent, so add/delete does NOT shrink it --
+    // the user's manual home stays at the same fractional position
+    // and the output naturally reaches further as N grows.
     void setSceneCount(int n);
     int getSceneCount() const { return mSceneCount; }
 
@@ -83,9 +103,12 @@ namespace od
 
     // Input-space CV baseline + Gain captured on Manual entry.
     // Schmitt comparison uses frozen Gain so a live Gain change
-    // doesn't spuriously trip the state transition.
+    // doesn't spuriously trip the state transition. Default
+    // Gain = 0 matches the cold-start Parameter so Schmitt
+    // evaluates to 0 -> never trips until first manual write
+    // bumps mGainAtEntry from whatever the user has set.
     float mCVInputAtEntry = 0.0f;
-    float mGainAtEntry = 1.0f;
+    float mGainAtEntry = 0.0f;
 
     // Cached last CV sample from process() so hardSetBias() (Lua
     // thread) has a stable baseline when latching mCVInputAtEntry.

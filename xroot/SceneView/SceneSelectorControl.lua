@@ -66,10 +66,13 @@ function SceneSelectorControl:init(chain, role, sceneView)
   self.role = role
   self.sceneView = sceneView
 
-  -- Main fader bound to arbiter.Bias. Integer-stepped DialMap so
-  -- the encoder feels like it's clicking through scene indices.
-  -- Range [0, sceneCount]; default-grown to 16 as a safe upper
-  -- bound (clipped per-frame by the arbiter's setSceneCount).
+  -- Main fader bound to arbiter.Bias. kIndex semantics: Bias is
+  -- a [0, 1] normalized fader position (fraction of bank). The
+  -- arbiter scales by mSceneCount at output time and clips to
+  -- [0, N]. Fader visual range is bank-independent so adding /
+  -- removing scenes never changes the encoder feel; the label
+  -- (via _updateLabel) shows the current scene name at the
+  -- bank-scaled rounded output position.
   self.cvFader = app.Fader(0, 0, ply, 64)
   self.cvFader:setLabel(role)
   self.arbiter = chain and chain.getSceneArbiter and chain:getSceneArbiter(role)
@@ -78,16 +81,16 @@ function SceneSelectorControl:init(chain, role, sceneView)
     self._biasParam = self.arbiter:getParameter("Bias")
     self._gainParam:enableSerialization()
     self._biasParam:enableSerialization()
-    -- Gain cap +-32 (locked in plan); integer-coarse 1 step for
-    -- bias-side encoder feel, fine 0.1 for inter-scene snap
-    -- when the user wants intermediate values (preview, not
-    -- audible -- arbiter rounds to int for output).
-    self._biasMap = app.LinearDialMap(0, 16)
-    self._biasMap:setSteps(1.0, 1.0, 0.1, 0.01)
+    -- Standard [0, 1] "unit" dial map (coarse 0.1, fine 0.01,
+    -- super-fine 0.001). Fractional bias is valid stored state:
+    -- audible output is round(Bias * N), so a slow CV-driven
+    -- sweep can glide the fader visually between integer scene
+    -- positions without immediately switching scenes.
+    self._biasMap = Encoder.getMap("unit")
     self.cvFader:setParameter(self._biasParam)
     self.cvFader:setMap(self._biasMap)
     self.cvFader:setUnits(app.unitNone)
-    self.cvFader:setPrecision(0)
+    self.cvFader:setPrecision(2)
     if chain.getSceneCVRange then
       local range = chain:getSceneCVRange(role)
       if range then self.cvFader:setRangeObject(range) end
@@ -115,17 +118,14 @@ function SceneSelectorControl:init(chain, role, sceneView)
     self.scope:setCornerRadius(3, 3, 3, 3)
     sub:addChild(self.scope)
 
-    -- Wide-range Gain map (+/-32, locked in plan doc) instead
-    -- of the stock Encoder.getMap("gain") which caps at +/-10.
-    -- Sub-volt CV sources need Gain ~16 to traverse a 16-scene
-    -- bank from a 1V swing; +/-32 leaves headroom for tighter
-    -- throws.
-    self._gainMap = app.LinearDialMap(-32, 32)
-    self._gainMap:setSteps(5.0, 1.0, 0.1, 0.01)
+    -- Standard +-10 gain map. With Bias / CV in normalized [0, 1]
+    -- domain, Gain=1 means "full input swing = full bank"; Gain=2
+    -- means "half swing = full bank" (good for LFOs that only
+    -- reach +-0.5). Wider range isn't musically useful in kIndex.
     self.gainReadout = app.Readout(0, 0, ply, 10)
     self.gainReadout:setParameter(self._gainParam)
     self.gainReadout:setCenter(subCol2, subCenter4)
-    self.gainReadout:setMap(self._gainMap)
+    self.gainReadout:setMap(Encoder.getMap("gain"))
     self.gainReadout:setUnits(app.unitNone)
     self.gainReadout:setPrecision(2)
     sub:addChild(self.gainReadout)
@@ -135,7 +135,7 @@ function SceneSelectorControl:init(chain, role, sceneView)
     self.biasReadout:setCenter(subCol3, subCenter4)
     self.biasReadout:setMap(self._biasMap)
     self.biasReadout:setUnits(app.unitNone)
-    self.biasReadout:setPrecision(0)
+    self.biasReadout:setPrecision(2)
     sub:addChild(self.biasReadout)
 
     local desc = app.Label(role, 10)
@@ -171,12 +171,20 @@ end
 
 function SceneSelectorControl:_updateLabel()
   if not (self.cvFader and self._biasParam) then return end
-  local idx = math.floor(self._biasParam:value() + 0.5)
-  if idx <= 0 then
+  if self.sceneView == nil then
     self.cvFader:setLabel(self.role)
     return
   end
-  if self.sceneView == nil then return end
+  -- kIndex: Bias is [0, 1]. Output position is the same math the
+  -- arbiter does -- round(bias * N) with bank-clip on either end.
+  local n = self.sceneView:getSceneCount()
+  if n <= 0 then
+    self.cvFader:setLabel(self.role)
+    return
+  end
+  local idx = math.floor(self._biasParam:value() * n + 0.5)
+  if idx < 1 then idx = 1
+  elseif idx > n then idx = n end
   local scene = self.sceneView:getScene(idx)
   if scene then
     self.cvFader:setLabel(scene:getName() or self.role)
@@ -273,12 +281,16 @@ function SceneSelectorControl:encoder(change, shifted)
   end
   self:_updateLabel()
   -- 5.4 dual-write: notify Performance so the v1.0 SceneView
-  -- crossfader stays in sync with the arbiter Bias. Performance
-  -- handles the rebuild. 5.5b drops this when chip-tap rewires
-  -- to write arbiter directly and SceneView crossfader becomes
-  -- a computed read.
-  self:callUp("syncSceneCrossfader", self.role,
-              math.floor(self._biasParam:target() + 0.5))
+  -- crossfader stays in sync with the arbiter Bias. With kIndex
+  -- semantics, Bias is in [0, 1] and the SceneView crossfader
+  -- wants an integer scene index -- convert via round(Bias * N).
+  -- 5.5b drops this when chip-tap rewires to write arbiter
+  -- directly.
+  local n = self.sceneView and self.sceneView:getSceneCount() or 0
+  local sceneIdx = math.floor(self._biasParam:target() * n + 0.5)
+  if sceneIdx < 0 then sceneIdx = 0
+  elseif sceneIdx > n then sceneIdx = n end
+  self:callUp("syncSceneCrossfader", self.role, sceneIdx)
   return true
 end
 
@@ -378,8 +390,8 @@ end
 function SceneSelectorControl:_biasSet()
   local Decimal = require "Keyboard.Decimal"
   local kb = Decimal {
-    message = self.role .. " scene index.",
-    commitMessage = "scene index updated.",
+    message = self.role .. " bias (0 to 1).",
+    commitMessage = "bias updated.",
     initialValue = self.biasReadout:getValueInUnits()
   }
   local task = function(value)
@@ -390,8 +402,11 @@ function SceneSelectorControl:_biasSet()
         self.arbiter:hardSetBias(value)
       end
       self:_updateLabel()
-      self:callUp("syncSceneCrossfader", self.role,
-                  math.floor(value + 0.5))
+      local n = self.sceneView and self.sceneView:getSceneCount() or 0
+      local sceneIdx = math.floor(value * n + 0.5)
+      if sceneIdx < 0 then sceneIdx = 0
+      elseif sceneIdx > n then sceneIdx = n end
+      self:callUp("syncSceneCrossfader", self.role, sceneIdx)
       self:_setFocusedReadout(nil)
     end
   end

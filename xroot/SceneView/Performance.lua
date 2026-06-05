@@ -356,17 +356,24 @@ end
 
 -- Push the v1.0 SceneView crossfader integer into the arbiter
 -- Bias for each role, so M2/M3 faders track the chip-tap path
--- during 5.4. Also refreshes their scene-name labels.
+-- during 5.4. With kIndex semantics the arbiter Bias is
+-- normalized [0, 1], so divide the integer crossfader idx by N
+-- to get the matching fractional position. Also refreshes the
+-- selector scene-name labels.
 function Performance:_syncArbitersFromCrossfaders()
   if not self.selectorControls then return end
   if not (self.chain and self.chain.getSceneArbiter) then return end
+  local n = self.sceneView:getSceneCount()
   local values = {
     A = self.sceneView:getCrossfaderA(),
     B = self.sceneView:getCrossfaderB(),
   }
   for role, idx in pairs(values) do
     local arb = self.chain:getSceneArbiter(role)
-    if arb then arb:hardSetBias(idx) end
+    if arb then
+      local bias = (n > 0) and (idx / n) or 0.0
+      arb:hardSetBias(bias)
+    end
   end
   self:_refreshSelectorLabels()
 end

@@ -55,8 +55,10 @@ local function test_construct_and_defaults()
   if arb:getCurrentIndex() ~= 0 then
     return fail(name, "fresh currentIndex expected 0, got " .. arb:getCurrentIndex())
   end
-  if arb:getParameter("Gain"):target() ~= 1.0 then
-    return fail(name, "default Gain expected 1.0")
+  -- kIndex: cold-start Gain = 0 (CV inert until user enables it).
+  if arb:getParameter("Gain"):target() ~= 0.0 then
+    return fail(name, "default Gain expected 0.0, got " ..
+                 tostring(arb:getParameter("Gain"):target()))
   end
   if arb:getParameter("Bias"):target() ~= 0.0 then
     return fail(name, "default Bias expected 0.0")
@@ -64,17 +66,21 @@ local function test_construct_and_defaults()
   pass(name)
 end
 
-local function test_setSceneCount_clip()
-  local name = "setSceneCount-clip"
+local function test_setSceneCount_preserves_normalized_bias()
+  local name = "setSceneCount-preserves-bias"
   local arb = app.SceneIndexArbiter()
   arb:setName("bench.arbiter")
   arb:setSceneCount(16)
-  arb:getParameter("Bias"):hardSet(8.0)
-  -- shrink the bank; bias should clip down
+  arb:hardSetBias(0.5)  -- normalized midpoint
+  if math.abs(arb:getParameter("Bias"):target() - 0.5) > 1e-6 then
+    return fail(name, "bias should accept normalized midpoint")
+  end
+  -- kIndex: bank shrink does NOT shrink Bias. The normalized
+  -- position is the user's intent and stays put; the audible
+  -- output rescales via the new N.
   arb:setSceneCount(4)
-  if arb:getParameter("Bias"):target() ~= 4.0 then
-    return fail(name, string.format(
-      "bias expected clipped to 4.0, got %f", arb:getParameter("Bias"):target()))
+  if math.abs(arb:getParameter("Bias"):target() - 0.5) > 1e-6 then
+    return fail(name, "bias should stay at 0.5 after sceneCount change")
   end
   if arb:getSceneCount() ~= 4 then
     return fail(name, "sceneCount expected 4, got " .. arb:getSceneCount())
@@ -89,14 +95,14 @@ local function test_hardSetBias_clip_and_state()
   arb:setSceneCount(8)
 
   -- Negative biases clip to 0.
-  arb:hardSetBias(-3.0)
+  arb:hardSetBias(-0.5)
   if arb:getParameter("Bias"):target() ~= 0.0 then
     return fail(name, "negative bias should clip to 0")
   end
-  -- Over-bank biases clip to sceneCount.
-  arb:hardSetBias(99.0)
-  if arb:getParameter("Bias"):target() ~= 8.0 then
-    return fail(name, "over-bank bias should clip to sceneCount")
+  -- Over-1 biases clip to 1 (normalized).
+  arb:hardSetBias(2.5)
+  if arb:getParameter("Bias"):target() ~= 1.0 then
+    return fail(name, "over-1 bias should clip to 1.0")
   end
   -- State should be Tracking-Manual after any hardSetBias.
   if arb:getState() ~= 0 then
@@ -111,20 +117,17 @@ local function test_transition_flag_latches_on_hardSetBias()
   arb:setName("bench.arbiter")
   arb:setSceneCount(8)
 
-  -- Drain any pending flag from construction-time clips.
   arb:consumeTransitionFlag()
-  -- Bias was at 0; hard-set to 3 should change the rounded output
-  -- index and latch the flag.
-  arb:hardSetBias(3.0)
+  -- Bias 0.0 -> 0.5 with N=8 -> output 0 -> 4. Index changes.
+  arb:hardSetBias(0.5)
   if not arb:consumeTransitionFlag() then
     return fail(name, "transition flag should latch after index change")
   end
-  -- Second consume should return false (auto-cleared).
   if arb:consumeTransitionFlag() then
     return fail(name, "transition flag should auto-clear after consume")
   end
   -- Same bias again: no new transition.
-  arb:hardSetBias(3.0)
+  arb:hardSetBias(0.5)
   if arb:consumeTransitionFlag() then
     return fail(name, "same bias write should not re-latch the flag")
   end
@@ -137,47 +140,59 @@ local function test_currentIndex_tracks_bias_in_manual()
   arb:setName("bench.arbiter")
   arb:setSceneCount(16)
 
-  arb:hardSetBias(5.0)
-  if arb:getCurrentIndex() ~= 5 then
-    return fail(name, "currentIndex expected 5, got " .. arb:getCurrentIndex())
-  end
-  -- Fractional bias rounds to nearest integer.
-  arb:hardSetBias(7.4)
-  if arb:getCurrentIndex() ~= 7 then
-    return fail(name, "bias 7.4 should round to 7")
-  end
-  arb:hardSetBias(7.6)
+  -- bias 0.5 with N=16 -> round(8.0) = 8
+  arb:hardSetBias(0.5)
   if arb:getCurrentIndex() ~= 8 then
-    return fail(name, "bias 7.6 should round to 8")
+    return fail(name, "bias 0.5 * 16 expected 8, got " .. arb:getCurrentIndex())
+  end
+  -- bias 7/16 -> round(7.0) = 7
+  arb:hardSetBias(7 / 16)
+  if arb:getCurrentIndex() ~= 7 then
+    return fail(name, "bias 7/16 expected currentIndex 7")
+  end
+  -- bias 0.97 -> round(15.52) = 16, clipped to 16 (sceneCount)
+  arb:hardSetBias(0.97)
+  if arb:getCurrentIndex() ~= 16 then
+    return fail(name, "bias 0.97 * 16 expected currentIndex 16")
+  end
+  -- bias 1.0 -> round(16) = 16
+  arb:hardSetBias(1.0)
+  if arb:getCurrentIndex() ~= 16 then
+    return fail(name, "bias 1.0 expected currentIndex 16")
   end
   pass(name)
 end
 
-local function test_setSceneCount_clip_currentIndex()
-  local name = "setSceneCount-clip-currentIndex"
+local function test_sceneCount_change_rescales_output()
+  -- kIndex: bias stays normalized across bank changes, but the
+  -- output index rescales since it's round(bias * N).
+  local name = "sceneCount-change-rescales-output"
   local arb = app.SceneIndexArbiter()
   arb:setName("bench.arbiter")
   arb:setSceneCount(16)
-  arb:hardSetBias(12.0)
-  if arb:getCurrentIndex() ~= 12 then
-    return fail(name, "pre-shrink index expected 12")
+  arb:hardSetBias(0.5)
+  if arb:getCurrentIndex() ~= 8 then
+    return fail(name, "16-scene bank at 0.5 expected index 8")
   end
   arb:setSceneCount(8)
-  -- Bias has clipped to 8; currentIndex tracks via the same
-  -- clamp (last-fired-index reset path).
-  if arb:getCurrentIndex() > 8 then
-    return fail(name, "currentIndex should clip to new sceneCount")
+  if arb:getCurrentIndex() ~= 4 then
+    return fail(name, "8-scene bank at 0.5 expected index 4, got " ..
+                 arb:getCurrentIndex())
+  end
+  arb:setSceneCount(2)
+  if arb:getCurrentIndex() ~= 1 then
+    return fail(name, "2-scene bank at 0.5 expected index 1")
   end
   pass(name)
 end
 
 app.logInfo("scene_arbiter_bench: starting v1.1 phase 5.3a arbiter tests")
 test_construct_and_defaults()
-test_setSceneCount_clip()
+test_setSceneCount_preserves_normalized_bias()
 test_hardSetBias_clip_and_state()
 test_transition_flag_latches_on_hardSetBias()
 test_currentIndex_tracks_bias_in_manual()
-test_setSceneCount_clip_currentIndex()
+test_sceneCount_change_rescales_output()
 
 local total = #results
 local pass_count = 0
