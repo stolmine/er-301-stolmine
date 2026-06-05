@@ -66,8 +66,8 @@ local function test_construct_and_defaults()
   pass(name)
 end
 
-local function test_setSceneCount_preserves_normalized_bias()
-  local name = "setSceneCount-preserves-bias"
+local function test_setSceneCount_normalized_bias_accepted()
+  local name = "setSceneCount-normalized-bias-accepted"
   local arb = app.SceneIndexArbiter()
   arb:setName("bench.arbiter")
   arb:setSceneCount(16)
@@ -75,15 +75,8 @@ local function test_setSceneCount_preserves_normalized_bias()
   if math.abs(arb:getParameter("Bias"):target() - 0.5) > 1e-6 then
     return fail(name, "bias should accept normalized midpoint")
   end
-  -- kIndex: bank shrink does NOT shrink Bias. The normalized
-  -- position is the user's intent and stays put; the audible
-  -- output rescales via the new N.
-  arb:setSceneCount(4)
-  if math.abs(arb:getParameter("Bias"):target() - 0.5) > 1e-6 then
-    return fail(name, "bias should stay at 0.5 after sceneCount change")
-  end
-  if arb:getSceneCount() ~= 4 then
-    return fail(name, "sceneCount expected 4, got " .. arb:getSceneCount())
+  if arb:getSceneCount() ~= 16 then
+    return fail(name, "sceneCount expected 16, got " .. arb:getSceneCount())
   end
   pass(name)
 end
@@ -163,36 +156,60 @@ local function test_currentIndex_tracks_bias_in_manual()
   pass(name)
 end
 
-local function test_sceneCount_change_rescales_output()
-  -- kIndex: bias stays normalized across bank changes, but the
-  -- output index rescales since it's round(bias * N).
-  local name = "sceneCount-change-rescales-output"
+local function test_sceneCount_change_preserves_selected_scene()
+  -- kIndex: when sceneCount changes, the arbiter re-anchors Bias
+  -- so the currently-selected integer scene stays selected (fixes
+  -- the .49 bug where adding a scene with high Bias auto-selected
+  -- the just-added one because round(0.7 * 4) > round(0.7 * 3)).
+  -- Bias visually snaps to the new fractional position; output
+  -- integer is preserved.
+  local name = "sceneCount-change-preserves-selected-scene"
   local arb = app.SceneIndexArbiter()
   arb:setName("bench.arbiter")
-  arb:setSceneCount(16)
-  arb:hardSetBias(0.5)
-  if arb:getCurrentIndex() ~= 8 then
-    return fail(name, "16-scene bank at 0.5 expected index 8")
-  end
-  arb:setSceneCount(8)
-  if arb:getCurrentIndex() ~= 4 then
-    return fail(name, "8-scene bank at 0.5 expected index 4, got " ..
+  arb:setSceneCount(3)
+  arb:hardSetBias(0.7)  -- round(0.7 * 3) = round(2.1) = 2
+  if arb:getCurrentIndex() ~= 2 then
+    return fail(name, "3-scene bank at bias 0.7 expected index 2, got " ..
                  arb:getCurrentIndex())
   end
+  -- Add a scene: N=3 -> 4. Without re-anchor, output drifts to 3
+  -- (the new scene). With re-anchor, output stays at 2.
+  arb:setSceneCount(4)
+  if arb:getCurrentIndex() ~= 2 then
+    return fail(name, "after add-scene expected index 2 preserved, got " ..
+                 arb:getCurrentIndex())
+  end
+  -- And bias should have shrunk from 0.7 to 0.5 (== 2 / 4).
+  if math.abs(arb:getParameter("Bias"):target() - 0.5) > 1e-6 then
+    return fail(name, "bias should re-anchor to 0.5 after grow to N=4")
+  end
+  -- Bank shrink that clips current index: N=4 -> 2, oldIdx 2 fits
+  -- exactly at the top (preservedIdx = min(2, 2) = 2). New bias =
+  -- 2 / 2 = 1.0.
   arb:setSceneCount(2)
+  if arb:getCurrentIndex() ~= 2 then
+    return fail(name, "shrink to N=2 expected index 2 (clipped), got " ..
+                 arb:getCurrentIndex())
+  end
+  if math.abs(arb:getParameter("Bias"):target() - 1.0) > 1e-6 then
+    return fail(name, "bias should re-anchor to 1.0 after shrink to N=2")
+  end
+  -- Bank shrink that clips harder: N=2 -> 1, oldIdx 2 clips to 1.
+  arb:setSceneCount(1)
   if arb:getCurrentIndex() ~= 1 then
-    return fail(name, "2-scene bank at 0.5 expected index 1")
+    return fail(name, "shrink to N=1 expected index 1, got " ..
+                 arb:getCurrentIndex())
   end
   pass(name)
 end
 
 app.logInfo("scene_arbiter_bench: starting v1.1 phase 5.3a arbiter tests")
 test_construct_and_defaults()
-test_setSceneCount_preserves_normalized_bias()
+test_setSceneCount_normalized_bias_accepted()
 test_hardSetBias_clip_and_state()
 test_transition_flag_latches_on_hardSetBias()
 test_currentIndex_tracks_bias_in_manual()
-test_sceneCount_change_rescales_output()
+test_sceneCount_change_preserves_selected_scene()
 
 local total = #results
 local pass_count = 0

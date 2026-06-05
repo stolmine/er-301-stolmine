@@ -142,12 +142,32 @@ namespace od
   {
     if (n < 0) n = 0;
     if (n == mSceneCount) return;
+
+    // Re-anchor Bias so the currently-selected scene stays selected
+    // through the bank-size change. Without this, Bias at e.g. 0.7
+    // with N=3 (output = round(2.1) = 2) drifts to scene 3 when N
+    // grows to 4 (output = round(2.8) = 3), so adding a new scene
+    // looked like it auto-selected the new one. Normalize the old
+    // integer output to the new bank scale: newBias = oldIdx / N'.
+    // Affects only Manual-state output audibly; in Tracking-CV the
+    // gain*cvIn product still rescales naturally, but Bias preserves
+    // the user's manual home position for when they yield back.
+    int oldIdx = mLastFiredIndex;
     mSceneCount = n;
-    // Bias is normalized; doesn't shrink with N. But the effective
-    // output index DOES change when N changes (round(Bias * N) is
-    // a different integer for a different N), so re-evaluate and
-    // fire a transition if needed so the morpher rebuild (Lua
-    // side, triggered separately) and the UI redraw stay in sync.
+    if (n > 0 && oldIdx > 0)
+    {
+      int preservedIdx = (oldIdx > n) ? n : oldIdx;
+      mBias.hardSet((float)preservedIdx / (float)n);
+    }
+    else if (n == 0)
+    {
+      mBias.hardSet(0.0f);
+    }
+
+    // Re-evaluate effective output. With Bias re-anchored, idx
+    // should usually equal oldIdx (or n if oldIdx was clipped down
+    // on bank shrink). CV-state output may still shift since
+    // gain*cvIn*N rescales naturally; that's expected.
     int idx = computeEffectiveIndex(mLastCVSample, mGain.target(),
                                      mBias.target());
     if (idx != mLastFiredIndex)
