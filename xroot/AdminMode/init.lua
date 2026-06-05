@@ -34,6 +34,42 @@ menu:add("Card Console", card)
 local history = require "LogHistory"
 menu:add("Log History", history)
 
+-- Reset Scene Mode: clears scene-mode state on every channel
+-- (drops all scenes, clears CV subchains, resets arbiter
+-- Bias/Gain). Inline-action shim that satisfies AdminMode.Menu's
+-- "destination has :show()" contract without needing a full
+-- Window subclass. Confirmation gated by the
+-- confirmSceneModeReset setting (default yes) so power users
+-- can disable the prompt.
+local resetSceneMode = {
+  show = function(self)
+    local Channels = require "Channels"
+    local doReset = function()
+      local seen = {}
+      for i = 1, 4 do
+        local chain = Channels.getChain(i)
+        if chain and not seen[chain] then
+          seen[chain] = true
+          if chain.resetSceneMode then chain:resetSceneMode() end
+        end
+      end
+    end
+    if Settings.get("confirmSceneModeReset") == "no" then
+      doReset()
+      return
+    end
+    local Verification = require "Verification"
+    local dlg = Verification.Main(
+      "Reset scene mode on all channels?",
+      "Drops all scenes + CV.")
+    dlg:subscribe("done", function(ans)
+      if ans then doReset() end
+    end)
+    dlg:show()
+  end
+}
+menu:add("Reset Scene Mode", resetSceneMode)
+
 if app.TESTING and Settings.get("enableDevMode") then
   local tests = require "Tests.Console"
   menu:add("Test Console", tests())

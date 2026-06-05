@@ -362,6 +362,15 @@ local defaults = {
       "no"
     }
   },
+  confirmSceneModeReset = {
+    category = "Confirmations",
+    description = "When resetting scene mode...",
+    value = "yes",
+    choices = {
+      "yes",
+      "no"
+    }
+  },
   confirmQuickSaveOverwrite = {
     category = "Confirmations",
     description = "When saving over an occupied quicksave...",
