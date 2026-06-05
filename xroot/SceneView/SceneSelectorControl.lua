@@ -115,10 +115,17 @@ function SceneSelectorControl:init(chain, role, sceneView)
     self.scope:setCornerRadius(3, 3, 3, 3)
     sub:addChild(self.scope)
 
+    -- Wide-range Gain map (+/-32, locked in plan doc) instead
+    -- of the stock Encoder.getMap("gain") which caps at +/-10.
+    -- Sub-volt CV sources need Gain ~16 to traverse a 16-scene
+    -- bank from a 1V swing; +/-32 leaves headroom for tighter
+    -- throws.
+    self._gainMap = app.LinearDialMap(-32, 32)
+    self._gainMap:setSteps(5.0, 1.0, 0.1, 0.01)
     self.gainReadout = app.Readout(0, 0, ply, 10)
     self.gainReadout:setParameter(self._gainParam)
     self.gainReadout:setCenter(subCol2, subCenter4)
-    self.gainReadout:setMap(Encoder.getMap("gain"))
+    self.gainReadout:setMap(self._gainMap)
     self.gainReadout:setUnits(app.unitNone)
     self.gainReadout:setPrecision(2)
     sub:addChild(self.gainReadout)
@@ -253,20 +260,25 @@ function SceneSelectorControl:encoder(change, shifted)
     fine = (self.biasEncoderState == Encoder.Fine)
   end
   self.focusedReadout:encoder(change, shifted, fine)
-  -- Bias-side encoder writes also need to land on the arbiter's
-  -- internal state machine so manual mode latches the CV
-  -- baseline. The Readout writes the Parameter directly; route
-  -- through hardSetBias to keep state consistent.
-  if self.focusedReadout == self.biasReadout and self.arbiter then
-    self.arbiter:hardSetBias(self._biasParam:value())
+  -- Arbiter state-machine relatch. Readout writes via softSet
+  -- (ramps mValue toward mTarget over 50 audio frames), so we
+  -- read :target() not :value() -- the latter would still hold
+  -- the stale pre-encoder value and we'd hardSet bias back to
+  -- it, undoing the encoder write. hardSetBias also re-latches
+  -- mCVInputAtEntry + mGainAtEntry from the current arbiter
+  -- state, which is what we want on a Gain change too so the
+  -- Schmitt threshold reflects the new Gain.
+  if self.arbiter then
+    self.arbiter:hardSetBias(self._biasParam:target())
   end
   self:_updateLabel()
   -- 5.4 dual-write: notify Performance so the v1.0 SceneView
   -- crossfader stays in sync with the arbiter Bias. Performance
-  -- handles the rebuild. 5.5 drops this when the morpher consumes
-  -- arbiter.Out directly.
+  -- handles the rebuild. 5.5b drops this when chip-tap rewires
+  -- to write arbiter directly and SceneView crossfader becomes
+  -- a computed read.
   self:callUp("syncSceneCrossfader", self.role,
-              math.floor(self._biasParam:value() + 0.5))
+              math.floor(self._biasParam:target() + 0.5))
   return true
 end
 
