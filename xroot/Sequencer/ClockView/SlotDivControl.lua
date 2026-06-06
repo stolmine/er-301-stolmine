@@ -55,16 +55,51 @@ function SlotDivControl:init(slotIdx)
   self._focused = false
 end
 
+-- Standard ER-301 selection/focus model:
+--   onCursorEnter only sets up the per-control state. It does NOT
+--     grab the encoder -- merely scrolling past a ply via encoder
+--     navigation must not steal focus from anything.
+--   spotPressed (M-tap) auto-focuses the fader on first tap and
+--     toggles on subsequent taps. This is what "grabs" the fader.
+--   onCursorLeave releases focus if still held.
+--   upReleased unfocuses the fader if focused (returns true so the
+--     event is consumed); if NOT focused, returns false so the
+--     event bubbles up to Window:upReleased for admin-menu egress.
+
 function SlotDivControl:onCursorEnter()
-  self:grabFocus("encoder", "zeroPressed", "cancelReleased")
-  Encoder.set(Encoder.Coarse)
-  self._focused = true
+  -- no auto-grab; selection-only.
 end
 
 function SlotDivControl:onCursorLeave()
-  self:releaseFocus("encoder", "zeroPressed", "cancelReleased")
-  Encoder.set(Encoder.Neutral)
+  if self._focused then
+    self:_unfocus()
+  end
+end
+
+function SlotDivControl:spotPressed(spotIndex, shifted, isFocusedPress)
+  if shifted then return end
+  if not isFocusedPress then
+    -- Cursor just landed via M-tap; auto-focus the fader.
+    self:_focus()
+    return
+  end
+  -- Already on this ply; second M-tap toggles focus.
+  if self._focused then self:_unfocus()
+  else self:_focus() end
+end
+
+function SlotDivControl:_focus()
+  if self._focused then return end
+  self._focused = true
+  self:grabFocus("encoder", "upReleased", "cancelReleased", "zeroPressed")
+  Encoder.set(Encoder.Coarse)
+end
+
+function SlotDivControl:_unfocus()
+  if not self._focused then return end
   self._focused = false
+  self:releaseFocus("encoder", "upReleased", "cancelReleased", "zeroPressed")
+  Encoder.set(Encoder.Neutral)
 end
 
 function SlotDivControl:encoder(change, shifted)
@@ -89,9 +124,19 @@ function SlotDivControl:zeroPressed()
   return true
 end
 
+function SlotDivControl:upReleased(shifted)
+  if self._focused then
+    self:_unfocus()
+    return true  -- consumed; do not bubble to Window egress.
+  end
+  return false   -- not focused: bubble up to Window:upReleased.
+end
+
 function SlotDivControl:cancelReleased(shifted)
-  -- No restore semantics for a settings fader; let the parent
-  -- handle (likely a "go back to admin menu" path).
+  if self._focused then
+    self:_unfocus()
+    return true
+  end
   return false
 end
 

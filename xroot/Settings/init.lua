@@ -232,6 +232,26 @@ local defaults = {
       "on"
     }
   },
+  sequencerClockSource = {
+    category = "Sequencer",
+    description = "Clock source:",
+    value = "internal",
+    choices = {
+      "internal",
+      "external"
+    },
+    onSet = function()
+      local seqTask = app.AudioThread.getSequencerTask()
+      if not seqTask then return end
+      local Settings = require "Settings"
+      local v = Settings.get("sequencerClockSource")
+      if v == "external" then
+        seqTask:setClockSource(1)  -- CLOCK_EXTERNAL
+      else
+        seqTask:setClockSource(0)  -- CLOCK_INTERNAL
+      end
+    end
+  },
   fileRecorderChannelCount = {
     category = "Multitrack Recorder",
     description = "Channel Count:",

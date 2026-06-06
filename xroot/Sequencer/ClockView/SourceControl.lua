@@ -10,9 +10,13 @@
 -- threshold readout at S2, globalDiv readout at S3 — keeping the
 -- div fader on S3 per locked design. SubButtons:
 --   S1 tap     -> Source picker (Source.Chooser, jacks tab).
---   S1 shifted -> int / ext mode toggle.
 --   S2 tap     -> Focus threshold readout (encoder writes); tap
 --                 again to open decimal keyboard.
+--
+-- The int/ext mode toggle lives in System Settings -> Sequencer ->
+-- "Clock source" (string-choice with onSet that calls
+-- seqTask:setClockSource). Standard ER-301 settings pattern; no
+-- in-view toggle button.
 --   S2 press / S2 release -> Manual fire (simulate rise / fall).
 --                            Standard Gate ViewControl pattern,
 --                            relocated to S2 because S3 is reserved
@@ -198,15 +202,7 @@ end
 
 function SourceControl:subReleased(i, shifted)
   if i == 1 then
-    if shifted then
-      if self.seqTask then
-        local cur = self.seqTask:getClockSource()
-        local next = (cur == CLOCK_EXTERNAL) and CLOCK_INTERNAL or CLOCK_EXTERNAL
-        self.seqTask:setClockSource(next)
-        self:_refreshLabels()
-      end
-      return true
-    end
+    if shifted then return false end
     local SourceChooser = require "Source.Chooser"
     local current = ClockBinding.getClockSource()
     local chooser = SourceChooser(nil, current)
