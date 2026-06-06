@@ -10,9 +10,10 @@ described a separate Sequencer admin section with a Clock
 settings sub-page. The new single-screen approach is simpler
 and reuses patterns from the v1.1 scenes work.
 
-Status: design locked 2026-06-05; revised 2026-06-05 after engine
-sanity-check (see "Engine reality" section below). Phase 6.1
-(this doc) is the deliverable.
+Status: bench-validated 2026-06-05. Phases 6.1-6.5 shipped on
+`feature/sequencer-external-clock`; 6.6 (persistence) and 6.7
+(deeper hardware sweep) pending. See "What shipped" section at
+the bottom for the as-built record.
 
 ---
 
@@ -457,3 +458,121 @@ From [[project_release_9_4_0]]:
   the existing Crash.init covers `Application.init`. Adding
   AdminMode entry + ClockView Window does not change install order.
   No new initialization paths to wrap.
+
+---
+
+## What shipped (as-built, 2026-06-05)
+
+Bench-validated on emu and hardware. Tag-derived dev versions
+`.9.4.0.5` through `.9.4.0.11` carry the full feature.
+
+### Engine — Comparator-based (revised from Inlet-direct plan)
+
+`SequencerTask` owns two `od::Comparator` member objects rather
+than raw Inlets. They expose:
+
+- Built-in threshold + hysteresis edge detection (trigger-on-rise).
+- `simulateRisingEdge` / `simulateFallingEdge` for manual fire from
+  the UI (S2 press/release on SourceControl, S3 press/release on
+  ResetControl).
+- `getRateInBPM` for rate measurement (consumed by the windowed
+  BPM cache, not directly).
+
+`SequencerTask::process` calls `mExtClockComp.process()` /
+`mExtResetComp.process()` directly each audio frame. Comparators
+are NOT part of any Chain — they're not scheduled by the graph
+compiler. `Comparator::process` is self-contained and audio-thread
+safe, so manual invocation works.
+
+Edge detection on `comparator->getOutput("Out")->buffer()` drives
+the global divider + per-slot dividers (clock path) and the slot
+reset (reset path, both modes).
+
+`Slot::externalTick(bpm, sampleRate)` and
+`Slot::processFrameExternal(...)` are the public hooks added to the
+sequencer engine. Internal mode is bit-identical to pre-phase-6.
+
+### Adaptive BPM readout
+
+`SequencerTask` maintains a windowed + EMA-smoothed `mCachedExtBpm`:
+
+1. Each audio frame, if the comparator has accumulated ≥8 edges
+   AND ≥0.5s elapsed since the last counter reset, take a rate
+   sample: `getRateInBPM() / 4.0` (the divide-by-4 is the 4 PPQN
+   assumption — 1/16-note pulses, matching the analog-modular
+   convention and the existing `Slot::stepLen=0.25` "tick = 1/16"
+   semantic).
+2. EMA-blend the sample: `mCachedExtBpm = 0.3 * sample + 0.7 *
+   mCachedExtBpm`. First valid sample snaps so the display doesn't
+   visibly climb from 0.
+3. Reset the comparator counter for the next window.
+
+`getExtBpm()` returns the cached float (no const_cast gymnastics).
+
+The windowed + EMA pattern was driven by user feedback: an earlier
+narrow-window implementation (>2 edges / >0.25s) produced ±1 BPM
+wobble. Bench-validated 2026-06-05: 5 Hz clock settles at 150 BPM
+in ~10 seconds, then holds.
+
+### Mode select — moved to System Settings
+
+`Settings/init.lua` exposes `sequencerClockSource` (choices
+"internal" / "external", category "Sequencer") with an `onSet`
+callback that pushes the value into `seqTask:setClockSource`.
+`Settings/Interface.lua` puts the entry under a new "Sequencer"
+category. The in-view shifted-S1 toggle was removed -- this is the
+standard ER-301 settings pattern and avoids cluttering the
+ClockView with mode state.
+
+### GridView BPM display switch
+
+`GridView` reads `seq:getClockSource()` each refresh:
+
+- Internal mode (default): `BPM N` / `BPM N.M` -- unchanged.
+- External mode: `BPM ext N` / `BPM ext N.M` / `BPM ext --` (last
+  case = derived value is 0, i.e. no pulses yet).
+
+The shift+S2 BPM-edit latch is silently inert in external mode
+(editing internal sBpm has no audible effect when externally
+clocked, so bailing is cleaner than fake-editor confusion).
+
+### UI conformance — focus model
+
+After user feedback, SlotDivControl now follows standard ER-301
+convention:
+
+- `onCursorEnter`: selection-only, no auto-grab. Scrolling past a
+  ply never steals encoder focus.
+- M-tap (`spotPressed`) auto-focuses the fader on first tap;
+  subsequent taps toggle.
+- `upReleased` / `cancelReleased`: focused → unfocus + return true
+  (consume); unfocused → return false (bubble up to Window's
+  egress for admin-menu return).
+
+ClockView Window itself has `upReleased` / `homeReleased` /
+`cancelReleased` that `:hide()` + emit "done", matching the
+Sample.Pool.Interface / GlobalChains.Interface convention.
+
+SourceControl + ResetControl were already correct (they only grab
+encoder inside `_setFocusedReadout` via explicit S-button gestures).
+
+### Source-picker wiring
+
+`xroot/Sequencer/ClockBinding.lua` connects picker selections
+directly to `comparator:getInput("In")` via
+`app.AudioThread.connect`. Held source NAMES (for both clock and
+reset) for UI + persistence (6.6).
+
+### Open items / known notes
+
+- **2x rate observation**: bench shows 5 Hz square source reads as
+  150 BPM (raw 600 / 4). Either the source is internally 10 Hz or
+  the PPQN should be 8 (rather than 4). User accepted 150 for v1
+  as the absolute number matters less than tracking proportionally
+  in a relative-timing system. Revisit at 6.7 hardware sweep with
+  a known-precise clock reference.
+- **Phase 6.6 persistence**: clockSource + globalDiv + per-slot
+  divs + picked source names all need to survive reboot. Not yet
+  wired into `Sequencer/Persist.lua`. Default state is internal +
+  div=1 everywhere + no sources bound, which already works on a
+  fresh boot.
