@@ -129,11 +129,13 @@ namespace od {
     void setSlotDiv(int slot, int div);
     int  getSlotDiv(int slot) const;
 
-    // Derived external BPM. Reads the ext-clock comparator's built-in
-    // rate counter (Comparator::getRateInBPM) which averages rising-edge
-    // count over the elapsed second-counter. Returns 0.0f until at least
-    // one ext clock pulse arrived since the last counter reset (which
-    // happens on source-switch / setClockSource).
+    // Derived external BPM, scaled to musical quarter-note tempo
+    // assuming the ext clock arrives at 4 PPQN (1/16-note pulses --
+    // analog-modular default; matches Slot::stepLen=0.25's "tick =
+    // 1/16" convention). Equivalently: ext_pulses_per_second * 15.
+    // Refreshed each audio frame from a windowed sample of the
+    // comparator's rate counter. Returns 0.0f until at least 3 ext
+    // clock pulses arrived after the last counter reset.
     float getExtBpm() const;
 
     // Bench-only resync of the divider state + comparator rate counters.

@@ -58,9 +58,15 @@ namespace od {
     // fresh. Driving this from the audio thread (rather than from
     // the view) means the value stays current whether or not the
     // ClockView is on screen.
+    //
+    // PPQN interpretation: ext clock pulses are assumed to be
+    // 1/16-note ticks (4 pulses per beat) -- the analog-modular
+    // default and what matches Slot::stepLen=0.25's "tick = 1/16"
+    // convention. So musical BPM = comparator_rate_in_bpm / 4
+    // (which is comparator_rate_in_hz * 60 / 4 = hz * 15).
     if (mExtClockComp.getRisingEdgeCount() > 2
         && mExtClockComp.getElapsed() > 0.25f) {
-      mCachedExtBpm = mExtClockComp.getRateInBPM();
+      mCachedExtBpm = mExtClockComp.getRateInBPM() / 4.0f;
       mExtClockComp.resetCounter();
     }
 
