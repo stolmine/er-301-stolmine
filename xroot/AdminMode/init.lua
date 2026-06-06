@@ -23,6 +23,8 @@ menu:add("Sample Pool", samples)
 menu:add("Global Chains", globalChains)
 menu:add("Multitrack Recorder", recorder)
 menu:add("Preamp Settings", gains)
+local sequencerClock = require "Sequencer.ClockView"
+menu:add("Sequencer Clock", sequencerClock())
 
 menu:header("Maintenance:")
 menu:add("CPU Load", load)

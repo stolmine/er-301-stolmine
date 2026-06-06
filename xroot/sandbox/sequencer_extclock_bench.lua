@@ -270,9 +270,35 @@ local function test_clock_binding_module()
 end
 
 -- ---------------------------------------------------------------------------
+-- Test 9 (phase 6.4): ClockView Window + controls instantiate cleanly.
+-- A headless instantiation smoke test that catches require-cycle bugs,
+-- missing methods on Source.Chooser, and any field-access typos before
+-- the user sees them at the UI. Does NOT call :show() since the GUI is
+-- not necessarily up at bench-load time.
+-- ---------------------------------------------------------------------------
+local function test_clockview_instantiation()
+  local name = "clockview-instantiation"
+  local ok, err = pcall(function()
+    local ClockView = require "Sequencer.ClockView"
+    local view = ClockView()
+    if not view then error("ClockView() returned nil") end
+    if not view.sourceControl then error("missing sourceControl") end
+    if not view.resetControl then error("missing resetControl") end
+    if not view.slotControls or #view.slotControls ~= 4 then
+      error("slotControls should be a 4-element table")
+    end
+  end)
+  if not ok then
+    fail(name, tostring(err))
+    return
+  end
+  pass(name)
+end
+
+-- ---------------------------------------------------------------------------
 -- Run all tests, report summary.
 -- ---------------------------------------------------------------------------
-app.logInfo("sequencer_extclock_bench: starting phase 6.2/6.3 isolation tests")
+app.logInfo("sequencer_extclock_bench: starting phase 6.2-6.4 isolation tests")
 
 test_clock_source_roundtrip()
 test_global_div_clamp()
@@ -282,6 +308,7 @@ test_default_ext_bpm()
 test_source_switch_resets_state()
 test_external_mode_no_spurious_ticks()
 test_clock_binding_module()
+test_clockview_instantiation()
 
 local total = #results
 local pass_count = 0
