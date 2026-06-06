@@ -51,22 +51,35 @@ namespace od {
     mExtClockComp.process();
     mExtResetComp.process();
 
-    // Refresh the windowed ext BPM cache. Same convention as
-    // ComparatorView::draw (lines 140-158): once we have >2 edges
-    // AND >0.25s elapsed since the last counter reset, take a
-    // rate sample and reset the counter so the next window starts
-    // fresh. Driving this from the audio thread (rather than from
-    // the view) means the value stays current whether or not the
-    // ClockView is on screen.
+    // Refresh the windowed ext BPM cache. Two-stage smoothing:
+    //   1. Window sample: wait until we have >=8 edges AND >=0.5s
+    //      elapsed before reading the comparator rate, then reset
+    //      the counter so the next window starts fresh. A wider
+    //      window than ComparatorView's (>2 edges / >0.25s) gives
+    //      a more stable raw sample at the cost of slower response
+    //      to true tempo changes (~1s settle at 75 BPM / 5 Hz pulse
+    //      input). The trade-off is fine for a display readout;
+    //      ticks themselves are not affected by this rate.
+    //   2. EMA on top of the windowed sample: 30% new, 70% retained.
+    //      Filters out the residual ±1 BPM wobble caused by edges
+    //      landing on different sides of frame boundaries.
     //
     // PPQN interpretation: ext clock pulses are assumed to be
     // 1/16-note ticks (4 pulses per beat) -- the analog-modular
     // default and what matches Slot::stepLen=0.25's "tick = 1/16"
     // convention. So musical BPM = comparator_rate_in_bpm / 4
     // (which is comparator_rate_in_hz * 60 / 4 = hz * 15).
-    if (mExtClockComp.getRisingEdgeCount() > 2
-        && mExtClockComp.getElapsed() > 0.25f) {
-      mCachedExtBpm = mExtClockComp.getRateInBPM() / 4.0f;
+    if (mExtClockComp.getRisingEdgeCount() >= 8
+        && mExtClockComp.getElapsed() >= 0.5f) {
+      const float windowSample = mExtClockComp.getRateInBPM() / 4.0f;
+      if (mCachedExtBpm <= 0.0f) {
+        // First valid sample: snap to it so the user doesn't watch
+        // the display climb from 0.
+        mCachedExtBpm = windowSample;
+      } else {
+        const float alpha = 0.3f;
+        mCachedExtBpm = alpha * windowSample + (1.0f - alpha) * mCachedExtBpm;
+      }
       mExtClockComp.resetCounter();
     }
 
