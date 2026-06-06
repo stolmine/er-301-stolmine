@@ -208,9 +208,71 @@ local function test_external_mode_no_spurious_ticks()
 end
 
 -- ---------------------------------------------------------------------------
+-- Test 8 (phase 6.3): ClockBinding source-picker wiring.
+-- Verifies set / get / clear for both clock and reset bindings, and
+-- that bad input is handled without raising. The actual electrical
+-- connectivity (Inlet.buffer() returning the source's audio) is
+-- covered by the broader audio graph test infrastructure.
+-- ---------------------------------------------------------------------------
+local function test_clock_binding_module()
+  local name = "clock-binding-module"
+  local ClockBinding = require "Sequencer.ClockBinding"
+
+  -- Initial state: nothing bound.
+  if ClockBinding.getClockSourceName() ~= nil then
+    fail(name, "ClockBinding boots with non-nil clock source"); return
+  end
+  if ClockBinding.getResetSourceName() ~= nil then
+    fail(name, "ClockBinding boots with non-nil reset source"); return
+  end
+
+  -- Bind G1 to clock, G2 to reset.
+  ClockBinding.setClockSource("G1")
+  if ClockBinding.getClockSourceName() ~= "G1" then
+    fail(name, "after setClockSource('G1'), getClockSourceName != 'G1'"); return
+  end
+  ClockBinding.setResetSource("G2")
+  if ClockBinding.getResetSourceName() ~= "G2" then
+    fail(name, "after setResetSource('G2'), getResetSourceName != 'G2'"); return
+  end
+
+  -- getClockSource returns the actual Source.External object.
+  local clkSrc = ClockBinding.getClockSource()
+  if not clkSrc or not clkSrc.getOutlet then
+    fail(name, "getClockSource did not return a Source.External-like object"); return
+  end
+
+  -- Rebind to a different source (G3); previous binding should be
+  -- transparently disconnected.
+  ClockBinding.setClockSource("G3")
+  if ClockBinding.getClockSourceName() ~= "G3" then
+    fail(name, "rebinding clock to 'G3' did not stick"); return
+  end
+
+  -- Clear via clearClockSource.
+  ClockBinding.clearClockSource()
+  if ClockBinding.getClockSourceName() ~= nil then
+    fail(name, "clearClockSource did not nil the name"); return
+  end
+
+  -- Clear via setClockSource(nil).
+  ClockBinding.setResetSource(nil)
+  if ClockBinding.getResetSourceName() ~= nil then
+    fail(name, "setResetSource(nil) did not nil the name"); return
+  end
+
+  -- Unknown source name: should log + leave state untouched, not crash.
+  ClockBinding.setClockSource("nonsense-source-xyz")
+  if ClockBinding.getClockSourceName() ~= nil then
+    fail(name, "unknown source name should leave clock binding unset"); return
+  end
+  pass(name)
+end
+
+-- ---------------------------------------------------------------------------
 -- Run all tests, report summary.
 -- ---------------------------------------------------------------------------
-app.logInfo("sequencer_extclock_bench: starting phase 6.2 isolation tests")
+app.logInfo("sequencer_extclock_bench: starting phase 6.2/6.3 isolation tests")
 
 test_clock_source_roundtrip()
 test_global_div_clamp()
@@ -219,6 +281,7 @@ test_inlet_accessors()
 test_default_ext_bpm()
 test_source_switch_resets_state()
 test_external_mode_no_spurious_ticks()
+test_clock_binding_module()
 
 local total = #results
 local pass_count = 0
