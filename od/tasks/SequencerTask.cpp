@@ -51,6 +51,19 @@ namespace od {
     mExtClockComp.process();
     mExtResetComp.process();
 
+    // Refresh the windowed ext BPM cache. Same convention as
+    // ComparatorView::draw (lines 140-158): once we have >2 edges
+    // AND >0.25s elapsed since the last counter reset, take a
+    // rate sample and reset the counter so the next window starts
+    // fresh. Driving this from the audio thread (rather than from
+    // the view) means the value stays current whether or not the
+    // ClockView is on screen.
+    if (mExtClockComp.getRisingEdgeCount() > 2
+        && mExtClockComp.getElapsed() > 0.25f) {
+      mCachedExtBpm = mExtClockComp.getRateInBPM();
+      mExtClockComp.resetCounter();
+    }
+
     // v2 outlet plumbing. Index order matches the v2 column layout:
     //   [0] cv1, [1] cv2, [2] gate1Amp, [3] gate2Amp,
     //   [4] stepLen, [5] transpose.
@@ -432,8 +445,9 @@ namespace od {
       mClockSource = source;
       mGlobalDivCount = 0;
       for (int i = 0; i < sequencer::kNumSlots; ++i) mSlotDivCount[i] = 0;
-      // Drop BPM estimate so the next pulse starts fresh measurement
-      // instead of averaging against a stale tempo window.
+      // Drop BPM estimate + comparator window so the next pulse starts
+      // fresh measurement rather than carrying over stale state.
+      mCachedExtBpm = 0.0f;
       mExtClockComp.resetCounter();
     }
   }
@@ -469,11 +483,7 @@ namespace od {
 
   float SequencerTask::getExtBpm() const
   {
-    // getRateInBPM is non-const on Comparator (it touches member state
-    // for the rate counter / hertz cache). Cast away const here since
-    // this getter is logically a read-only observation. Worst case is
-    // a brief stale read at the BPM display, musically harmless.
-    return const_cast<Comparator&>(mExtClockComp).getRateInBPM();
+    return mCachedExtBpm;
   }
 
   void SequencerTask::resetDividers()

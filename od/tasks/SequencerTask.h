@@ -257,6 +257,17 @@ namespace od {
                                // a master tick when it hits mGlobalDiv.
     int mSlotDiv[sequencer::kNumSlots]      = {1, 1, 1, 1};
     int mSlotDivCount[sequencer::kNumSlots] = {0, 0, 0, 0};
+
+    // Windowed ext BPM cache. SequencerTask refreshes this from the
+    // comparator's running rate counter every kBpmWindowSec of elapsed
+    // time (or every kBpmWindowEdges edges -- whichever comes first),
+    // then resets the comparator's counter. Without this, calling
+    // getRateInBPM directly accumulates over an ever-widening window
+    // and the displayed value drifts slowly toward the true rate. The
+    // ComparatorView graphic uses the same trick internally but only
+    // refreshes when visible; the audio-thread cache keeps the rate
+    // current regardless of which view the user is on.
+    float mCachedExtBpm = 0.0f;
   };
 
 } // namespace od
