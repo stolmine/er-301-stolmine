@@ -2,6 +2,7 @@
 
 #include <od/tasks/Task.h>
 #include <od/objects/Outlet.h>
+#include <od/objects/Inlet.h>
 #include <od/sequencer/Sequencer.h>
 
 namespace od {
@@ -73,6 +74,61 @@ namespace od {
     // anyway.
     void  setBpm(float bpm);
     float getBpm() const;
+
+    // -------------------------------------------------------------------
+    // External clock + reset (Phase 6 — sequencer external clock).
+    //
+    // CLOCK_INTERNAL (default) keeps the original behaviour: each Slot
+    // ticks autonomously from its own stepLen lane via Slot::processFrame.
+    // CLOCK_EXTERNAL replaces per-slot scheduling with a SequencerTask-
+    // owned divider chain driven by extClock rising edges, dispatching
+    // Slot::externalTick() per surviving tick. extReset rising edges
+    // call Slot::reset() on all four slots in BOTH modes (reset is
+    // independent of clock source).
+    //
+    // Inlets default to ZeroOutput when unconnected (od/objects/Inlet.cpp);
+    // unconnected = no edges = no behaviour change.
+    // -------------------------------------------------------------------
+    enum ClockSource {
+      CLOCK_INTERNAL = 0,
+      CLOCK_EXTERNAL = 1
+    };
+
+    void setClockSource(int source);
+    int  getClockSource() const;
+
+    // Inlet accessors for Lua-side `app.AudioThread.connect(srcOutlet,
+    // seqTask:getExtClockInlet())` wiring from a Source.External-style
+    // picker. The picker UI lives on plies 1 + 2 of the SequencerClockView
+    // SpottedStrip (phase 6.4).
+    Inlet* getExtClockInlet() { return &mExtClock; }
+    Inlet* getExtResetInlet() { return &mExtReset; }
+
+    // Global pre-divider (ply 1 main fader). Range 1..16, clamped.
+    void setGlobalDiv(int div);
+    int  getGlobalDiv() const;
+
+    // Per-slot post-divider (plies 3..6). slot in 0..3; div in 1..16.
+    void setSlotDiv(int slot, int div);
+    int  getSlotDiv(int slot) const;
+
+    // Derived external BPM. Updated by SequencerTask::process() on each
+    // master event from inter-arrival time, smoothed via EMA. Returns
+    // 0.0f until at least two ext clock pulses have arrived. Sequencer
+    // views read this when clockSource == CLOCK_EXTERNAL to display the
+    // running tempo (the internal-BPM Setting display is greyed out in
+    // external mode).
+    //
+    // Single-writer (audio thread) / single-reader (UI thread) plain
+    // float -- same convention as the v1.1 SceneIndexArbiter UI-poll
+    // surface. Worst-case stale read is musically harmless.
+    float getExtBpm() const;
+
+    // Bench-only resync of the divider state. Useful when isolation-
+    // testing globalDiv changes mid-clock so the next pulse fires
+    // immediately rather than waiting for the counter to roll over.
+    // Not called from production code paths.
+    void resetDividers();
 
     // Bench-harness proxy API. Lua passes integers and floats only;
     // Predicate / Action structs are not SWIG-exposed for v0.1.
@@ -163,6 +219,35 @@ namespace od {
   private:
     sequencer::Slot mSlots[sequencer::kNumSlots];
     static float    sBpm;
+
+    // External clock + reset Inlets. Owned via Task::own() in the
+    // ctor for refcount lifecycle. Lua connects external Source
+    // outlets directly to these via `app.AudioThread.connect`.
+    Inlet mExtClock{"ExtClock"};
+    Inlet mExtReset{"ExtReset"};
+
+    // Edge-detector state. Compared against this frame's per-sample
+    // values; an edge fires when prev < 0.5 && cur >= 0.5.
+    float mExtClockPrev = 0.0f;
+    float mExtResetPrev = 0.0f;
+
+    // Source selector + divider state.
+    int mClockSource     = CLOCK_INTERNAL;
+    int mGlobalDiv       = 1;
+    int mGlobalDivCount  = 0;  // increments on each ext clock edge; fires
+                               // a master tick when it hits mGlobalDiv.
+    int mSlotDiv[sequencer::kNumSlots]      = {1, 1, 1, 1};
+    int mSlotDivCount[sequencer::kNumSlots] = {0, 0, 0, 0};
+
+    // Derived ext BPM. mExtBpm is the smoothed value Lua reads.
+    // mExtEventLastSampleClock is a sample-count timestamp of the
+    // previous master tick, used to compute inter-arrival time.
+    // mFrameSampleClock is incremented by FRAMELENGTH per process()
+    // call so timestamps stay monotonic across frames.
+    float    mExtBpm                  = 0.0f;
+    uint64_t mExtEventLastSampleClock = 0;
+    bool     mExtEventLastValid       = false;
+    uint64_t mFrameSampleClock        = 0;
   };
 
 } // namespace od

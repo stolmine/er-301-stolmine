@@ -20,6 +20,10 @@ namespace od {
     own(mSeq4Gate1Amp); own(mSeq4Gate2Amp);
     own(mSeq4StepLen); own(mSeq4Transpose);
 
+    // Ext-clock + reset inlets (phase 6).
+    own(mExtClock);
+    own(mExtReset);
+
     for (int i = 0; i < sequencer::kNumSlots; ++i) {
       mSlots[i].init(i);
     }
@@ -33,7 +37,11 @@ namespace od {
   {
     const int frameLen = FRAMELENGTH;
     const float sampleRate = static_cast<float>(globalConfig.sampleRate);
-    const float bpm = sBpm;
+    // sBpm is the internal-mode BPM. External mode prefers the derived
+    // ext BPM for gate-length math (so gate spans track the actual
+    // incoming tempo) but falls back to sBpm if we haven't accumulated
+    // a tempo estimate yet (< 2 ext pulses since boot / source switch).
+    const float internalBpm = sBpm;
 
     // v2 outlet plumbing. Index order matches the v2 column layout:
     //   [0] cv1, [1] cv2, [2] gate1Amp, [3] gate2Amp,
@@ -45,17 +53,114 @@ namespace od {
       {&mSeq4Cv1, &mSeq4Cv2, &mSeq4Gate1Amp, &mSeq4Gate2Amp, &mSeq4StepLen, &mSeq4Transpose}
     };
 
-    for (int s = 0; s < sequencer::kNumSlots; ++s) {
-      mSlots[s].processFrame(
-        frameLen,
-        outs[s][sequencer::kColCV1]->buffer(),
-        outs[s][sequencer::kColCV2]->buffer(),
-        outs[s][sequencer::kColGate1Len]->buffer(),
-        outs[s][sequencer::kColGate2Len]->buffer(),
-        outs[s][sequencer::kColStepLen]->buffer(),
-        outs[s][sequencer::kColTranspose]->buffer(),
-        bpm, sampleRate);
+    // Reset edge detection — runs in BOTH modes. A modular reset jack
+    // is still useful when the sequencer is internally clocked but
+    // synced to an external transport. Detect any rising edge anywhere
+    // in this frame and fire reset() on all slots at the start (v1
+    // sample-quantizes resets to the start of the frame for
+    // simplicity; sample-accurate splitting is a v2 refinement).
+    {
+      const float *rstBuf = mExtReset.buffer();
+      bool resetEdge = false;
+      float prev = mExtResetPrev;
+      for (int i = 0; i < frameLen; ++i) {
+        const float cur = rstBuf[i];
+        if (prev < 0.5f && cur >= 0.5f) resetEdge = true;
+        prev = cur;
+      }
+      mExtResetPrev = prev;
+      if (resetEdge) {
+        for (int s = 0; s < sequencer::kNumSlots; ++s) {
+          mSlots[s].reset();
+        }
+      }
     }
+
+    if (mClockSource == CLOCK_EXTERNAL) {
+      // 1) Per-sample ext clock edge detection. Each edge feeds the
+      //    global divider; surviving ticks feed per-slot dividers;
+      //    surviving per-slot ticks call slot.externalTick(). Per v1
+      //    plan, ticks fire at the start of the frame (one frame of
+      //    latency, ~2.7ms at 48k/128).
+      const float *clkBuf = mExtClock.buffer();
+      float prev = mExtClockPrev;
+      // Pick BPM for externalTick gate-length math. Prefer derived ext
+      // BPM when available; fall back to internal BPM until we have a
+      // valid measurement.
+      const float gateBpm = (mExtBpm > 0.0f) ? mExtBpm : internalBpm;
+
+      for (int i = 0; i < frameLen; ++i) {
+        const float cur = clkBuf[i];
+        if (prev < 0.5f && cur >= 0.5f) {
+          // Ext clock rising edge. Advance global divider.
+          ++mGlobalDivCount;
+          if (mGlobalDivCount >= mGlobalDiv) {
+            mGlobalDivCount = 0;
+            // Master tick. Update derived BPM, then dispatch per-slot
+            // dividers.
+            const uint64_t nowSamples = mFrameSampleClock + static_cast<uint64_t>(i);
+            if (mExtEventLastValid) {
+              const uint64_t deltaSamples = nowSamples - mExtEventLastSampleClock;
+              if (deltaSamples > 0) {
+                // master_event = 1 beat at the per-slot level (no PPQN
+                // scaling in v1; the user shapes rate via globalDiv).
+                // BPM = 60 / (deltaSeconds). EMA smooths jitter; alpha
+                // = 0.25 gives ~4-tick settle (tunable in 6.7 bench).
+                const float deltaSec = static_cast<float>(deltaSamples) / sampleRate;
+                const float instantBpm = 60.0f / deltaSec;
+                const float alpha = 0.25f;
+                if (mExtBpm <= 0.0f) {
+                  mExtBpm = instantBpm;
+                } else {
+                  mExtBpm = alpha * instantBpm + (1.0f - alpha) * mExtBpm;
+                }
+              }
+            }
+            mExtEventLastSampleClock = nowSamples;
+            mExtEventLastValid = true;
+
+            for (int s = 0; s < sequencer::kNumSlots; ++s) {
+              ++mSlotDivCount[s];
+              if (mSlotDivCount[s] >= mSlotDiv[s]) {
+                mSlotDivCount[s] = 0;
+                mSlots[s].externalTick(gateBpm, sampleRate);
+              }
+            }
+          }
+        }
+        prev = cur;
+      }
+      mExtClockPrev = prev;
+
+      // 2) Emission pass — each slot fills its output buffers without
+      //    advancing its own samplesUntilTick.
+      for (int s = 0; s < sequencer::kNumSlots; ++s) {
+        mSlots[s].processFrameExternal(
+          frameLen,
+          outs[s][sequencer::kColCV1]->buffer(),
+          outs[s][sequencer::kColCV2]->buffer(),
+          outs[s][sequencer::kColGate1Len]->buffer(),
+          outs[s][sequencer::kColGate2Len]->buffer(),
+          outs[s][sequencer::kColStepLen]->buffer(),
+          outs[s][sequencer::kColTranspose]->buffer());
+      }
+    } else {
+      // CLOCK_INTERNAL — existing behaviour, per-slot polymetric
+      // stepLen-driven scheduling. Unchanged from pre-phase-6.
+      for (int s = 0; s < sequencer::kNumSlots; ++s) {
+        mSlots[s].processFrame(
+          frameLen,
+          outs[s][sequencer::kColCV1]->buffer(),
+          outs[s][sequencer::kColCV2]->buffer(),
+          outs[s][sequencer::kColGate1Len]->buffer(),
+          outs[s][sequencer::kColGate2Len]->buffer(),
+          outs[s][sequencer::kColStepLen]->buffer(),
+          outs[s][sequencer::kColTranspose]->buffer(),
+          internalBpm, sampleRate);
+      }
+    }
+
+    mFrameSampleClock += static_cast<uint64_t>(frameLen);
   }
 
   sequencer::Slot &SequencerTask::getSlot(int idx)
@@ -331,6 +436,68 @@ namespace od {
   float SequencerTask::heldTranspose(int slot) const
   {
     return mSlots[clampSlot(slot)].heldTranspose;
+  }
+
+  // -------------------------------------------------------------------------
+  // External clock + reset (phase 6) — setters / getters / inlet accessors.
+  // -------------------------------------------------------------------------
+
+  void SequencerTask::setClockSource(int source)
+  {
+    // Switching modes resets the divider counters and the BPM-estimate
+    // state so the new mode starts cleanly. The next ext-clock edge
+    // (in external mode) or the next frame (in internal mode) fires a
+    // tick as expected.
+    if (source != CLOCK_INTERNAL && source != CLOCK_EXTERNAL) return;
+    if (mClockSource != source) {
+      mClockSource = source;
+      mGlobalDivCount = 0;
+      for (int i = 0; i < sequencer::kNumSlots; ++i) mSlotDivCount[i] = 0;
+      // Drop BPM estimate so the next pulse starts fresh measurement
+      // instead of EMA-blending against a stale tempo.
+      mExtBpm = 0.0f;
+      mExtEventLastValid = false;
+    }
+  }
+
+  int SequencerTask::getClockSource() const
+  {
+    return mClockSource;
+  }
+
+  void SequencerTask::setGlobalDiv(int div)
+  {
+    if (div < 1) div = 1;
+    if (div > 16) div = 16;
+    mGlobalDiv = div;
+  }
+
+  int SequencerTask::getGlobalDiv() const
+  {
+    return mGlobalDiv;
+  }
+
+  void SequencerTask::setSlotDiv(int slot, int div)
+  {
+    if (div < 1) div = 1;
+    if (div > 16) div = 16;
+    mSlotDiv[clampSlot(slot)] = div;
+  }
+
+  int SequencerTask::getSlotDiv(int slot) const
+  {
+    return mSlotDiv[clampSlot(slot)];
+  }
+
+  float SequencerTask::getExtBpm() const
+  {
+    return mExtBpm;
+  }
+
+  void SequencerTask::resetDividers()
+  {
+    mGlobalDivCount = 0;
+    for (int i = 0; i < sequencer::kNumSlots; ++i) mSlotDivCount[i] = 0;
   }
 
 } // namespace od

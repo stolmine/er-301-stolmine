@@ -52,6 +52,8 @@ local function start()
   dofile(app.roots.x .. "/sandbox/scene_arbiter_bench.lua")
   -- v1.1 ParamSetMorph kVeeIndexed isolation bench (TODO: remove once 5.3 ships)
   dofile(app.roots.x .. "/sandbox/scene_morph_indexed_bench.lua")
+  -- Phase 6.2 sequencer external-clock isolation bench (TODO: remove once 6.7 ships)
+  dofile(app.roots.x .. "/sandbox/sequencer_extclock_bench.lua")
   -- local Debug = require "Debug"
   -- Debug.traceRequires()
   app.logInfo("Entering Application")
