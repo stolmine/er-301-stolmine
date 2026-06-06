@@ -10,8 +10,9 @@ described a separate Sequencer admin section with a Clock
 settings sub-page. The new single-screen approach is simpler
 and reuses patterns from the v1.1 scenes work.
 
-Status: design locked 2026-06-05. Phase 6.1 (this doc) is the
-deliverable.
+Status: design locked 2026-06-05; revised 2026-06-05 after engine
+sanity-check (see "Engine reality" section below). Phase 6.1
+(this doc) is the deliverable.
 
 ---
 
@@ -39,12 +40,22 @@ left to right:
 
 | Ply | Class | Main display | Sub display |
 |---|---|---|---|
-| 1 | larets-pattern `GainBias` Control | global div fader (int 1..16) | source toggle (int/ext SubButton) • subchain dive • bias readout • scope |
-| 2 | `Gate`-style Control | gate indicator (rising-edge) | subchain dive only |
+| 1 | larets-pattern `GainBias` Control | global div fader (int 1..16) | source toggle (int/ext SubButton) • Source picker (Source.ExternalChooser) • bias readout • scope |
+| 2 | `Gate`-style Control | gate indicator (rising-edge) | Source picker (Source.ExternalChooser) only |
 | 3 | top-level int fader Control | seq 1 div (int 1..16) | none |
 | 4 | top-level int fader Control | seq 2 div (int 1..16) | none |
 | 5 | top-level int fader Control | seq 3 div (int 1..16) | none |
 | 6 | top-level int fader Control | seq 4 div (int 1..16) | none |
+
+Plies 1 and 2 use a **Source picker** (the same `Source.ExternalChooser`
+pattern as the scene-CV M2/M3 plies), not a full subchain dive.
+A picker-selected Source.External outlet binds directly to the
+SequencerTask's extClock / extReset Inlet via `od::connect`. No
+host chain, no branch lifecycle, no per-branch persistence wiring.
+Trade-off: can't insert effects (Schmitt, rate-mult, etc.) between
+the modular jack and the sequencer; the globalDiv / per-slot div
+faders cover the rate-shaping need for v1. If a future bench
+requires processing, hoist to a host-chain branch model in v2.
 
 The SpottedStrip pattern is the same one Performance view uses:
 single Section, controls panned through the viewport by the
@@ -52,39 +63,71 @@ camera as the cursor moves.
 
 ---
 
+## Engine reality (sanity-check, 2026-06-05)
+
+Each `Slot` owns its own `samplesUntilTick`. `Slot::processFrame()`
+runs a per-sample countdown and calls its own (private) `fireTick()`
+when it reaches zero. `Slot::fireTick()` returns the next interval
+from the just-emitted stepLen column row, giving the existing
+**per-slot polymetric stepLen feature**: each slot can run at an
+independent rate driven by its own stepLen lane.
+
+`SequencerTask::process()` just loops over slots calling
+`processFrame(bpm, sampleRate)`. There is no central master-event
+distributor today.
+
+Implications for this feature:
+
+- **Internal mode = unchanged.** Slots keep their per-slot
+  polymetric stepLen-driven scheduling. We do NOT hoist tick
+  scheduling up to SequencerTask in internal mode.
+- **External mode = SequencerTask drives slot ticks directly.**
+  When `clockSource == EXTERNAL`, each slot's
+  `samplesUntilTick` countdown is suspended. SequencerTask
+  edge-detects ext clock, applies globalDiv, then per-slot div
+  counters, and on each surviving tick calls a new public
+  `Slot::externalTick()` entry point. In external mode the per-slot
+  stepLen column has no effect on tick spacing (the divider takes
+  over); it still feeds the stepLen output buffer for any
+  consumers but its row value no longer schedules the next tick.
+- **`Slot::fireTick()` exposure.** Add a public
+  `Slot::externalTick()` that runs the same body as `fireTick()`
+  but discards the returned next-tick-interval (the
+  externally-clocked slot ignores stepLen for scheduling).
+  Internal mode keeps its existing private `fireTick()` call.
+
 ## Event flow
 
 ```
-            (source toggle on ply 1 sub)
-             /                       \
-   internal_BPM_tick           ext_clock_rising_edge
-             \                       /
-              \                     /
-               \                   /
-                \                 /
-                 master_event
-                       |
-                  ÷ globalDiv (ply 1 main fader)
-                       |
-                 master_tick
-                       |
-        +--------------+--------------+--------------+
-        |              |              |              |
-      ÷ d1           ÷ d2           ÷ d3           ÷ d4
-      slot 1         slot 2         slot 3         slot 4
-                                   (each fires its existing fireTick)
+                       (clockSource flag on SequencerTask)
+                       /                                  \
+        CLOCK_INTERNAL                                 CLOCK_EXTERNAL
+              |                                              |
+   per-slot.samplesUntilTick               extClockInlet rising-edge per-sample
+   ticks autonomously                                       |
+   from its stepLen column                            ÷ globalDiv
+   (existing behaviour)                                     |
+                                                       master_tick
+                                                            |
+                                       +--------+-----+-----+--------+
+                                       |        |     |     |        |
+                                     ÷ d1     ÷ d2  ÷ d3  ÷ d4
+                                   slot 1   slot 2 slot 3 slot 4
+                                   (Slot::externalTick() per surviving tick)
 ```
 
-- **Master event** = whichever source's pulse (internal BPM
-  countdown or external rising edge).
-- **`globalDiv`** divides the master-event stream before
+- **External master event** = ext clock rising edge (per-sample
+  detect in `SequencerTask::process`).
+- **`globalDiv`** divides the master-event stream BEFORE per-slot
   distribution. globalDiv = 1 passes every event; globalDiv = 4
-  fires one master tick per 4 events. Lives on ply 1's main
-  fader.
-- **Per-slot `dN`** divides the master-tick stream individually
-  per slot. Each `Slot::fireTick()` fires every dN master ticks.
-- **Reset** on ply 2's rising edge calls `reset()` on every slot
-  (hard-reset playhead to loop-min). Sample-accurate, no queueing.
+  fires one master tick per 4 events.
+- **Per-slot `dN`** divides the master-tick stream individually per
+  slot. Each `Slot::externalTick()` fires every dN master ticks.
+- **Reset** = `extResetInlet` rising edge calls `Slot::reset()` on
+  every slot. Sample-accurate, no queueing. Works in both internal
+  AND external clock modes (reset is independent of clock source —
+  the modular reset jack is still useful when the sequencer is
+  internally clocked but synced to an external transport).
 
 ---
 
@@ -149,33 +192,47 @@ float     extEventLastTime = 0.0f;
 float     extBpmEma = 0.0f;
 ```
 
-### `processFrame` extension
+### `SequencerTask::process` extension
 
-Adds a per-sample edge detector branch when `clockSource ==
-CLOCK_EXTERNAL`. Internal mode keeps the existing
-`samplesUntilTick` countdown driver. Pseudocode:
+Internal mode keeps the existing behaviour: loop over slots, call
+`Slot::processFrame(bpm, sampleRate)`, slots autonomously tick from
+their own stepLen lanes.
+
+External mode replaces the slot's internal countdown with
+externally-driven ticks. Pseudocode:
 
 ```
-on each sample i in frame:
-  if clockSource == EXTERNAL and extClockInlet:
-    cur = extClockInlet.buffer()[i]
-    if extClockLastSample < 0.5 and cur >= 0.5:
-      master_event_received()
-    extClockLastSample = cur
+process(inputs, outputs):
+  if clockSource == EXTERNAL:
+    # 1) Per-sample reset edge detect (works in BOTH modes, gate
+    #    below moves outside).
+    for i in 0..frameLen:
+      cur = extClockInlet.buffer()[i]
+      if extClockLastSample < 0.5 and cur >= 0.5:
+        master_event_received(slotSampleIdx = i)
+      extClockLastSample = cur
 
-  if extResetInlet:
+    # 2) Drive each slot in 'externally-clocked' mode for this
+    #    frame: processFrameExternal(frameLen) emits output buffers
+    #    (held S&H + gate envelopes ticking down) but skips its own
+    #    samplesUntilTick countdown. fireTick() side effects ride
+    #    the externalTick() calls scheduled above.
+    for slot in slots:
+      slot.processFrameExternal(frameLen, ...)
+  else:
+    # Existing path unchanged.
+    for slot in slots:
+      slot.processFrame(frameLen, ..., bpm, sampleRate)
+
+  # Reset edge detect runs in BOTH modes (a modular reset is still
+  # meaningful for an internally-clocked sequencer).
+  for i in 0..frameLen:
     cur = extResetInlet.buffer()[i]
     if extResetLastSample < 0.5 and cur >= 0.5:
       for each slot: slot.reset()
     extResetLastSample = cur
 
-  if clockSource == INTERNAL:
-    samplesUntilTick--
-    if samplesUntilTick <= 0:
-      master_event_received()
-      samplesUntilTick += samplesPerTick
-
-master_event_received():
+master_event_received(slotSampleIdx):
   globalDivCounter++
   if globalDivCounter >= globalDiv:
     globalDivCounter = 0
@@ -183,14 +240,54 @@ master_event_received():
       slotDivCounter[i]++
       if slotDivCounter[i] >= slotDiv[i]:
         slotDivCounter[i] = 0
-        slots[i].fireTick()
-  if clockSource == EXTERNAL:
-    update_ext_bpm()  // EMA on inter-arrival time
+        slots[i].externalTick()  # public; same body as fireTick(),
+                                 # discards next-interval return.
+  update_ext_bpm()  # EMA on inter-arrival time
 ```
 
-The existing sample-accurate processFrame loop already iterates
-per sample at tick boundaries; this just adds two more
-edge-detect predicates and an event distribution step.
+The actual implementation will fuse the two per-sample loops into
+one pass for cache friendliness; the pseudocode separates them for
+clarity. `slotSampleIdx` is captured so a future "sample-accurate
+external ticks" refinement can split the audio frame at the tick
+boundary; for v1 we tick at the start of the frame.
+
+### `Slot::externalTick()` (new public)
+
+```cpp
+// Public entry point for externally-clocked ticks. Same body as
+// fireTick() (sample-and-hold, L2 eval, advance playheads, set
+// firedThisTick flags, etc.). Returns void: the slot's
+// samplesUntilTick is not touched because the external clock owns
+// scheduling.
+void externalTick();
+```
+
+`fireTick()` stays private. The new method shares the
+implementation (refactor the body into a private
+`fireTickImpl(bool returnSpt)` helper if compiler can't inline both
+cleanly, or just call fireTick() and discard the return; the
+discarded int is harmless because external-mode `processFrameExternal`
+doesn't reference `samplesUntilTick`).
+
+### `Slot::processFrameExternal()` (new public)
+
+```cpp
+// Audio-thread per-frame work when the slot is externally
+// clocked. Fills the same six output buffers as processFrame()
+// (S&H + gate envelopes) but DOES NOT decrement samplesUntilTick
+// or call fireTick() internally. externalTick() is called from
+// SequencerTask on tick boundaries instead.
+void processFrameExternal(int frameLen,
+                          float* cv1, float* cv2,
+                          float* gate1Amp, float* gate2Amp,
+                          float* stepLen, float* transpose);
+```
+
+Refactor: the inner sample-emission loop of `processFrame` (lines
+270-291 in current `Sequencer.cpp`, after the `while
+(samplesUntilTick <= 0) fireTick()` block) can be hoisted into a
+private `emitSamples(filled, n, buffers)` helper called by both
+processFrame paths.
 
 ### Derived ext BPM
 
@@ -212,11 +309,21 @@ single-reader (UI), plain float — same pattern as the arbiter
 
 ### SequencerTask SWIG-bound surface
 
-- `setClockSource(int)` / `clockSource()`
-- `setExtClockInlet(od::Inlet*)` / `setExtResetInlet(od::Inlet*)`
+- `setClockSource(int)` / `clockSource()` — int, not enum
+- `getExtClockInlet()` / `getExtResetInlet()` — return `od::Inlet*`
+  for Lua to pass to `app.connect(srcOutlet, dstInlet)`.
 - `setGlobalDiv(int)` / `globalDiv()`
 - `setSlotDiv(int slot, int div)` / `slotDiv(int slot)`
 - `extBpm()` returns the Parameter's value
+
+Lua wiring (parallel to InputTask outlets in `app-setup.lua`):
+when a Source picker on ply 1 or 2 commits a selection, the picker
+calls `app.connect(srcOutlet, seqTask:getExtClockInlet())` /
+`getExtResetInlet()`. Disconnect path: `app.disconnect(seqTask:
+getExtClockInlet())` (matches existing Inlet binding patterns
+elsewhere in the codebase). Source picker stores the picked source
+NAME for persistence; on deserialize, look up the name in
+`externalSources[]` and reconnect.
 
 ---
 
@@ -262,35 +369,50 @@ gets a "(ext)" badge or is dimmed when ext is active.
 
 ## Persistence
 
-Multi-role serialize schema on `SequencerTask`:
+Lua-side serialize schema (held alongside other sequencer-global
+state in `Sequencer/Persist.lua`):
 
-```
-t.clockSource = CLOCK_INTERNAL | CLOCK_EXTERNAL  -- enum int
-t.globalDiv   = N
-t.slotDiv     = { d1, d2, d3, d4 }
-t.extClockBranch = extClockBranch:serialize()
-t.resetBranch    = resetBranch:serialize()
+```lua
+{
+  clockSource = "internal" | "external",
+  globalDiv   = N,                  -- int 1..16
+  slotDiv     = { d1, d2, d3, d4 }, -- ints 1..16
+  extClockSource = "G1",            -- nil or external-source name
+  extResetSource = "G2",            -- nil or external-source name
+}
 ```
 
-Pattern parallels `Chain.Root._sceneCVBranches`: branches held
-directly on the SequencerTask, serialized inline. On deserialize,
-restore via the same hardSet-not-softSet convention used for
-scenes (no ramp dynamics on boot).
+On deserialize:
+1. `seqTask:setClockSource(...)`, `setGlobalDiv(...)`,
+   `setSlotDiv(slot, d)`.
+2. If `extClockSource` non-nil: look up `externalSources[name]`,
+   `app.connect(source:getOutlet(), seqTask:getExtClockInlet())`.
+   Same for reset.
+3. No branch tree to restore. No `hardSet` ramp-dynamics concern
+   (everything is a plain int or a connect call). The boot-time
+   relatch contract from v1.1 scenes ([[project_release_9_4_0]])
+   does NOT apply here — `globalDivCounter` / `slotDivCounter` are
+   pure counters with no baseline state; restoring them at 0
+   simply means the first post-boot tick after a clock pulse fires
+   normally.
 
 ---
 
 ## Phases
 
-- **6.1** (this doc): plan + locked decisions.
-- **6.2**: engine — source select, edge detection, global +
-  per-slot dividers, reset, derived ext BPM. Internal still
-  default. SWIG bindings. Isolation bench.
-- **6.3**: extClock + reset top-level branches on SequencerTask.
-  Branch serialize/deserialize.
+- **6.1** (this doc): plan + locked decisions + engine-reality
+  sanity check.
+- **6.2**: engine — `Slot::externalTick()` + `processFrameExternal()`,
+  `SequencerTask` extClockInlet / extResetInlet / dividers / source
+  select / derived ext BPM. Internal mode unchanged. SWIG bindings.
+  Isolation bench.
+- **6.3**: extClock + reset Source-picker wiring on SequencerTask.
+  `app.connect` plumbing from a Source.ExternalChooser-style picker
+  into `getExtClockInlet()` / `getExtResetInlet()`. No branches.
 - **6.4**: `Sequencer.ClockView` Lua Window (6-ply SpottedStrip).
 - **6.5**: AdminMode entry + sequencer-view BPM display switch.
-- **6.6**: full persistence — clock source + dividers + branches
-  survive reboot. Boot-time restore.
+- **6.6**: persistence — clockSource + dividers + picked source
+  names survive reboot. Boot-time reconnect from saved names.
 - **6.7**: hardware bench sweep — modular gate at 1/16, 1/8, 1/4;
   reset interop; drift under heavy DSP load; derived BPM accuracy.
 
@@ -316,25 +438,22 @@ scenes (no ramp dynamics on boot).
 
 From [[project_release_9_4_0]]:
 
-- **Multi-role branch map pattern**: `entry.valueSource` alias
-  works for any role whose value-source-object exposes Parameters
-  the engage loop wants to touch uniformly. Applies here for
-  extClock + reset.
-- **Audio-thread autonomy**: keep all event distribution +
-  divider counting in `processFrame`. UI starvation under heavy
-  DSP must not stall scene switching, and the same must hold for
-  external clock advancement.
-- **Boot-time relatch**: any state that depends on baseline
-  capture (like the arbiter's mGainAtEntry) needs an explicit
-  post-deserialize touch. Likely doesn't apply here since
-  dividers are pure counters with no baseline state, but worth
-  checking in 6.6 if any new C++ field accumulates pre-event
-  context.
-- **Bank-drift / state-drift detection on UI tick**: the
-  Performance view's `_rebuildBank` self-correction pattern
-  handles external state changes elegantly. May apply if the
-  ClockView's plies need to reflect changes from elsewhere
-  (e.g., the picker auto-routing the clock subchain).
-- **Forward-reference hazard**: any new Lua-side helper called
-  from `Chain.Root` (or `SequencerTask` Lua bindings) must be
-  defined AFTER its callers in the file.
+- **Multi-role branch map pattern**: DOES NOT apply here. We
+  intentionally took the lighter Source-picker path on plies 1 + 2
+  (user direction 2026-06-05: "we don't need a full on subchain,
+  just a way to grab a source"). The valueSource alias pattern
+  remains a tool for future work that needs branch hosting on a
+  Task-level object.
+- **Audio-thread autonomy**: keep all event distribution + divider
+  counting in `SequencerTask::process` / `Slot::processFrameExternal`.
+  UI starvation must not stall clock advancement.
+- **Boot-time relatch**: N/A. `globalDivCounter` / `slotDivCounter`
+  are pure counters with no baseline state. Initialize to 0 on
+  deserialize. No `mGainAtEntry`-style baseline to capture.
+- **Forward-reference hazard** ([[feedback_lua_forward_reference]]):
+  any new Lua-side helper called from `Sequencer.ClockView` or
+  `Sequencer/Persist.lua` must be defined AFTER its callers.
+- **Crash hook coverage** ([[feedback_crash_hook_install_order]]):
+  the existing Crash.init covers `Application.init`. Adding
+  AdminMode entry + ClockView Window does not change install order.
+  No new initialization paths to wrap.
