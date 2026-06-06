@@ -1020,13 +1020,32 @@ function GridView:refresh()
     self.l2FireDrawing:hide()
   end
 
-  -- BPM display shows the fader resolution: integer when on a whole
-  -- BPM, one decimal when the user has dialed to a fractional value.
-  local bpm = seq:getBpm()
-  if math.abs(bpm - math.floor(bpm + 0.5)) < 0.05 then
-    self.bpmLabel:setText(string.format("BPM %d", math.floor(bpm + 0.5)))
+  -- BPM display switches between internal and external sources based
+  -- on the Settings "sequencerClockSource" choice. Internal mode shows
+  -- the user-dialed sBpm (editable via the shift+S2 latch). External
+  -- mode shows the derived ext BPM measured by the ext-clock
+  -- Comparator's built-in rate counter (Comparator::getRateInBPM).
+  -- When the ext clock is silent / unconnected the derived value is
+  -- 0, which we render as "BPM ext --" so the user sees they're in
+  -- ext mode but no clock is arriving.
+  local external = (seq:getClockSource() == 1)  -- CLOCK_EXTERNAL
+  local bpm
+  if external then
+    bpm = seq:getExtBpm()
+    if bpm <= 0.0 then
+      self.bpmLabel:setText("BPM ext --")
+    elseif math.abs(bpm - math.floor(bpm + 0.5)) < 0.05 then
+      self.bpmLabel:setText(string.format("BPM ext %d", math.floor(bpm + 0.5)))
+    else
+      self.bpmLabel:setText(string.format("BPM ext %.1f", bpm))
+    end
   else
-    self.bpmLabel:setText(string.format("BPM %.1f", bpm))
+    bpm = seq:getBpm()
+    if math.abs(bpm - math.floor(bpm + 0.5)) < 0.05 then
+      self.bpmLabel:setText(string.format("BPM %d", math.floor(bpm + 0.5)))
+    else
+      self.bpmLabel:setText(string.format("BPM %.1f", bpm))
+    end
   end
   -- Persistent layer indicator: "seq1.L1" or "seq1.L2" on the sub
   -- title line, so the user always knows which layer the grid view
@@ -1249,11 +1268,19 @@ end
 -- S2-release path (mark modal entry) doesn't fire.
 function GridView:subPressed(i, shifted)
   if i == 2 and shifted then
+    -- In external clock mode the latch is inert: editing the internal
+    -- sBpm has no effect on the externally-clocked ticks (incoming
+    -- pulses set the tempo, gate lengths use the comparator's derived
+    -- ext BPM). Bail out silently rather than confusing the user with
+    -- a fake editor.
+    local seq = app.AudioThread.getSequencerTask()
+    if seq and seq:getClockSource() == 1 then  -- CLOCK_EXTERNAL
+      return false
+    end
     if self.bpmLatched then
       -- Releasing the latch: persist final value to Settings.
       self.bpmLatched = false
       self.bpmAccum   = 0
-      local seq = app.AudioThread.getSequencerTask()
       if seq then
         local Settings = require "Settings"
         Settings.set("bpm", string.format("%.2f", seq:getBpm()))

@@ -259,11 +259,37 @@ public:
   // not registered as picker sources. May fire 0 or more ticks during
   // this frame. NOT thread-safe; must run on the audio thread,
   // called by SequencerTask::process.
+  //
+  // Used when SequencerTask::clockSource == CLOCK_INTERNAL. The slot
+  // owns its own samplesUntilTick countdown driven by the just-emitted
+  // stepLen column row.
   void processFrame(int frameLen,
                     float* cv1, float* cv2,
                     float* gate1Amp, float* gate2Amp,
                     float* stepLen, float* transpose,
                     float bpm, float sampleRate);
+
+  // Externally-clocked counterpart of processFrame. Emits the same
+  // six output buffers (S&H + gate envelopes) but does NOT decrement
+  // samplesUntilTick or call fireTick() internally. Ticks are driven
+  // externally via Slot::externalTick() called from SequencerTask on
+  // master-tick boundaries. Used when SequencerTask::clockSource ==
+  // CLOCK_EXTERNAL. Per-slot polymetric stepLen-driven scheduling
+  // is suppressed in this mode; the divider counter in SequencerTask
+  // takes over.
+  void processFrameExternal(int frameLen,
+                            float* cv1, float* cv2,
+                            float* gate1Amp, float* gate2Amp,
+                            float* stepLen, float* transpose);
+
+  // Public entry point for an externally-driven tick. Same body as
+  // the private fireTick() (S&H + L2 eval + advance + envelope
+  // retrigger). Discards the next-interval return value because the
+  // external clock owns scheduling. BPM is used for gate-length
+  // math only (samplesPerBeat in fireGate); SR is needed for the
+  // same calculation. No-op when !running, matching processFrame's
+  // gate-silent behaviour when stopped.
+  void externalTick(float bpm, float sampleRate);
 
   // ---- bench / Lua API ----
   // Safe to call from non-audio threads; not real-time clean.

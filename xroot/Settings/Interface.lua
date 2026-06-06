@@ -112,6 +112,14 @@ menuItems[#menuItems + 1] = {
 }
 menuItems[#menuItems + 1] = {
   "addCategory",
+  "Sequencer"
+}
+menuItems[#menuItems + 1] = {
+  "addVariable",
+  "sequencerClockSource"
+}
+menuItems[#menuItems + 1] = {
+  "addCategory",
   "QuickSaves"
 }
 menuItems[#menuItems + 1] = {

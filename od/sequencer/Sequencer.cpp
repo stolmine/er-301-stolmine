@@ -291,6 +291,63 @@ void Slot::processFrame(int frameLen,
   }
 }
 
+void Slot::processFrameExternal(int frameLen,
+                                float* cv1, float* cv2,
+                                float* gate1Amp, float* gate2Amp,
+                                float* stepLen, float* transpose)
+{
+  // CV output scaling -- same convention as processFrame. 1.0 unit
+  // == 10V at the output jack, so cell volts emit at * 0.1.
+  static constexpr float kCvOutScale = 0.1f;
+
+  if (!running) {
+    // Hold last values; both gate envelopes drop to silent. Matches
+    // processFrame's stopped behaviour.
+    for (int i = 0; i < frameLen; ++i) {
+      cv1[i]       = heldCV1 * kCvOutScale;
+      cv2[i]       = heldCV2 * kCvOutScale;
+      gate1Amp[i]  = 0.0f;
+      gate2Amp[i]  = 0.0f;
+      stepLen[i]   = heldStepLen;
+      transpose[i] = heldTranspose;
+    }
+    return;
+  }
+
+  // No internal tick scheduling here. externalTick() is invoked from
+  // SequencerTask on master-tick boundaries (typically before this
+  // method runs for the frame), which has already updated S&H +
+  // gate envelopes. We just emit + count down gate envelopes per
+  // sample.
+  for (int i = 0; i < frameLen; ++i) {
+    cv1[i]       = heldCV1 * kCvOutScale;
+    cv2[i]       = heldCV2 * kCvOutScale;
+    stepLen[i]   = heldStepLen;
+    transpose[i] = heldTranspose;
+    if (gate1RemainingSamples > 0) {
+      gate1Amp[i] = heldGate1Amp;
+      --gate1RemainingSamples;
+    } else {
+      gate1Amp[i] = 0.0f;
+    }
+    if (gate2RemainingSamples > 0) {
+      gate2Amp[i] = heldGate2Amp;
+      --gate2RemainingSamples;
+    } else {
+      gate2Amp[i] = 0.0f;
+    }
+  }
+}
+
+void Slot::externalTick(float bpm, float sampleRate)
+{
+  if (!running) return;
+  cachedBpm        = bpm;
+  cachedSampleRate = sampleRate;
+  // Discard returned samples-per-tick: external clock owns scheduling.
+  (void)fireTick();
+}
+
 void Slot::setL1(int col, int row, float value)
 {
   if (col < 0 || col >= kNumColumns) return;

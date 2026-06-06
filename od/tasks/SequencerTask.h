@@ -2,6 +2,8 @@
 
 #include <od/tasks/Task.h>
 #include <od/objects/Outlet.h>
+#include <od/objects/Inlet.h>
+#include <od/objects/timing/Comparator.h>
 #include <od/sequencer/Sequencer.h>
 
 namespace od {
@@ -73,6 +75,74 @@ namespace od {
     // anyway.
     void  setBpm(float bpm);
     float getBpm() const;
+
+    // -------------------------------------------------------------------
+    // External clock + reset (Phase 6 — sequencer external clock).
+    //
+    // Each input is fronted by a Comparator (od/objects/timing/Comparator.h):
+    // threshold + hysteresis edge detection, configurable rise/fall/gate/
+    // toggle modes, simulateRisingEdge/simulateFallingEdge for UI manual
+    // fire, built-in getRateInBPM for tempo display. SequencerTask owns
+    // the comparators and drives them via comparator->process() in its
+    // own process() loop -- comparators are not part of any chain so the
+    // graph compiler doesn't schedule them, but their public process()
+    // method is self-contained and audio-thread safe.
+    //
+    // CLOCK_INTERNAL (default) keeps the original behaviour: each Slot
+    // ticks autonomously from its own stepLen lane via Slot::processFrame.
+    // CLOCK_EXTERNAL replaces per-slot scheduling with a SequencerTask-
+    // owned divider chain driven by ext-clock comparator Out edges,
+    // dispatching Slot::externalTick() per surviving tick. Reset
+    // comparator Out edges call Slot::reset() on all four slots in BOTH
+    // modes (reset is independent of clock source).
+    //
+    // Comparator inputs default to ZeroOutput when unconnected; no edges,
+    // no behaviour change.
+    // -------------------------------------------------------------------
+    enum ClockSource {
+      CLOCK_INTERNAL = 0,
+      CLOCK_EXTERNAL = 1
+    };
+
+    void setClockSource(int source);
+    int  getClockSource() const;
+
+    // Comparator accessors. Lua picker connects the picked source's
+    // outlet to comparator.In via `app.AudioThread.connect(srcOutlet,
+    // seqTask:getExtClockComparator():getInput("In"))`.
+    Comparator* getExtClockComparator() { return &mExtClockComp; }
+    Comparator* getExtResetComparator() { return &mExtResetComp; }
+
+    // Manual-fire convenience wrappers that forward to the comparator's
+    // simulateRisingEdge / simulateFallingEdge methods. UI uses these
+    // for the S3-fire (clock) and S3-fire (reset) gestures.
+    void triggerClockRise();
+    void triggerClockFall();
+    void triggerResetRise();
+    void triggerResetFall();
+
+    // Global pre-divider (ply 1 main fader). Range 1..16, clamped.
+    void setGlobalDiv(int div);
+    int  getGlobalDiv() const;
+
+    // Per-slot post-divider (plies 3..6). slot in 0..3; div in 1..16.
+    void setSlotDiv(int slot, int div);
+    int  getSlotDiv(int slot) const;
+
+    // Derived external BPM, scaled to musical quarter-note tempo
+    // assuming the ext clock arrives at 4 PPQN (1/16-note pulses --
+    // analog-modular default; matches Slot::stepLen=0.25's "tick =
+    // 1/16" convention). Equivalently: ext_pulses_per_second * 15.
+    // Refreshed each audio frame from a windowed sample of the
+    // comparator's rate counter. Returns 0.0f until at least 3 ext
+    // clock pulses arrived after the last counter reset.
+    float getExtBpm() const;
+
+    // Bench-only resync of the divider state + comparator rate counters.
+    // Useful when isolation-testing globalDiv changes mid-clock so the
+    // next pulse fires immediately rather than waiting for the counter
+    // to roll over. Not called from production code paths.
+    void resetDividers();
 
     // Bench-harness proxy API. Lua passes integers and floats only;
     // Predicate / Action structs are not SWIG-exposed for v0.1.
@@ -163,6 +233,43 @@ namespace od {
   private:
     sequencer::Slot mSlots[sequencer::kNumSlots];
     static float    sBpm;
+
+    // External clock + reset Comparators. SequencerTask drives them
+    // via mExtClockComp.process() and mExtResetComp.process() each
+    // audio frame; their Out buffers are then edge-scanned for the
+    // divider chain (clock) and slot reset (reset). Lua connects
+    // external Source outlets directly to comparator.In via
+    // `app.AudioThread.connect(srcOutlet, comp:getInput("In"))`.
+    // Comparators are NOT scheduled by the graph compiler (they're not
+    // part of any Chain); SequencerTask owns and processes them
+    // directly. Comparator::process() is self-contained and safe to
+    // call from the audio thread without being part of a Chain.
+    Comparator mExtClockComp;
+    Comparator mExtResetComp;
+
+    // Edge-detector state for tracking comparator Out across frame
+    // boundaries. An edge fires when prev < 0.5 && cur >= 0.5.
+    float mExtClockOutPrev = 0.0f;
+    float mExtResetOutPrev = 0.0f;
+
+    // Source selector + divider state.
+    int mClockSource     = CLOCK_INTERNAL;
+    int mGlobalDiv       = 1;
+    int mGlobalDivCount  = 0;  // increments on each ext clock edge; fires
+                               // a master tick when it hits mGlobalDiv.
+    int mSlotDiv[sequencer::kNumSlots]      = {1, 1, 1, 1};
+    int mSlotDivCount[sequencer::kNumSlots] = {0, 0, 0, 0};
+
+    // Windowed ext BPM cache. SequencerTask refreshes this from the
+    // comparator's running rate counter every kBpmWindowSec of elapsed
+    // time (or every kBpmWindowEdges edges -- whichever comes first),
+    // then resets the comparator's counter. Without this, calling
+    // getRateInBPM directly accumulates over an ever-widening window
+    // and the displayed value drifts slowly toward the true rate. The
+    // ComparatorView graphic uses the same trick internally but only
+    // refreshes when visible; the audio-thread cache keeps the rate
+    // current regardless of which view the user is on.
+    float mCachedExtBpm = 0.0f;
   };
 
 } // namespace od
