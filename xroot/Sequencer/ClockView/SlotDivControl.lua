@@ -45,6 +45,7 @@ function SlotDivControl:init(slotIdx)
   self.fader:setPrecision(0)
   self:setControlGraphic(self.fader)
   self:setMainCursorController(self.fader)
+  self.verticalDivider = ply
 
   self:addSpotDescriptor{
     center = 0.5 * ply,

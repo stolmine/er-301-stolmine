@@ -3,6 +3,7 @@
 #include <od/tasks/Task.h>
 #include <od/objects/Outlet.h>
 #include <od/objects/Inlet.h>
+#include <od/objects/timing/Comparator.h>
 #include <od/sequencer/Sequencer.h>
 
 namespace od {
@@ -78,16 +79,25 @@ namespace od {
     // -------------------------------------------------------------------
     // External clock + reset (Phase 6 — sequencer external clock).
     //
+    // Each input is fronted by a Comparator (od/objects/timing/Comparator.h):
+    // threshold + hysteresis edge detection, configurable rise/fall/gate/
+    // toggle modes, simulateRisingEdge/simulateFallingEdge for UI manual
+    // fire, built-in getRateInBPM for tempo display. SequencerTask owns
+    // the comparators and drives them via comparator->process() in its
+    // own process() loop -- comparators are not part of any chain so the
+    // graph compiler doesn't schedule them, but their public process()
+    // method is self-contained and audio-thread safe.
+    //
     // CLOCK_INTERNAL (default) keeps the original behaviour: each Slot
     // ticks autonomously from its own stepLen lane via Slot::processFrame.
     // CLOCK_EXTERNAL replaces per-slot scheduling with a SequencerTask-
-    // owned divider chain driven by extClock rising edges, dispatching
-    // Slot::externalTick() per surviving tick. extReset rising edges
-    // call Slot::reset() on all four slots in BOTH modes (reset is
-    // independent of clock source).
+    // owned divider chain driven by ext-clock comparator Out edges,
+    // dispatching Slot::externalTick() per surviving tick. Reset
+    // comparator Out edges call Slot::reset() on all four slots in BOTH
+    // modes (reset is independent of clock source).
     //
-    // Inlets default to ZeroOutput when unconnected (od/objects/Inlet.cpp);
-    // unconnected = no edges = no behaviour change.
+    // Comparator inputs default to ZeroOutput when unconnected; no edges,
+    // no behaviour change.
     // -------------------------------------------------------------------
     enum ClockSource {
       CLOCK_INTERNAL = 0,
@@ -97,12 +107,19 @@ namespace od {
     void setClockSource(int source);
     int  getClockSource() const;
 
-    // Inlet accessors for Lua-side `app.AudioThread.connect(srcOutlet,
-    // seqTask:getExtClockInlet())` wiring from a Source.External-style
-    // picker. The picker UI lives on plies 1 + 2 of the SequencerClockView
-    // SpottedStrip (phase 6.4).
-    Inlet* getExtClockInlet() { return &mExtClock; }
-    Inlet* getExtResetInlet() { return &mExtReset; }
+    // Comparator accessors. Lua picker connects the picked source's
+    // outlet to comparator.In via `app.AudioThread.connect(srcOutlet,
+    // seqTask:getExtClockComparator():getInput("In"))`.
+    Comparator* getExtClockComparator() { return &mExtClockComp; }
+    Comparator* getExtResetComparator() { return &mExtResetComp; }
+
+    // Manual-fire convenience wrappers that forward to the comparator's
+    // simulateRisingEdge / simulateFallingEdge methods. UI uses these
+    // for the S3-fire (clock) and S3-fire (reset) gestures.
+    void triggerClockRise();
+    void triggerClockFall();
+    void triggerResetRise();
+    void triggerResetFall();
 
     // Global pre-divider (ply 1 main fader). Range 1..16, clamped.
     void setGlobalDiv(int div);
@@ -112,22 +129,17 @@ namespace od {
     void setSlotDiv(int slot, int div);
     int  getSlotDiv(int slot) const;
 
-    // Derived external BPM. Updated by SequencerTask::process() on each
-    // master event from inter-arrival time, smoothed via EMA. Returns
-    // 0.0f until at least two ext clock pulses have arrived. Sequencer
-    // views read this when clockSource == CLOCK_EXTERNAL to display the
-    // running tempo (the internal-BPM Setting display is greyed out in
-    // external mode).
-    //
-    // Single-writer (audio thread) / single-reader (UI thread) plain
-    // float -- same convention as the v1.1 SceneIndexArbiter UI-poll
-    // surface. Worst-case stale read is musically harmless.
+    // Derived external BPM. Reads the ext-clock comparator's built-in
+    // rate counter (Comparator::getRateInBPM) which averages rising-edge
+    // count over the elapsed second-counter. Returns 0.0f until at least
+    // one ext clock pulse arrived since the last counter reset (which
+    // happens on source-switch / setClockSource).
     float getExtBpm() const;
 
-    // Bench-only resync of the divider state. Useful when isolation-
-    // testing globalDiv changes mid-clock so the next pulse fires
-    // immediately rather than waiting for the counter to roll over.
-    // Not called from production code paths.
+    // Bench-only resync of the divider state + comparator rate counters.
+    // Useful when isolation-testing globalDiv changes mid-clock so the
+    // next pulse fires immediately rather than waiting for the counter
+    // to roll over. Not called from production code paths.
     void resetDividers();
 
     // Bench-harness proxy API. Lua passes integers and floats only;
@@ -220,16 +232,23 @@ namespace od {
     sequencer::Slot mSlots[sequencer::kNumSlots];
     static float    sBpm;
 
-    // External clock + reset Inlets. Owned via Task::own() in the
-    // ctor for refcount lifecycle. Lua connects external Source
-    // outlets directly to these via `app.AudioThread.connect`.
-    Inlet mExtClock{"ExtClock"};
-    Inlet mExtReset{"ExtReset"};
+    // External clock + reset Comparators. SequencerTask drives them
+    // via mExtClockComp.process() and mExtResetComp.process() each
+    // audio frame; their Out buffers are then edge-scanned for the
+    // divider chain (clock) and slot reset (reset). Lua connects
+    // external Source outlets directly to comparator.In via
+    // `app.AudioThread.connect(srcOutlet, comp:getInput("In"))`.
+    // Comparators are NOT scheduled by the graph compiler (they're not
+    // part of any Chain); SequencerTask owns and processes them
+    // directly. Comparator::process() is self-contained and safe to
+    // call from the audio thread without being part of a Chain.
+    Comparator mExtClockComp;
+    Comparator mExtResetComp;
 
-    // Edge-detector state. Compared against this frame's per-sample
-    // values; an edge fires when prev < 0.5 && cur >= 0.5.
-    float mExtClockPrev = 0.0f;
-    float mExtResetPrev = 0.0f;
+    // Edge-detector state for tracking comparator Out across frame
+    // boundaries. An edge fires when prev < 0.5 && cur >= 0.5.
+    float mExtClockOutPrev = 0.0f;
+    float mExtResetOutPrev = 0.0f;
 
     // Source selector + divider state.
     int mClockSource     = CLOCK_INTERNAL;
@@ -238,16 +257,6 @@ namespace od {
                                // a master tick when it hits mGlobalDiv.
     int mSlotDiv[sequencer::kNumSlots]      = {1, 1, 1, 1};
     int mSlotDivCount[sequencer::kNumSlots] = {0, 0, 0, 0};
-
-    // Derived ext BPM. mExtBpm is the smoothed value Lua reads.
-    // mExtEventLastSampleClock is a sample-count timestamp of the
-    // previous master tick, used to compute inter-arrival time.
-    // mFrameSampleClock is incremented by FRAMELENGTH per process()
-    // call so timestamps stay monotonic across frames.
-    float    mExtBpm                  = 0.0f;
-    uint64_t mExtEventLastSampleClock = 0;
-    bool     mExtEventLastValid       = false;
-    uint64_t mFrameSampleClock        = 0;
   };
 
 } // namespace od

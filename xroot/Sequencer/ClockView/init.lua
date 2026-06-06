@@ -53,4 +53,31 @@ function ClockView:init()
   self:enableSelection()
 end
 
+-- Standard admin-sub-window egress (matches Sample.Pool.Interface +
+-- GlobalChains.Interface). UP hides the view and returns control to
+-- the AdminMode menu. The focused-control upReleased handlers
+-- (SourceControl, ResetControl) grab focus first so a focused encoder
+-- gets unfocused before the cancel bubbles up here.
+function ClockView:upReleased(shifted)
+  if not shifted then
+    self:hide()
+    self:emitSignal("done")
+  end
+  return true
+end
+
+function ClockView:homeReleased()
+  self:hide()
+  self:emitSignal("done")
+  return true
+end
+
+function ClockView:cancelReleased(shifted)
+  if not shifted then
+    self:hide()
+    self:emitSignal("done")
+  end
+  return true
+end
+
 return ClockView

@@ -106,18 +106,27 @@ local function test_slot_div_clamp()
 end
 
 -- ---------------------------------------------------------------------------
--- Test 4: ext clock + reset inlets exist (non-nil pointers).
+-- Test 4: ext clock + reset comparators exist and expose In inlets.
 -- ---------------------------------------------------------------------------
 local function test_inlet_accessors()
-  local name = "ext-inlet-accessors"
-  local clkInlet = seq:getExtClockInlet()
-  local rstInlet = seq:getExtResetInlet()
-  if not clkInlet then
-    fail(name, "getExtClockInlet returned nil"); return
+  local name = "ext-comparator-accessors"
+  local clkComp = seq:getExtClockComparator()
+  local rstComp = seq:getExtResetComparator()
+  if not clkComp then
+    fail(name, "getExtClockComparator returned nil"); return
   end
-  if not rstInlet then
-    fail(name, "getExtResetInlet returned nil"); return
+  if not rstComp then
+    fail(name, "getExtResetComparator returned nil"); return
   end
+  if not clkComp:getInput("In") then
+    fail(name, "ext clock comparator has no 'In' inlet"); return
+  end
+  if not rstComp:getInput("In") then
+    fail(name, "ext reset comparator has no 'In' inlet"); return
+  end
+  -- Manual-fire wrappers should call without crashing.
+  seq:triggerClockRise(); seq:triggerClockFall()
+  seq:triggerResetRise(); seq:triggerResetFall()
   pass(name)
 end
 

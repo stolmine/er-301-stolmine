@@ -1,14 +1,10 @@
 -- Sequencer external-clock + reset source bindings.
 --
--- Phase 6.3 of the sequencer external-clock feature. Provides the
 -- Lua-side wiring layer between a Source.External picker (run by
--- ClockView in 6.4) and SequencerTask's extClock / extReset Inlets.
---
--- Per the phase-6 plan, plies 1 + 2 of the ClockView use a Source
--- picker only (no subchain dive). A user-picked Source.External
--- outlet is connected DIRECTLY to seqTask:getExtClockInlet() /
--- getExtResetInlet() via app.AudioThread.connect. No branches, no
--- host chain.
+-- the ClockView controls) and the ext-clock / ext-reset Comparator
+-- inputs on SequencerTask. A user-picked Source.External outlet is
+-- connected DIRECTLY to comparator:getInput("In") via
+-- app.AudioThread.connect. No branches, no host chain.
 --
 -- Module state is the currently-bound source NAMES, used both by the
 -- UI (to render the picker's "current selection") and by quicksave
@@ -20,9 +16,9 @@ local ClockBinding = {}
 
 local seqTask = app.AudioThread.getSequencerTask()
 
--- Currently-bound source names. nil = no source bound; the
--- corresponding Inlet is unconnected (returns ZeroOutput per
--- od/objects/Inlet.cpp, i.e. no edges, no behaviour change).
+-- Currently-bound source names. nil = no source bound; the comparator
+-- input is unconnected (returns ZeroOutput per Inlet.cpp, i.e. no
+-- edges, no behaviour change).
 local clockSourceName = nil
 local resetSourceName = nil
 
@@ -50,17 +46,22 @@ local function resolveSource(srcOrName)
   return nil, nil
 end
 
+local function comparatorInput(comp)
+  if not comp then return nil end
+  return comp:getInput("In")
+end
+
 -- ---------------------------------------------------------------------------
 -- Clock source binding
 -- ---------------------------------------------------------------------------
 
 function ClockBinding.setClockSource(srcOrName)
   if not seqTask then return end
-  local inlet = seqTask:getExtClockInlet()
+  local inlet = comparatorInput(seqTask:getExtClockComparator())
   if not inlet then return end
 
-  -- Always disconnect first; covers both the "rebinding to a new
-  -- source" and "clearing" cases without code duplication.
+  -- Always disconnect first; covers both "rebinding to a new source"
+  -- and "clearing" cases without code duplication.
   app.AudioThread.disconnect(inlet)
   clockSourceName = nil
 
@@ -92,7 +93,7 @@ end
 
 function ClockBinding.setResetSource(srcOrName)
   if not seqTask then return end
-  local inlet = seqTask:getExtResetInlet()
+  local inlet = comparatorInput(seqTask:getExtResetComparator())
   if not inlet then return end
 
   app.AudioThread.disconnect(inlet)
