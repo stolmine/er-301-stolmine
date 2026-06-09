@@ -1763,6 +1763,23 @@ function GridView:mainReleased(i, shifted)
   if shifted then return false end
   if i >= 1 and i <= kNumColumns then
     local newCol = i - 1
+    -- Tap on the already-focused column during an active selection on
+    -- the SAME column = "nav to the moving end of selection + drop the
+    -- selection." Selection is a transient modal entered to perform an
+    -- action and auto-exit; the user's column-M-tap intent here is to
+    -- escape the selection, not to enter edit on whatever cell happens
+    -- to be focused. Snap focusHead to selectionEnd so the cursor lands
+    -- where the user was last extending, then clear selection state.
+    if newCol == self.columnCursor
+       and self.selectionActive
+       and self.selectionColumn == newCol then
+      self.focusHeadRow    = self.selectionEnd
+      self.preEditValues   = {}
+      self.editedCells     = {}
+      self.selectionActive = false
+      self:refresh()
+      return true
+    end
     -- Tap on the already-focused column = "edit this cell" gesture.
     -- Same behaviour as ENTER, so we forward straight to
     -- enterReleased(false) which handles all the layer + mode
