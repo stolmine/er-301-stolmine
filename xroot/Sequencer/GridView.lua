@@ -1555,6 +1555,12 @@ function GridView:subReleased(i, shifted)
     -- always-on discoverable affordance (reads the OTHER layer). The
     -- shifted-S3 duplicate was removed to free that slot for the
     -- cell-clear gesture (Step 9 item 21).
+    --
+    -- Drop editingL1 across a layer switch. L2 has no inline edit
+    -- concept (it uses the CellEditor modal), so carrying the edit
+    -- flag across leaves a null state: encoder routes to nudge but
+    -- the user is staring at L2 cells.
+    if self.editingL1 then self.editingL1 = false end
     self.layer = (self.layer == "L1") and "L2" or "L1"
     self:refresh()
     return true
