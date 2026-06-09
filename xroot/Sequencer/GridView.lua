@@ -1029,22 +1029,28 @@ function GridView:refresh()
   -- 0, which we render as "BPM ext --" so the user sees they're in
   -- ext mode but no clock is arriving.
   local external = (seq:getClockSource() == 1)  -- CLOCK_EXTERNAL
+  -- "> " chevron prefix when BPM latch is engaged: glance-readable
+  -- "encoder is targeting BPM" indicator on the BPM digits themselves.
+  -- The softkey row's BPM* cue duplicates the signal at a glance but
+  -- sits across the display from where the user is looking when
+  -- dialing -- the prefix puts the cue at the target.
+  local caret = self.bpmLatched and "> " or ""
   local bpm
   if external then
     bpm = seq:getExtBpm()
     if bpm <= 0.0 then
-      self.bpmLabel:setText("BPM ext --")
+      self.bpmLabel:setText(caret .. "BPM ext --")
     elseif math.abs(bpm - math.floor(bpm + 0.5)) < 0.05 then
-      self.bpmLabel:setText(string.format("BPM ext %d", math.floor(bpm + 0.5)))
+      self.bpmLabel:setText(string.format("%sBPM ext %d", caret, math.floor(bpm + 0.5)))
     else
-      self.bpmLabel:setText(string.format("BPM ext %.1f", bpm))
+      self.bpmLabel:setText(string.format("%sBPM ext %.1f", caret, bpm))
     end
   else
     bpm = seq:getBpm()
     if math.abs(bpm - math.floor(bpm + 0.5)) < 0.05 then
-      self.bpmLabel:setText(string.format("BPM %d", math.floor(bpm + 0.5)))
+      self.bpmLabel:setText(string.format("%sBPM %d", caret, math.floor(bpm + 0.5)))
     else
-      self.bpmLabel:setText(string.format("BPM %.1f", bpm))
+      self.bpmLabel:setText(string.format("%sBPM %.1f", caret, bpm))
     end
   end
   -- Persistent layer indicator: "seq1.L1" or "seq1.L2" on the sub
