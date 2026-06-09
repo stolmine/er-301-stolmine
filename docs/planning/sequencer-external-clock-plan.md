@@ -571,8 +571,25 @@ reset) for UI + persistence (6.6).
   as the absolute number matters less than tracking proportionally
   in a relative-timing system. Revisit at 6.7 hardware sweep with
   a known-precise clock reference.
-- **Phase 6.6 persistence**: clockSource + globalDiv + per-slot
-  divs + picked source names all need to survive reboot. Not yet
-  wired into `Sequencer/Persist.lua`. Default state is internal +
-  div=1 everywhere + no sources bound, which already works on a
-  fresh boot.
+- **Phase 6.6 persistence (SHIPPED 2026-06-08):**
+  - `xroot/Sequencer/Persist.lua` schema bumped v2 -> v3.
+  - Serialize captures `data.clock` subtable: `source`
+    ("internal"/"external"), `globalDiv`, `slotDiv[1..4]`,
+    `extClockSource` + `extResetSource` (picker-bound source names
+    from `ClockBinding`).
+  - Deserialize applies clock state BEFORE the per-slot loop so the
+    engine sees its new dividers + source before any slot tick
+    could fire.
+  - `setClockSource` side effect (zeros divider counters + comparator
+    rate cache) is the intentional clean-start behaviour on load.
+  - Settings.sequencerClockSource synced from the quicksave's value
+    via `pcall(Settings.set, ...)`. Quicksave wins; System Settings
+    menu always shows actually-live mode after load.
+  - v2 -> v3 migration inserts engine defaults (internal / div=1 /
+    no sources bound), so old v2 saves restore identically to
+    pre-feature behaviour. v1 -> v2 -> v3 chain works.
+  - Unknown source names from stale saves are logged but don't
+    crash (handled by existing `ClockBinding.setX` no-op-on-unknown
+    path).
+  - Bench: 12/12 PASS (3 new tests cover round-trip, v2 migration,
+    unknown-source).
