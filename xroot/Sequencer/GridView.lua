@@ -1717,6 +1717,16 @@ function GridView:mainReleased(i, shifted)
     if newCol == self.columnCursor then
       return self:enterReleased(false)
     end
+    -- Switching columns exits edit mode. Required follow-up to the
+    -- "M on current column = edit" gesture: each edit session is
+    -- per-column-focus-act, so a column switch always resets to
+    -- nav state. The user then taps the new column's M-key a
+    -- second time to enter edit on its focused cell. Without this,
+    -- editingL1 would silently follow the user across columns and
+    -- the gesture grammar would be confusing.
+    if self.editingL1 then
+      self.editingL1 = false
+    end
     if self.selectionActive and newCol ~= self.selectionColumn then
       -- Switching columns implicitly commits any in-flight bulk edit.
       -- Values stay at their current (edited) state, but the pre-edit
