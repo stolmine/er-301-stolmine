@@ -1,0 +1,41 @@
+Section,Test ID,Section Name,Starting State,Gesture,Expected End State,Watch For,Notes
+A,A1,Entering BPM latch (shift+S2),Nav (clean),shift+S2,"BPM latched, encoder writes BPM",sub-bar shows BPM label,
+A,A2,Entering BPM latch (shift+S2),editingL1 (ENTER on L1 then encoder shows edit indicator),shift+S2,"BPM latched, edit committed (cell value preserved as-is)","edit cursor gone, BPM label visible",collision #2
+A,A3,Entering BPM latch (shift+S2),selectionActive (shift+encoder to extend a 3-row selection),shift+S2,"BPM latched, selection dropped, cells stay at bulk-edited values","selection box gone, BPM label visible",collision #4
+A,A4,Entering BPM latch (shift+S2),markingMode (tap S2 once then encoder a few rows),shift+S2,"BPM latched, marker pair committed","marker indicator at final positions, no lingering mark cursor",collision #5
+A,A5,Entering BPM latch (shift+S2),BPM latched already (from any prior path),shift+S2 again,BPM unlatched,should NOT also enter mark - this is the original bug fix,
+B,B1,Exiting BPM latch (bare S2),BPM latched,bare S2 (no shift),"nav, BPM persists to Settings","should NOT enter mark mode, marker2 unchanged on column 0",primary fix
+B,B2,Exiting BPM latch (bare S2),BPM latched,shift+S2,"nav, BPM persists",should NOT enter mark,
+B,B3,Exiting BPM latch (bare S2),"BPM latched, then release shift before S2",shift+S2 (release shift first),"nav, BPM persists",should NOT enter mark - release-timing edge case the transient flag exists for,timing edge case
+B,B4,Exiting BPM latch (bare S2),BPM latched,UP,"nav, BPM persists",,already shipped earlier
+B,B5,Exiting BPM latch (bare S2),"BPM latched, then leave the takeover",any takeover-exit gesture,re-enter takeover finds clean nav,onHide should have cleared latch,already shipped earlier
+C,C1,Entering L1 edit (ENTER on L1 layer),Nav,ENTER,"editingL1 active, encoder nudges cell","edit indicator visible, no marker / selection / BPM cursors",
+C,C2,Entering L1 edit (ENTER on L1 layer),selectionActive,ENTER,"editingL1 active, selection dropped, bulk values stay",selection box gone,
+C,C3,Entering L1 edit (ENTER on L1 layer),markingMode,ENTER,"editingL1 active, marker pair committed","marker visible at final positions, no marker cursor",
+C,C4,Entering L1 edit (ENTER on L1 layer),BPM latched,ENTER,"editingL1 active, BPM persisted to Settings",BPM label gone,collision #6
+C,C5,Entering L1 edit (ENTER on L1 layer),editingL1 active,ENTER again,"focusHead advances by 1 row, still editing",row indicator moves down,not a collision - existing advance behavior
+D,D1,Entering L2 CellEditor modal (ENTER on L2 layer),Nav on L2,ENTER,CellEditor modal opens,"modal on screen, takeover hidden underneath",
+D,D2,Entering L2 CellEditor modal (ENTER on L2 layer),selectionActive on L2,ENTER,"CellEditor opens, selection dropped before modal","close modal -> back to clean nav, not back to selection",
+D,D3,Entering L2 CellEditor modal (ENTER on L2 layer),markingMode on L2,ENTER,"CellEditor opens, mark committed","close modal -> marker pair visible at final positions, no mark cursor",
+D,D4,Entering L2 CellEditor modal (ENTER on L2 layer),BPM latched on L2,ENTER,"CellEditor opens, BPM persisted",close modal -> nav (no BPM cursor still active behind modal),collision #6 L2 path
+E,E1,Entering mark mode (bare S2 release while not latched),Nav,tap S2,"markingMode active, marker2 follows encoder",marker indicator on focused column,
+E,E2,Entering mark mode (bare S2 release while not latched),editingL1,tap S2,"markingMode active, edit committed","sub-bar shows mark label, no edit indicator","collision #1, TODO target"
+E,E3,Entering mark mode (bare S2 release while not latched),selectionActive,tap S2,"markingMode active, selection dropped",no selection box,collision #3
+E,E4,Entering mark mode (bare S2 release while not latched),BPM latched,bare S2,nav (exits BPM via the bare-S2-while-latched gesture; no mark fires),BPM gone and no mark cursor,B1 repeated for symmetry
+F,F1,Column switch (M-tap on different column),Nav on column 0,tap M3,nav on column 2,cursor moves to column 2,
+F,F2,Column switch (M-tap on different column),editingL1 on column 0,tap M3,nav on column 2 (edit exited),no edit indicator on either column,collision #8 / already-shipped
+F,F3,Column switch (M-tap on different column),selectionActive on column 0,tap M3,"nav on column 2, selection on column 0 dropped (different-column rule)",no selection box anywhere,
+F,F4,Column switch (M-tap on different column),selectionActive on column 0,tap M1 (same column),selection preserved,,per existing same-column rule (not a collision)
+F,F5,Column switch (M-tap on different column),markingMode on column 0,tap M3,"nav on column 2, mark pair committed on column 0",column 0 has marker indicator at the committed positions,
+F,F6,Column switch (M-tap on different column),BPM latched,tap M3,"nav on column 2, BPM persisted",BPM label gone,collision #7
+G,G1,M-tap on current column (recently-added edit gesture),Nav on column 0,tap M1 (current col),editingL1 active on column 0,edit indicator visible,
+G,G2,M-tap on current column (recently-added edit gesture),editingL1 on column 0,tap M1 again,focusHead advances by 1 row,"row moves down, still editing",not a collision - existing advance behavior
+G,G3,M-tap on current column (recently-added edit gesture),editingL1 on column 0,tap M3 (different col),"nav on column 2, edit exited",,collision #8 / already-shipped
+H,H1,Sanity / positive tests (encoder routing),None (nav),Twist,focusHead moves up/down,,positive
+H,H2,Sanity / positive tests (encoder routing),None (nav),shift+twist,starts a selection from current row,,positive
+H,H3,Sanity / positive tests (encoder routing),editingL1,Twist,cell value nudges by stepForColumn,,positive
+H,H4,Sanity / positive tests (encoder routing),editingL1,shift+twist,cell nudges by super-step (NOT selection - implicit-guard via elseif order),,positive
+H,H5,Sanity / positive tests (encoder routing),markingMode,Twist,focusHead + marker2 move together (NOT cell edit; NOT selection),,positive
+H,H6,Sanity / positive tests (encoder routing),bpmLatched,Twist,BPM changes (NOT cell; NOT marker; NOT focusHead),,positive
+H,H7,Sanity / positive tests (encoder routing),selectionActive,shift+twist,extends selection,,positive
+H,H8,Sanity / positive tests (encoder routing),selectionActive,bare twist (no shift),bulk-edit cell values across selection,,positive
