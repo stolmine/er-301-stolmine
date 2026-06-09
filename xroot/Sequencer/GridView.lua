@@ -1159,6 +1159,20 @@ function GridView:onHide()
     Signal.remove("onDisplayFrame", self.frameCallback)
     self.frameCallback = nil
   end
+  -- Release any sticky modal state so a later re-show starts clean.
+  -- Without this, a user who latches BPM and then exits the takeover
+  -- (shift+ENTER, mode-toggle switch, home gesture) finds the encoder
+  -- still routed to BPM on re-entry with no signal beyond the sub-bar
+  -- label -- easy to miss after a context switch.
+  if self.bpmLatched then
+    self.bpmLatched = false
+    self.bpmAccum   = 0
+    local seq = app.AudioThread.getSequencerTask()
+    if seq then
+      local Settings = require "Settings"
+      Settings.set("bpm", string.format("%.2f", seq:getBpm()))
+    end
+  end
 end
 
 -- ---- input handlers ----
@@ -1190,6 +1204,43 @@ function GridView:_commitMark()
   self.markingMode   = "idle"
   self.markBackup    = nil
   self.markFirstMark = nil
+end
+
+-- Force-commit any modal that owns the encoder or the visual cursor
+-- BEFORE entering a new modal. Ensures encoder ownership is single
+-- and avoids visual lies (where one modal's cursor renders while
+-- another modal's encoder handler eats the input).
+--
+-- `entering` is the modal we're about to enter; we exit every other
+-- active modal. Exit semantics mirror what UP / CANCEL already do
+-- for each:
+--   editingL1:        drop flag (cell value already live in engine)
+--   selectionActive:  drop flag + bulk-edit state (matches UP, no
+--                     rollback)
+--   markingMode:      _commitMark (matches UP)
+--   bpmLatched:       drop flag + persist BPM to Settings (matches
+--                     UP / onHide)
+function GridView:_commitOtherModalsBefore(entering)
+  if entering ~= "editingL1" and self.editingL1 then
+    self.editingL1 = false
+  end
+  if entering ~= "selectionActive" and self.selectionActive then
+    self.preEditValues   = {}
+    self.editedCells     = {}
+    self.selectionActive = false
+  end
+  if entering ~= "markingMode" and self.markingMode == "marking_end" then
+    self:_commitMark()
+  end
+  if entering ~= "bpmLatched" and self.bpmLatched then
+    self.bpmLatched = false
+    self.bpmAccum   = 0
+    local seq = app.AudioThread.getSequencerTask()
+    if seq then
+      local Settings = require "Settings"
+      Settings.set("bpm", string.format("%.2f", seq:getBpm()))
+    end
+  end
 end
 
 function GridView:_revertMark()
@@ -1286,6 +1337,10 @@ function GridView:subPressed(i, shifted)
         Settings.set("bpm", string.format("%.2f", seq:getBpm()))
       end
     else
+      -- Entering the latch: commit any other in-flight modal so the
+      -- encoder lands cleanly on BPM and no stale cursor lies about
+      -- what the encoder is editing.
+      self:_commitOtherModalsBefore("bpmLatched")
       self.bpmLatched = true
       self.bpmAccum   = 0
     end
@@ -1437,6 +1492,12 @@ function GridView:subReleased(i, shifted)
     return true
   elseif i == 2 then
     if self.markingMode == "idle" then
+      -- Commit any in-flight L1 edit / bulk selection / BPM latch
+      -- so the encoder lands cleanly on the marking_end live-update
+      -- path. Without this, edit / selection / latch state survives
+      -- alongside the new mark cursor and the encoder routes get
+      -- ambiguous (TODO 9.2.1 -- mark-vs-edit collision report).
+      self:_commitOtherModalsBefore("markingMode")
       -- First press: snapshot existing marker pair, plant marker1 at
       -- focusHead, set marker2 = focusHead as a 1-step seed loop, and
       -- enter the modal. Encoder + HOME from here live-update marker2.
@@ -1717,15 +1778,27 @@ function GridView:mainReleased(i, shifted)
     if newCol == self.columnCursor then
       return self:enterReleased(false)
     end
-    -- Switching columns exits edit mode. Required follow-up to the
-    -- "M on current column = edit" gesture: each edit session is
-    -- per-column-focus-act, so a column switch always resets to
-    -- nav state. The user then taps the new column's M-key a
-    -- second time to enter edit on its focused cell. Without this,
-    -- editingL1 would silently follow the user across columns and
-    -- the gesture grammar would be confusing.
+    -- Switching columns exits edit mode + BPM latch. Required follow-
+    -- up to the "M on current column = edit" gesture: each edit
+    -- session is per-column-focus-act, so a column switch always
+    -- resets to nav state. The user then taps the new column's M-key
+    -- a second time to enter edit on its focused cell.
+    --
+    -- BPM latch exit on column switch is part of the modal-mutual-
+    -- exclusion sweep: the column-switch gesture is a nav action, so
+    -- it shouldn't survive a BPM-edit context. Mirrors UP / onHide
+    -- semantics.
     if self.editingL1 then
       self.editingL1 = false
+    end
+    if self.bpmLatched then
+      self.bpmLatched = false
+      self.bpmAccum   = 0
+      local seq = app.AudioThread.getSequencerTask()
+      if seq then
+        local Settings = require "Settings"
+        Settings.set("bpm", string.format("%.2f", seq:getBpm()))
+      end
     end
     if self.selectionActive and newCol ~= self.selectionColumn then
       -- Switching columns implicitly commits any in-flight bulk edit.
@@ -1761,6 +1834,10 @@ function GridView:enterReleased(shifted)
   -- the modal advances focusHead and reloads the editor for the
   -- next row via the commitAndAdvance signal below.
   if self.layer == "L2" and not self.editingL1 then
+    -- Commit other modals before opening the L2 cell editor on top
+    -- so the user lands back in clean nav after the modal closes,
+    -- not back into a stale BPM-latched / selection / mark state.
+    self:_commitOtherModalsBefore(nil)
     local CellEditor = require "Sequencer.CellEditor"
     local editor = CellEditor(self.slot, self.columnCursor, self.focusHeadRow)
     editor:subscribe("done", function() self:refresh() end)
@@ -1775,15 +1852,13 @@ function GridView:enterReleased(shifted)
   if self.editingL1 then
     self.focusHeadRow = clamp(self.focusHeadRow + 1, 0, kMaxRow)
   else
-    -- Entering edit mode commits any in-flight mark modal (same
-    -- semantics as UP / column-change).
-    self:_commitMark()
+    -- Commit any in-flight mark / selection / BPM latch before
+    -- entering edit. The helper folds all three exits into one
+    -- named call so future modals stay consistent (was: ad-hoc
+    -- _commitMark + selection clearing inline, no BPM latch
+    -- handling).
+    self:_commitOtherModalsBefore("editingL1")
     self.editingL1 = true
-    -- Entering edit mode while a bulk-edit is active commits it (same
-    -- semantics as UP / column-change): keep values, drop snapshot.
-    self.preEditValues   = {}
-    self.editedCells     = {}
-    self.selectionActive = false
   end
   self:refresh()
   return true
@@ -1844,6 +1919,22 @@ function GridView:cancelReleased(shifted)
 end
 
 function GridView:upReleased(shifted)
+  -- BPM latch release: parallel branch to cancelReleased's, since the
+  -- latch can be entered with shift+S2 and is otherwise only exitable
+  -- by a second shift+S2 toggle. UP should release it like any other
+  -- modal mode. Persist the dialed value to the bpm Setting (engine
+  -- already has it from live setBpm during the latch).
+  if self.bpmLatched then
+    self.bpmLatched = false
+    self.bpmAccum   = 0
+    local seq = app.AudioThread.getSequencerTask()
+    if seq then
+      local Settings = require "Settings"
+      Settings.set("bpm", string.format("%.2f", seq:getBpm()))
+    end
+    self:refresh()
+    return true
+  end
   if self.editingL1 then
     self.editingL1 = false
     self:refresh()
