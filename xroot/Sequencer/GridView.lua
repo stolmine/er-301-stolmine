@@ -1702,6 +1702,31 @@ function GridView:mainReleased(i, shifted)
   if shifted then return false end
   if i >= 1 and i <= kNumColumns then
     local newCol = i - 1
+    -- Tap on the already-focused column = "edit this cell" gesture.
+    -- Same behaviour as ENTER, so we forward straight to
+    -- enterReleased(false) which handles all the layer + mode
+    -- branches (L1 enter-edit / L1 advance-row / L2 open CellEditor)
+    -- + mark/selection commit semantics in one place.
+    --
+    -- Rationale: users often reach for the M-key of the current
+    -- column intending to edit the cell, not to "select again"
+    -- (which was a no-op). Folding the gesture in costs nothing for
+    -- users who don't think this way (a column already focused stays
+    -- focused either way) and unblocks the intuitive "tap column,
+    -- tap again to edit" muscle memory.
+    if newCol == self.columnCursor then
+      return self:enterReleased(false)
+    end
+    -- Switching columns exits edit mode. Required follow-up to the
+    -- "M on current column = edit" gesture: each edit session is
+    -- per-column-focus-act, so a column switch always resets to
+    -- nav state. The user then taps the new column's M-key a
+    -- second time to enter edit on its focused cell. Without this,
+    -- editingL1 would silently follow the user across columns and
+    -- the gesture grammar would be confusing.
+    if self.editingL1 then
+      self.editingL1 = false
+    end
     if self.selectionActive and newCol ~= self.selectionColumn then
       -- Switching columns implicitly commits any in-flight bulk edit.
       -- Values stay at their current (edited) state, but the pre-edit
