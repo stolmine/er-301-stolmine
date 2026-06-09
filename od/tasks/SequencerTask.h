@@ -260,16 +260,19 @@ namespace od {
     int mSlotDiv[sequencer::kNumSlots]      = {1, 1, 1, 1};
     int mSlotDivCount[sequencer::kNumSlots] = {0, 0, 0, 0};
 
-    // Windowed ext BPM cache. SequencerTask refreshes this from the
-    // comparator's running rate counter every kBpmWindowSec of elapsed
-    // time (or every kBpmWindowEdges edges -- whichever comes first),
-    // then resets the comparator's counter. Without this, calling
-    // getRateInBPM directly accumulates over an ever-widening window
-    // and the displayed value drifts slowly toward the true rate. The
-    // ComparatorView graphic uses the same trick internally but only
-    // refreshes when visible; the audio-thread cache keeps the rate
-    // current regardless of which view the user is on.
-    float mCachedExtBpm = 0.0f;
+    // Inter-edge BPM tracker. On each ext clock rising edge we
+    // compute (now - mExtClockLastEdgeSamples) / sampleRate to get the
+    // inter-pulse interval in seconds, then quarter-note interval =
+    // pulse interval * 4 (PPQN), then BPM = 60 / quarterSec. EMA-
+    // smoothed with alpha=0.4 to filter frame-quantization noise.
+    // First valid reading snaps so the readout doesn't visibly climb.
+    // Locks within ~2 edges -- a major win over the previous windowed
+    // approach which needed >=8 edges + >=0.5s before sampling.
+    float    mCachedExtBpm           = 0.0f;
+    uint64_t mExtClockLastEdgeSamples = 0;
+    // mFrameSampleClock advances by frameLen every process() call so
+    // the edge timestamps stay monotonic across frame boundaries.
+    uint64_t mFrameSampleClock       = 0;
   };
 
 } // namespace od

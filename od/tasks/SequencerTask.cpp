@@ -47,41 +47,16 @@ namespace od {
     // Drive the comparators first. They read from their In Inlets
     // (connected to picker-bound source Outlets by ClockBinding) and
     // write their gate states to their Out Outlet buffers. Out is what
-    // we edge-scan below for the divider / reset logic.
+    // we edge-scan below for the divider / reset logic + the BPM
+    // tracker.
     mExtClockComp.process();
     mExtResetComp.process();
 
-    // Refresh the windowed ext BPM cache. Two-stage smoothing:
-    //   1. Window sample: wait until we have >=8 edges AND >=0.5s
-    //      elapsed before reading the comparator rate, then reset
-    //      the counter so the next window starts fresh. A wider
-    //      window than ComparatorView's (>2 edges / >0.25s) gives
-    //      a more stable raw sample at the cost of slower response
-    //      to true tempo changes (~1s settle at 75 BPM / 5 Hz pulse
-    //      input). The trade-off is fine for a display readout;
-    //      ticks themselves are not affected by this rate.
-    //   2. EMA on top of the windowed sample: 30% new, 70% retained.
-    //      Filters out the residual ±1 BPM wobble caused by edges
-    //      landing on different sides of frame boundaries.
-    //
-    // PPQN interpretation: ext clock pulses are assumed to be
-    // 1/16-note ticks (4 pulses per beat) -- the analog-modular
-    // default and what matches Slot::stepLen=0.25's "tick = 1/16"
-    // convention. So musical BPM = comparator_rate_in_bpm / 4
-    // (which is comparator_rate_in_hz * 60 / 4 = hz * 15).
-    if (mExtClockComp.getRisingEdgeCount() >= 8
-        && mExtClockComp.getElapsed() >= 0.5f) {
-      const float windowSample = mExtClockComp.getRateInBPM() / 4.0f;
-      if (mCachedExtBpm <= 0.0f) {
-        // First valid sample: snap to it so the user doesn't watch
-        // the display climb from 0.
-        mCachedExtBpm = windowSample;
-      } else {
-        const float alpha = 0.3f;
-        mCachedExtBpm = alpha * windowSample + (1.0f - alpha) * mCachedExtBpm;
-      }
-      mExtClockComp.resetCounter();
-    }
+    // BPM tracker (inter-edge interval, EMA-smoothed) lives in the
+    // CLOCK_EXTERNAL branch below since it needs to look at
+    // comparator.Out's per-sample state. PPQN assumption is 4
+    // (1/16-note pulses, analog-modular default, matches
+    // Slot::stepLen=0.25's "tick = 1/16" convention).
 
     // v2 outlet plumbing. Index order matches the v2 column layout:
     //   [0] cv1, [1] cv2, [2] gate1Amp, [3] gate2Amp,
@@ -93,42 +68,57 @@ namespace od {
       {&mSeq4Cv1, &mSeq4Cv2, &mSeq4Gate1Amp, &mSeq4Gate2Amp, &mSeq4StepLen, &mSeq4Transpose}
     };
 
-    // Reset edge detection on comparator.Out — runs in BOTH modes. A
-    // modular reset jack is still useful when the sequencer is
-    // internally clocked but synced to an external transport. v1
-    // quantizes resets to the start of the frame.
-    {
-      const float *rstBuf = mExtResetComp.getOutput("Out")->buffer();
-      bool resetEdge = false;
-      float prev = mExtResetOutPrev;
-      for (int i = 0; i < frameLen; ++i) {
-        const float cur = rstBuf[i];
-        if (prev < 0.5f && cur >= 0.5f) resetEdge = true;
-        prev = cur;
-      }
-      mExtResetOutPrev = prev;
-      if (resetEdge) {
-        for (int s = 0; s < sequencer::kNumSlots; ++s) {
-          mSlots[s].reset();
-        }
-      }
-    }
-
     if (mClockSource == CLOCK_EXTERNAL) {
       // Per-sample edge detection on the ext clock comparator's Out.
-      // Each edge feeds the global divider; surviving ticks feed
-      // per-slot dividers; surviving per-slot ticks call externalTick().
-      // Gate-length BPM uses the comparator's built-in rate measurement
-      // when available; falls back to internal BPM otherwise.
+      // Each edge:
+      //   1) feeds the BPM tracker (inter-edge-interval, EMA-smoothed)
+      //      so the readout locks within ~2 edges instead of waiting
+      //      for the windowed sampler's >=8 edges / >=0.5s threshold.
+      //   2) feeds the global divider; surviving ticks feed per-slot
+      //      dividers; surviving per-slot ticks call externalTick().
+      // Reset edge detection ALSO runs only here -- per user direction
+      // 2026-06-08, modular reset only fires when ext clock is the
+      // active source. The "internally-clocked, externally-reset" path
+      // is conceptually nice but confused users at the bench. If we
+      // want it back later it goes behind a Setting.
       const float *clkBuf = mExtClockComp.getOutput("Out")->buffer();
-      const float compBpm = mExtClockComp.getRateInBPM();
-      const float gateBpm = (compBpm > 0.0f) ? compBpm : internalBpm;
-      float prev = mExtClockOutPrev;
+      const float *rstBuf = mExtResetComp.getOutput("Out")->buffer();
+      const float gateBpm = (mCachedExtBpm > 0.0f) ? mCachedExtBpm : internalBpm;
+      float clkPrev = mExtClockOutPrev;
+      float rstPrev = mExtResetOutPrev;
+      bool  resetEdge = false;
 
       for (int i = 0; i < frameLen; ++i) {
-        const float cur = clkBuf[i];
-        if (prev < 0.5f && cur >= 0.5f) {
-          // Ext clock rising edge. Advance global divider.
+        const float clkCur = clkBuf[i];
+        if (clkPrev < 0.5f && clkCur >= 0.5f) {
+          // Ext clock rising edge. Update BPM tracker from the
+          // inter-edge interval -- one division per edge is plenty
+          // fast for typical clock rates and we get a stable reading
+          // in two ticks.
+          const uint64_t nowSamples = mFrameSampleClock + static_cast<uint64_t>(i);
+          if (mExtClockLastEdgeSamples > 0) {
+            const uint64_t intervalSamples = nowSamples - mExtClockLastEdgeSamples;
+            if (intervalSamples > 0) {
+              // ext clock pulses = 4 PPQN (1/16-note). quarter-note
+              // interval = pulse interval * 4. BPM = 60 / quarterSec.
+              const float intervalSec = static_cast<float>(intervalSamples) / sampleRate;
+              const float quarterSec  = intervalSec * 4.0f;
+              const float instantBpm  = 60.0f / quarterSec;
+              if (mCachedExtBpm <= 0.0f) {
+                // First valid reading: snap so user sees a real number
+                // immediately rather than ramping from 0.
+                mCachedExtBpm = instantBpm;
+              } else {
+                // Tight EMA -- still smooths frame-quantization noise
+                // but doesn't lag like the old windowed sampler.
+                const float alpha = 0.4f;
+                mCachedExtBpm = alpha * instantBpm + (1.0f - alpha) * mCachedExtBpm;
+              }
+            }
+          }
+          mExtClockLastEdgeSamples = nowSamples;
+
+          // Divider chain.
           ++mGlobalDivCount;
           if (mGlobalDivCount >= mGlobalDiv) {
             mGlobalDivCount = 0;
@@ -141,9 +131,21 @@ namespace od {
             }
           }
         }
-        prev = cur;
+        clkPrev = clkCur;
+
+        // Reset edge detection (ext mode only -- see comment above).
+        const float rstCur = rstBuf[i];
+        if (rstPrev < 0.5f && rstCur >= 0.5f) resetEdge = true;
+        rstPrev = rstCur;
       }
-      mExtClockOutPrev = prev;
+      mExtClockOutPrev = clkPrev;
+      mExtResetOutPrev = rstPrev;
+
+      if (resetEdge) {
+        for (int s = 0; s < sequencer::kNumSlots; ++s) {
+          mSlots[s].reset();
+        }
+      }
 
       // Emission pass — slots emit S&H + gate envelopes without
       // advancing their internal samplesUntilTick.
@@ -172,6 +174,10 @@ namespace od {
           internalBpm, sampleRate);
       }
     }
+
+    // Frame-sample clock advances regardless of mode so the BPM
+    // tracker's timestamps stay monotonic across mode switches.
+    mFrameSampleClock += static_cast<uint64_t>(frameLen);
   }
 
   sequencer::Slot &SequencerTask::getSlot(int idx)
@@ -464,9 +470,11 @@ namespace od {
       mClockSource = source;
       mGlobalDivCount = 0;
       for (int i = 0; i < sequencer::kNumSlots; ++i) mSlotDivCount[i] = 0;
-      // Drop BPM estimate + comparator window so the next pulse starts
-      // fresh measurement rather than carrying over stale state.
+      // Drop BPM estimate + comparator window + edge timestamp so the
+      // next pulse starts fresh measurement rather than carrying over
+      // stale state.
       mCachedExtBpm = 0.0f;
+      mExtClockLastEdgeSamples = 0;
       mExtClockComp.resetCounter();
     }
   }
