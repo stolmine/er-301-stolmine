@@ -1159,6 +1159,20 @@ function GridView:onHide()
     Signal.remove("onDisplayFrame", self.frameCallback)
     self.frameCallback = nil
   end
+  -- Release any sticky modal state so a later re-show starts clean.
+  -- Without this, a user who latches BPM and then exits the takeover
+  -- (shift+ENTER, mode-toggle switch, home gesture) finds the encoder
+  -- still routed to BPM on re-entry with no signal beyond the sub-bar
+  -- label -- easy to miss after a context switch.
+  if self.bpmLatched then
+    self.bpmLatched = false
+    self.bpmAccum   = 0
+    local seq = app.AudioThread.getSequencerTask()
+    if seq then
+      local Settings = require "Settings"
+      Settings.set("bpm", string.format("%.2f", seq:getBpm()))
+    end
+  end
 end
 
 -- ---- input handlers ----
@@ -1844,6 +1858,22 @@ function GridView:cancelReleased(shifted)
 end
 
 function GridView:upReleased(shifted)
+  -- BPM latch release: parallel branch to cancelReleased's, since the
+  -- latch can be entered with shift+S2 and is otherwise only exitable
+  -- by a second shift+S2 toggle. UP should release it like any other
+  -- modal mode. Persist the dialed value to the bpm Setting (engine
+  -- already has it from live setBpm during the latch).
+  if self.bpmLatched then
+    self.bpmLatched = false
+    self.bpmAccum   = 0
+    local seq = app.AudioThread.getSequencerTask()
+    if seq then
+      local Settings = require "Settings"
+      Settings.set("bpm", string.format("%.2f", seq:getBpm()))
+    end
+    self:refresh()
+    return true
+  end
   if self.editingL1 then
     self.editingL1 = false
     self:refresh()

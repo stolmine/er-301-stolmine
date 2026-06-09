@@ -469,6 +469,17 @@ function Chooser:subReleased(i, shifted)
   return self.ring:subReleased(i, shifted)
 end
 
+-- Empty shiftPressed handler consumes the press event so a shift-held
+-- entry into the picker (Header.lua's Replace gesture starts with
+-- shift+M3) doesn't surface as a phantom shiftReleased on first
+-- refresh -- which would otherwise drop the user into favorites-
+-- tagging mode unexpectedly. shiftReleased below still fires for
+-- subsequent shift presses inside the picker, so the deliberate
+-- "shift = enter tagging mode" gesture remains intact.
+function Chooser:shiftPressed()
+  return true
+end
+
 function Chooser:shiftReleased()
   self.ring:toggleFavoritesEditMode()
   return true
