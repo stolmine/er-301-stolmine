@@ -24,11 +24,15 @@ local kNumSlots          = 4
 local kNumColumns        = 6
 local kMaxStepsPerColumn = 64
 
--- Quicksave schema version. Bumped to 2 when the column layout
--- migrated from v0.1 (cv1 cv2 cv3 gtL gtA stL) to v2 (cv1 cv2 g1L
--- g2L stL tr). Older saves with no schemaVersion field are treated
--- as v1 and run through migrateV1ToV2 on load.
-local kSchemaVersion     = 2
+-- Quicksave schema version.
+--   v1: legacy 6-column layout (cv1 cv2 cv3 gtL gtA stL).
+--   v2: v2 column layout (cv1 cv2 g1L g2L stL tr) -- see migrateV1ToV2.
+--   v3: adds `clock` subtable (ext-clock source / dividers / picker
+--       source names). v2 saves migrate by inserting defaults that
+--       match engine boot state, so behavior is identical for users
+--       who never touched the ext-clock UI.
+-- Older saves with no schemaVersion field are treated as v1.
+local kSchemaVersion     = 3
 
 -- v0.1 column indices, used only by the v1 -> v2 migration.
 local V1_COL_CV1      = 0
@@ -162,6 +166,24 @@ local function migrateV1ToV2(data)
   return data
 end
 
+-- Migrate a v2 quicksave to v3 by inserting a `clock` subtable filled
+-- with engine boot defaults. v2 saves predate the ext-clock feature;
+-- restoring them must not silently switch the user into external
+-- mode, so we use internal/div=1/no-sources as defaults. Returns the
+-- same table for chaining.
+local function migrateV2ToV3(data)
+  if not data then return data end
+  data.clock = {
+    source         = "internal",
+    globalDiv      = 1,
+    slotDiv        = { 1, 1, 1, 1 },
+    extClockSource = nil,
+    extResetSource = nil,
+  }
+  data.schemaVersion = kSchemaVersion
+  return data
+end
+
 -- ---------------------------------------------------------------------------
 -- Serialize
 -- ---------------------------------------------------------------------------
@@ -213,6 +235,20 @@ function M.serialize()
     end
     data.slots[s + 1] = slot
   end
+
+  -- v3 clock subtable: source mode + globalDiv + per-slot dividers +
+  -- picker-bound source names. ClockBinding is module-state-only so
+  -- this is the only place its current binding gets persisted.
+  local ClockBinding = require "Sequencer.ClockBinding"
+  data.clock = {
+    source         = (seq:getClockSource() == 1) and "external" or "internal",
+    globalDiv      = seq:getGlobalDiv(),
+    slotDiv        = { seq:getSlotDiv(0), seq:getSlotDiv(1),
+                       seq:getSlotDiv(2), seq:getSlotDiv(3) },
+    extClockSource = ClockBinding.getClockSourceName(),
+    extResetSource = ClockBinding.getResetSourceName(),
+  }
+
   return data
 end
 
@@ -223,12 +259,51 @@ function M.deserialize(data)
   local seq = app.AudioThread.getSequencerTask()
   if not (seq and data and data.slots) then return end
 
-  -- v1 saves have no schemaVersion field; run the migration in place so
-  -- the rest of this function works against a v2-shaped table.
+  -- v1 saves have no schemaVersion field; run migrations in chain so
+  -- the rest of this function works against the current shape.
+  --   v1 -> v2: column layout (cv3 dropped, gtA -> g2L, +tr column)
+  --   v2 -> v3: add `clock` subtable with engine defaults
   local sv = data.schemaVersion or 1
   if sv < kSchemaVersion then
     app.logInfo("Sequencer.Persist: migrating v%d quicksave -> v%d", sv, kSchemaVersion)
-    data = migrateV1ToV2(data)
+    if sv < 2 then data = migrateV1ToV2(data); sv = 2 end
+    if sv < 3 then data = migrateV2ToV3(data); sv = 3 end
+  end
+
+  -- Clock state restore (v3+). Done BEFORE the per-slot loop so the
+  -- engine sees its new dividers + source mode before any slot tick
+  -- could fire. (Slots are stopped per-slot inside the loop anyway,
+  -- but the clock-first ordering keeps the side effects clean.)
+  --
+  -- setClockSource side effects: zeros mGlobalDivCount, mSlotDivCount[],
+  -- mCachedExtBpm, and resets the ext-clock comparator's rate counter.
+  -- This is the intended behaviour -- a fresh quicksave load means a
+  -- fresh BPM measurement window.
+  if data.clock then
+    local clk = data.clock
+    local sourceNum = (clk.source == "external") and 1 or 0
+    seq:setClockSource(sourceNum)
+    seq:setGlobalDiv(clk.globalDiv or 1)
+    if type(clk.slotDiv) == "table" then
+      for sl = 0, kNumSlots - 1 do
+        seq:setSlotDiv(sl, clk.slotDiv[sl + 1] or 1)
+      end
+    end
+    -- Sync the System Settings entry so the menu shows what's actually
+    -- live in engine. pcall: Settings.set crashes if invoked before
+    -- Settings.init() has populated `variables` (e.g. boot-time bench
+    -- in xroot/sandbox runs before Application.init). Match the
+    -- defensive pattern used by the transport-restore Settings.get
+    -- below.
+    pcall(function()
+      local Settings = require "Settings"
+      Settings.set("sequencerClockSource", clk.source == "external" and "external" or "internal")
+    end)
+    -- Picker source bindings. ClockBinding.setX accepts nil to clear
+    -- and logs (no crash) on unknown source names from stale saves.
+    local ClockBinding = require "Sequencer.ClockBinding"
+    ClockBinding.setClockSource(clk.extClockSource)
+    ClockBinding.setResetSource(clk.extResetSource)
   end
 
   -- Setting gates whether the saved running flag is honored on load.
@@ -315,8 +390,9 @@ function M.deserialize(data)
 end
 
 -- Exposed for bench coverage. Production callers go through
--- M.deserialize which invokes the migration automatically.
+-- M.deserialize which invokes migrations automatically.
 M._migrateV1ToV2  = migrateV1ToV2
+M._migrateV2ToV3  = migrateV2ToV3
 M._schemaVersion  = kSchemaVersion
 
 return M

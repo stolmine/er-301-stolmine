@@ -114,9 +114,21 @@ menuItems[#menuItems + 1] = {
   "addCategory",
   "Sequencer"
 }
+-- BPM is intentionally NOT exposed here -- it's settable only inside
+-- the sequencer takeover (shift+S2 latch + encoder) so the user can
+-- adjust it one-handed while watching the grid. The bpm entry in
+-- init.lua's defaults still drives persistence across reboots.
 menuItems[#menuItems + 1] = {
   "addVariable",
   "sequencerClockSource"
+}
+menuItems[#menuItems + 1] = {
+  "addVariable",
+  "unifyConfirm"
+}
+menuItems[#menuItems + 1] = {
+  "addVariable",
+  "quickSaveRestoresSequencerTransport"
 }
 menuItems[#menuItems + 1] = {
   "addCategory",
@@ -133,22 +145,6 @@ menuItems[#menuItems + 1] = {
 menuItems[#menuItems + 1] = {
   "addVariable",
   "quickSaveRestoresRecorder"
-}
-menuItems[#menuItems + 1] = {
-  "addCategory",
-  "Sequencer"
-}
--- BPM is intentionally NOT exposed here -- it's settable only inside
--- the sequencer takeover (shift+S2 latch + encoder) so the user can
--- adjust it one-handed while watching the grid. The bpm entry in
--- init.lua's defaults still drives persistence across reboots.
-menuItems[#menuItems + 1] = {
-  "addVariable",
-  "unifyConfirm"
-}
-menuItems[#menuItems + 1] = {
-  "addVariable",
-  "quickSaveRestoresSequencerTransport"
 }
 menuItems[#menuItems + 1] = {
   "addCategory",
