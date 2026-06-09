@@ -1093,7 +1093,13 @@ function GridView:refresh()
   -- state for both kinds of fader.
   if self.bpmLatched then
     self.editStepLabel:setText(self.bpmStepMode == "coarse" and "COARSE" or "FINE")
-  elseif self.editingL1 then
+  elseif self.editingL1
+         or (self.selectionActive
+             and self.selectionColumn == self.columnCursor
+             and self.layer == "L1") then
+    -- Show the FINE/COARSE chip during live L1 bulk-edit too, so the
+    -- user can see (and toggle via the dial) the step size driving
+    -- their bulk nudges.
     self.editStepLabel:setText(self.editStepMode == "coarse" and "COARSE" or "FINE")
   else
     self.editStepLabel:setText("")
@@ -2041,7 +2047,20 @@ function GridView:dialPressed(shifted)
     self:refresh()
     return true
   end
-  if not self.editingL1 then return false end
+  -- Allow editStepMode toggle during L1 inline edit OR during a live
+  -- bulk-edit on a selection. encoder() already routes through
+  -- stepForColumn(col, self.editStepMode, ...) in both paths, but the
+  -- dial gate previously rejected the toggle outside of editingL1 so
+  -- bulk-editing was stuck at whichever step mode the user last set
+  -- under L1 inline edit. Defaults to "fine", which is integer-only on
+  -- transpose (col 5) -- hence the bench symptom "we can only move by
+  -- a whole integer."
+  if not self.editingL1
+     and not (self.selectionActive
+              and self.selectionColumn == self.columnCursor
+              and self.layer == "L1") then
+    return false
+  end
   self.editStepMode = (self.editStepMode == "fine") and "coarse" or "fine"
   self:refresh()
   return true
