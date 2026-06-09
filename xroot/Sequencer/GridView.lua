@@ -1312,49 +1312,66 @@ function GridView:_pasteAtFocus()
   return true
 end
 
--- shift+S2 PRESS toggles BPM-latch mode: tap once to grab the
--- fader (encoder now routes to BPM), tap again to release. Persists
--- the final value to Settings on release so the new BPM survives
--- reboot. While latched the press is consumed here so the regular
--- S2-release path (mark modal entry) doesn't fire.
+-- BPM-latch entry / exit gestures on S2:
+--   * shift+S2 PRESS enters the latch (encoder routes to BPM).
+--   * S2 PRESS (with or without shift) exits the latch when active.
+--
+-- Asymmetric: entry needs the modifier, exit is bare. Matches the
+-- common in-modal escape pattern ("I'm in BPM, S2 takes me out")
+-- so users don't have to re-reach for shift to exit.
+--
+-- Both directions consume the matching S2 release via the
+-- bpmLatchedConsumedRelease flag so the release doesn't fall
+-- through into mark-mode entry. The `shifted` parameter on
+-- subReleased isn't reliable for this -- Application.lua passes
+-- releaseShifted captured from the PREVIOUS event -- so we use a
+-- transient flag instead.
 function GridView:subPressed(i, shifted)
-  if i == 2 and shifted then
-    -- In external clock mode the latch is inert: editing the internal
-    -- sBpm has no effect on the externally-clocked ticks (incoming
-    -- pulses set the tempo, gate lengths use the comparator's derived
-    -- ext BPM). Bail out silently rather than confusing the user with
-    -- a fake editor.
-    local seq = app.AudioThread.getSequencerTask()
-    if seq and seq:getClockSource() == 1 then  -- CLOCK_EXTERNAL
-      return false
+  if i ~= 2 then return false end
+
+  -- In external clock mode the latch is inert: editing the internal
+  -- sBpm has no effect on externally-clocked ticks. Bail silently.
+  local seq = app.AudioThread.getSequencerTask()
+  if seq and seq:getClockSource() == 1 then  -- CLOCK_EXTERNAL
+    return false
+  end
+
+  if self.bpmLatched then
+    -- Exit: any S2 press (shifted or not). Persist + clear state.
+    self.bpmLatched = false
+    self.bpmAccum   = 0
+    if seq then
+      local Settings = require "Settings"
+      Settings.set("bpm", string.format("%.2f", seq:getBpm()))
     end
-    if self.bpmLatched then
-      -- Releasing the latch: persist final value to Settings.
-      self.bpmLatched = false
-      self.bpmAccum   = 0
-      if seq then
-        local Settings = require "Settings"
-        Settings.set("bpm", string.format("%.2f", seq:getBpm()))
-      end
-    else
-      -- Entering the latch: commit any other in-flight modal so the
-      -- encoder lands cleanly on BPM and no stale cursor lies about
-      -- what the encoder is editing.
-      self:_commitOtherModalsBefore("bpmLatched")
-      self.bpmLatched = true
-      self.bpmAccum   = 0
-    end
+    self.bpmLatchedConsumedRelease = true
+    self:refresh()
+    return true
+  elseif shifted then
+    -- Enter: shift+S2 only. Commit any other in-flight modal so the
+    -- encoder lands cleanly on BPM and no stale cursor lies about
+    -- what the encoder is editing.
+    self:_commitOtherModalsBefore("bpmLatched")
+    self.bpmLatched = true
+    self.bpmAccum   = 0
+    self.bpmLatchedConsumedRelease = true
     self:refresh()
     return true
   end
+
   return false
 end
 
 function GridView:subReleased(i, shifted)
-  -- Suppress the S2-release-as-mark-entry path while the BPM latch
-  -- is engaged on shift+S2 (the latch is owned by subPressed; the
-  -- subsequent release shouldn't double-fire into the mark modal).
-  if i == 2 and shifted then
+  -- Suppress the S2-release-as-mark-entry path when the matching
+  -- subPressed was consumed by the BPM-latch toggle. Using the
+  -- transient flag instead of the `shifted` parameter is deliberate:
+  -- the parameter is `releaseShifted` captured from the PREVIOUS
+  -- event, which can already be false here if the user lifted shift
+  -- before lifting S2 (or simultaneously, with the shift release
+  -- event arriving first). The flag survives event-ordering jitter.
+  if i == 2 and self.bpmLatchedConsumedRelease then
+    self.bpmLatchedConsumedRelease = false
     return true
   end
 
