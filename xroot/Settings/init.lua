@@ -226,7 +226,7 @@ local defaults = {
   sceneMode = {
     category = "Scenes",
     description = "Scene mode (replaces hold mode):",
-    value = "off",
+    value = "on",
     choices = {
       "off",
       "on"
