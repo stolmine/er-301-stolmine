@@ -13,6 +13,7 @@ local Class = require "Base.Class"
 local Window = require "Base.Window"
 local Signal = require "Signal"
 local Env = require "Env"
+local Encoder = require "Encoder"
 
 local GridView = Class {}
 GridView:include(Window)
@@ -1148,6 +1149,9 @@ function GridView:refresh()
     self.s2Button:setText("mark")
     self.s3Button:setText(otherLayer)
   end
+
+  -- Sync coarse/fine LEDs to whichever modal owns the encoder now.
+  self:_pushEncoderLED()
 end
 
 function GridView:onShow()
@@ -1167,6 +1171,10 @@ function GridView:onShow()
 end
 
 function GridView:onHide()
+  -- Release encoder-LED ownership when the takeover dismisses. Without
+  -- this, a stale Fine/Coarse LED would persist into whatever view the
+  -- user lands in next.
+  Encoder.set(Encoder.Neutral)
   if self.frameCallback then
     Signal.remove("onDisplayFrame", self.frameCallback)
     self.frameCallback = nil
@@ -1232,6 +1240,30 @@ end
 --   markingMode:      _commitMark (matches UP)
 --   bpmLatched:       drop flag + persist BPM to Settings (matches
 --                     UP / onHide)
+-- Sync the encoder's coarse/fine indicator LEDs to whatever modal
+-- currently owns the encoder. Mapping:
+--   bpmLatched                          -> bpmStepMode drives LED
+--   editingL1                           -> editStepMode drives LED
+--   selectionActive (L1, same column)   -> editStepMode drives LED (bulk-edit)
+--   anything else                       -> Neutral (both LEDs off)
+-- LEDs are hardware-only; the emu's GPIO writes are stubbed so this
+-- is effectively a no-op in the emulator. Verify on hardware bench.
+-- Called from refresh() (per state-change), onHide (release), no need
+-- elsewhere since refresh is already the ER-301 convention for
+-- "something changed, redraw / push state."
+function GridView:_pushEncoderLED()
+  if self.bpmLatched then
+    Encoder.set(self.bpmStepMode == "coarse" and Encoder.Coarse or Encoder.Fine)
+  elseif self.editingL1
+         or (self.selectionActive
+             and self.layer == "L1"
+             and self.selectionColumn == self.columnCursor) then
+    Encoder.set(self.editStepMode == "coarse" and Encoder.Coarse or Encoder.Fine)
+  else
+    Encoder.set(Encoder.Neutral)
+  end
+end
+
 function GridView:_commitOtherModalsBefore(entering)
   if entering ~= "editingL1" and self.editingL1 then
     self.editingL1 = false
