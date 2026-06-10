@@ -1029,22 +1029,28 @@ function GridView:refresh()
   -- 0, which we render as "BPM ext --" so the user sees they're in
   -- ext mode but no clock is arriving.
   local external = (seq:getClockSource() == 1)  -- CLOCK_EXTERNAL
+  -- "> " chevron prefix when BPM latch is engaged: glance-readable
+  -- "encoder is targeting BPM" indicator on the BPM digits themselves.
+  -- The softkey row's BPM* cue duplicates the signal at a glance but
+  -- sits across the display from where the user is looking when
+  -- dialing -- the prefix puts the cue at the target.
+  local caret = self.bpmLatched and "> " or ""
   local bpm
   if external then
     bpm = seq:getExtBpm()
     if bpm <= 0.0 then
-      self.bpmLabel:setText("BPM ext --")
+      self.bpmLabel:setText(caret .. "BPM ext --")
     elseif math.abs(bpm - math.floor(bpm + 0.5)) < 0.05 then
-      self.bpmLabel:setText(string.format("BPM ext %d", math.floor(bpm + 0.5)))
+      self.bpmLabel:setText(string.format("%sBPM ext %d", caret, math.floor(bpm + 0.5)))
     else
-      self.bpmLabel:setText(string.format("BPM ext %.1f", bpm))
+      self.bpmLabel:setText(string.format("%sBPM ext %.1f", caret, bpm))
     end
   else
     bpm = seq:getBpm()
     if math.abs(bpm - math.floor(bpm + 0.5)) < 0.05 then
-      self.bpmLabel:setText(string.format("BPM %d", math.floor(bpm + 0.5)))
+      self.bpmLabel:setText(string.format("%sBPM %d", caret, math.floor(bpm + 0.5)))
     else
-      self.bpmLabel:setText(string.format("BPM %.1f", bpm))
+      self.bpmLabel:setText(string.format("%sBPM %.1f", caret, bpm))
     end
   end
   -- Persistent layer indicator: "seq1.L1" or "seq1.L2" on the sub
@@ -1087,7 +1093,13 @@ function GridView:refresh()
   -- state for both kinds of fader.
   if self.bpmLatched then
     self.editStepLabel:setText(self.bpmStepMode == "coarse" and "COARSE" or "FINE")
-  elseif self.editingL1 then
+  elseif self.editingL1
+         or (self.selectionActive
+             and self.selectionColumn == self.columnCursor
+             and self.layer == "L1") then
+    -- Show the FINE/COARSE chip during live L1 bulk-edit too, so the
+    -- user can see (and toggle via the dial) the step size driving
+    -- their bulk nudges.
     self.editStepLabel:setText(self.editStepMode == "coarse" and "COARSE" or "FINE")
   else
     self.editStepLabel:setText("")
@@ -1555,6 +1567,12 @@ function GridView:subReleased(i, shifted)
     -- always-on discoverable affordance (reads the OTHER layer). The
     -- shifted-S3 duplicate was removed to free that slot for the
     -- cell-clear gesture (Step 9 item 21).
+    --
+    -- Drop editingL1 across a layer switch. L2 has no inline edit
+    -- concept (it uses the CellEditor modal), so carrying the edit
+    -- flag across leaves a null state: encoder routes to nudge but
+    -- the user is staring at L2 cells.
+    if self.editingL1 then self.editingL1 = false end
     self.layer = (self.layer == "L1") and "L2" or "L1"
     self:refresh()
     return true
@@ -1763,6 +1781,23 @@ function GridView:mainReleased(i, shifted)
   if shifted then return false end
   if i >= 1 and i <= kNumColumns then
     local newCol = i - 1
+    -- Tap on the already-focused column during an active selection on
+    -- the SAME column = "nav to the moving end of selection + drop the
+    -- selection." Selection is a transient modal entered to perform an
+    -- action and auto-exit; the user's column-M-tap intent here is to
+    -- escape the selection, not to enter edit on whatever cell happens
+    -- to be focused. Snap focusHead to selectionEnd so the cursor lands
+    -- where the user was last extending, then clear selection state.
+    if newCol == self.columnCursor
+       and self.selectionActive
+       and self.selectionColumn == newCol then
+      self.focusHeadRow    = self.selectionEnd
+      self.preEditValues   = {}
+      self.editedCells     = {}
+      self.selectionActive = false
+      self:refresh()
+      return true
+    end
     -- Tap on the already-focused column = "edit this cell" gesture.
     -- Same behaviour as ENTER, so we forward straight to
     -- enterReleased(false) which handles all the layer + mode
@@ -2012,7 +2047,20 @@ function GridView:dialPressed(shifted)
     self:refresh()
     return true
   end
-  if not self.editingL1 then return false end
+  -- Allow editStepMode toggle during L1 inline edit OR during a live
+  -- bulk-edit on a selection. encoder() already routes through
+  -- stepForColumn(col, self.editStepMode, ...) in both paths, but the
+  -- dial gate previously rejected the toggle outside of editingL1 so
+  -- bulk-editing was stuck at whichever step mode the user last set
+  -- under L1 inline edit. Defaults to "fine", which is integer-only on
+  -- transpose (col 5) -- hence the bench symptom "we can only move by
+  -- a whole integer."
+  if not self.editingL1
+     and not (self.selectionActive
+              and self.selectionColumn == self.columnCursor
+              and self.layer == "L1") then
+    return false
+  end
   self.editStepMode = (self.editStepMode == "fine") and "coarse" or "fine"
   self:refresh()
   return true
