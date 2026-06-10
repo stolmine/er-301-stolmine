@@ -1128,6 +1128,21 @@ function GridView:refresh()
     self.s1Button:setText("")
     self.s2Button:setText("BPM*")
     self.s3Button:setText("")
+  elseif self.editingL1 then
+    -- Terminal-edit S-key vocabulary. Bare = dupe / step / rand;
+    -- shifted = paste / -- / clr (existing shift overlay still fires
+    -- in subReleased). Mark-entry / layer-toggle / BPM-latch entry
+    -- gestures are blocked while editing -- the bar reflects only
+    -- edit-relevant actions.
+    if app.isShiftButtonPushed() then
+      self.s1Button:setText(clipboard ~= nil and "paste" or "")
+      self.s2Button:setText("")
+      self.s3Button:setText("clr")
+    else
+      self.s1Button:setText("dupe^")
+      self.s2Button:setText("step")
+      self.s3Button:setText("rand")
+    end
   elseif self.selectionActive then
     self.s1Button:setText("copy")
     self.s2Button:setText("cut")
@@ -1363,6 +1378,12 @@ end
 -- S2-release path (mark modal entry) doesn't fire.
 function GridView:subPressed(i, shifted)
   if i == 2 and shifted then
+    -- Terminal-edit gate: while editingL1, shift+S2 (BPM-latch entry)
+    -- is blocked. Edit mode is intentionally a pit -- entry is via
+    -- ENTER / same-col M-tap, exit is via UP / CANCEL / column-switch
+    -- / new slot. Cross-modal escape via shifted S-keys is silenced
+    -- so the user doesn't accidentally slip out of editing.
+    if self.editingL1 then return false end
     -- In external clock mode the latch is inert: editing the internal
     -- sBpm has no effect on the externally-clocked ticks (incoming
     -- pulses set the tempo, gate lengths use the comparator's derived
@@ -1509,6 +1530,40 @@ function GridView:subReleased(i, shifted)
       else
         seq:clearL2(self.slot, self.columnCursor, self.focusHeadRow)
       end
+      self:refresh()
+      return true
+    end
+    return false
+  end
+
+  -- Terminal-edit S-key branch. While editingL1, the bare S-keys are
+  -- repurposed for edit-specific actions; mark / layer-toggle /
+  -- transport defaults that the bar normally offers are suppressed.
+  -- The user has to exit editingL1 first (UP / CANCEL / column-switch)
+  -- to reach those. Shift+S1 paste and shift+S3 clr ran above and
+  -- stay accessible since both are coherent with cell editing.
+  if self.editingL1 then
+    if i == 1 then
+      -- Dupe from row above. Skip at row 0 (no source row).
+      if self.focusHeadRow > 0 then
+        local v = seq:l1Value(self.slot, self.columnCursor, self.focusHeadRow - 1)
+        seq:setL1(self.slot, self.columnCursor, self.focusHeadRow, v)
+        self:refresh()
+      end
+      return true
+    elseif i == 2 then
+      -- Step back one row, stay editing. Clamped to 0. Pairs with
+      -- ENTER's commit + advance for a natural up/down editing loop.
+      if self.focusHeadRow > 0 then
+        self.focusHeadRow = self.focusHeadRow - 1
+        self:refresh()
+      end
+      return true
+    elseif i == 3 then
+      -- Randomize current cell using the column-type-aware random pool
+      -- (same pool used by selection-mode bulk-rand).
+      seq:setL1(self.slot, self.columnCursor, self.focusHeadRow,
+                randomForColumn(self.columnCursor))
       self:refresh()
       return true
     end
