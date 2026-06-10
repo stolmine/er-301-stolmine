@@ -47,10 +47,20 @@ namespace od
     // 0.03125). Lua-side label check tests idx < 1 against this
     // same integer, so the visual fallback ("show role label not
     // scene 1") tracks the same boundary.
+    // Tracking-CV: CV rides on top of bias as a delta-since-entry
+    // offset. mCVInputAtEntry was captured by the last hardSetBias
+    // (Manual entry). At the moment Schmitt trips, the delta equals
+    // the threshold (0.5/N in input-fraction space) so the handoff
+    // from bias to bias+offset is one scene step. As CV continues to
+    // move, output proportionally tracks bias + gain*(cvIn-entry).
+    // Live gain is intentional -- dialing gain controls modulation
+    // depth even while in Tracking-CV. Returning to bias via encoder
+    // re-baselines via hardSetBias() so the next Schmitt trip uses
+    // the new entry CV value.
     float normalized;
     if (mState == kTrackingCV)
     {
-      normalized = gain * cvIn;
+      normalized = bias + gain * (cvIn - mCVInputAtEntry);
     }
     else
     {
@@ -99,15 +109,14 @@ namespace od
     mOutput.mIsConstant = true;
 
     // Normalized effective position [0, 1] for the M2/M3 fader's
-    // range-bar visualization (MinMax reads this Out instead of
-    // the integer Out so the swing renders in the fader's coord
-    // system). Manual: bias is the effective position. CV: the
-    // gain * cvIn product, clamped, mirrors what the integer
-    // output computation rounds.
+    // range-bar visualization (MinMax reads this Out instead of the
+    // integer Out so the swing renders in the fader's coord system).
+    // Mirrors the integer-index computation: in Tracking-CV the
+    // position is bias + gain*(cvIn - entry), pre-clip.
     float effectiveNorm;
     if (mState == kTrackingCV)
     {
-      effectiveNorm = gain * cvIn;
+      effectiveNorm = bias + gain * (cvIn - mCVInputAtEntry);
     }
     else
     {
