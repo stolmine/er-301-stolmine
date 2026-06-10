@@ -41,7 +41,7 @@ That is the whole core loop: scroll, pick. Everything else is narrowing.
 
 | Gesture | Effect |
 |---|---|
-| `shift` + encoder | Move the **alphabet ribbon** to jump to a letter (stops at the ends, no wrap) |
+| `shift`+encoder | Move the **alphabet ribbon** to jump to a letter (stops at the ends, no wrap) |
 | `M2` / `shift`+`M2` | Cycle **sort** forward / back: recents · alpha · type · package · keyword · favorites |
 | `M3` / `shift`+`M3` | Cycle the **type filter** forward / back through unit classes; cycles back to *off* |
 | `HOME` | Snap cursor to the top of the current view |
@@ -115,13 +115,13 @@ nudge size, predicate/action, clipboard state, and persistence detail.
 Scene mode replaces the old hold-mode pinning workflow with an
 Octatrack-style approach: capture **scenes** (snapshots of your patch's
 control values) and **morph** smoothly between two of them with a
-crossfader — by hand or driven by CV.
+crossfader, by hand or driven by CV.
 
 You author scenes the same way you edit normally: any knob you touch
 while editing a scene is captured as that scene's *change from base*.
 There is no pin-every-control tax and no modulation matrix to fill in.
 
-Enable it in **Settings → Scenes → `sceneMode = on`**. With it off, the
+Scene mode is enabled by default. Disable it in **Settings → Scenes → `sceneMode = off`**. With it off, the
 hold context opens the legacy PinView instead.
 
 ### Enter and exit
@@ -136,14 +136,19 @@ to leave; your base values are intact.
 Left to right across the softkeys:
 
 - **`M1` — Morph.** The crossfader. With it focused, the encoder sweeps
-  the blend between the **A** and **B** scenes. `S2`/`S3` focus its gain
-  and bias readouts; **`S1`** dives into a sub-chain where you can insert
-  a CV source (LFO, sequencer, envelope) to drive the morph automatically.
+  the blend between the **A** (upper extreme) and **B** (lower extreme)
+  scenes. `S2`/`S3` focus its gain and bias readouts; **`S1`** dives
+  into a sub-chain where you can insert a CV source (LFO, sequencer,
+  envelope) to drive the morph automatically. You can also pick
+  external CV sources as input here, and process them with the chain.
 - **`M2` / `M3` — A and B selectors.** Each picks which scene sits at
   that end of the crossfader and can itself be CV-driven (`S1` dives a
   per-role CV branch; `S2`/`S3` set its gain/bias). Wire an LFO here and
   the A or B endpoint sweeps through your scene bank on its own.
-- **`M4..M6`+ — Scene slots**, one per scene (up to 16). The cursor
+  **NB**: A and B fader throws scale with the number of scenes
+  created. Scenes do not have absolute positions on the faders; the
+  faders address a fractional amount of extant 'scene-space'.
+- **`M4..M6+` — Scene slots**, one per scene (up to 16). The cursor
   moves here as you turn the encoder past the selectors. A trailing
   **`+`** slot appears when there's room — **tap its `M`** to create a
   new scene.
@@ -161,10 +166,12 @@ With a scene slot under the cursor, the sub bar gives you:
 A typical pass:
 
 1. **Create** a couple of scenes by tapping the `+` slot.
-2. Cursor to a scene, press **`S3` edit**. You're now in the normal edit
+2. Cursor over to a scene, press **`S3` edit**. You're now in the normal edit
    surface (subtitle shows which scene). Turn any controls you want this
-   scene to move — each is captured as a delta. `UP`/`CANCEL`, or flip
-   the toggle, to return to Performance.
+   scene to move — each is captured as a delta. `UP`/`CANCEL` to return to Performance.
+   **NB**: Certain actions are fenced off in scene editing, you cannot create or delete
+   units, you cannot adjust sub-display parameters like modulation gain, you cannot
+   modify subchain inputs.
 3. Repeat for the other scene(s).
 4. Cursor to one scene and **`S1`** to make it **A**; cursor to another
    and **`S2`** to make it **B**.
@@ -177,9 +184,12 @@ A typical pass:
 - **Admin menu → Reset Scene Mode** clears all scenes and CV branches on
   every channel and restores defaults (confirmation prompt unless you've
   turned it off under Settings → Confirmations).
+- Scenes will not survive linking or unlinking channels.
+- Scenes will break if you shift unit positions (i.e., move to mixer, etc.).
+- I would recommend building scenes on top of already finished patches for max convenience :)
 
 ➜ **Design background:** see `docs/planning/hold-mode-scenes-ux-spec.md`
-and `docs/planning/hold_mode_refactor.md` for the model and rationale.
+and `docs/planning/hold-mode-scenes.md` for the model and rationale.
 
 ---
 
