@@ -47,25 +47,16 @@ namespace od
     // 0.03125). Lua-side label check tests idx < 1 against this
     // same integer, so the visual fallback ("show role label not
     // scene 1") tracks the same boundary.
-    // Tracking-CV: CV rides on top of bias as a delta-since-entry
-    // offset. mCVInputAtEntry was captured by the last hardSetBias
-    // (Manual entry). At the moment Schmitt trips, the delta equals
-    // the threshold (0.5/N in input-fraction space) so the handoff
-    // from bias to bias+offset is one scene step. As CV continues to
-    // move, output proportionally tracks bias + gain*(cvIn-entry).
-    // Live gain is intentional -- dialing gain controls modulation
-    // depth even while in Tracking-CV. Returning to bias via encoder
-    // re-baselines via hardSetBias() so the next Schmitt trip uses
-    // the new entry CV value.
-    float normalized;
-    if (mState == kTrackingCV)
-    {
-      normalized = bias + gain * (cvIn - mCVInputAtEntry);
-    }
-    else
-    {
-      normalized = bias;
-    }
+    // GainBias semantics in both states: out = bias + gain * cvIn,
+    // matching Offset / Adder / GainBias-driven builtin units. Bias
+    // is the user's manual home, CV adds on top. With a unipolar
+    // positive CV source the output always rides at or above bias;
+    // with a bipolar CV source it swings symmetrically around bias.
+    // State machine is now introspection-only (consumeTransitionFlag
+    // + getState); it does not affect output. The rounding alone
+    // provides the deadband against CV noise (sub-scene jitter
+    // doesn't change round(normalized * N)).
+    float normalized = bias + gain * cvIn;
     int idx = (int)floorf(normalized * (float)mSceneCount + 0.5f);
     return clipIndex(idx);
   }
@@ -109,19 +100,11 @@ namespace od
     mOutput.mIsConstant = true;
 
     // Normalized effective position [0, 1] for the M2/M3 fader's
-    // range-bar visualization (MinMax reads this Out instead of the
+    // range-bar visualization (MinMax reads this instead of the
     // integer Out so the swing renders in the fader's coord system).
-    // Mirrors the integer-index computation: in Tracking-CV the
-    // position is bias + gain*(cvIn - entry), pre-clip.
-    float effectiveNorm;
-    if (mState == kTrackingCV)
-    {
-      effectiveNorm = bias + gain * (cvIn - mCVInputAtEntry);
-    }
-    else
-    {
-      effectiveNorm = bias;
-    }
+    // Same GainBias formula as the integer-index computation, just
+    // pre-rounded so the indicator can dwell between scene steps.
+    float effectiveNorm = bias + gain * cvIn;
     if (effectiveNorm < 0.0f) effectiveNorm = 0.0f;
     else if (effectiveNorm > 1.0f) effectiveNorm = 1.0f;
     simd_set(mOutputNorm.buffer(), FRAMELENGTH, effectiveNorm);
