@@ -1,0 +1,16 @@
+Section,Test ID,Section Name,Starting State,Gesture,Expected End State,Watch For,Notes
+F4,F4,F4 selection-end nav,"selection extended on col 0, focusHead at row 5 (end), anchor at row 2",tap M1 (same col),"focusHead = row 5, selection cleared, NOT in edit mode",no edit indicator; cursor at row 5 not row 2,primary fix; pass
+F4,F4-r1,F4 regression: no-selection same-col still edits,"nav, col 0, no selection",tap M1,editingL1 active,edit indicator on; same as before this batch,regression; pass
+F4,F4-r2,F4 regression: other-col M-tap still drops selection,selection on col 0,tap M3,"nav on col 2, selection on col 0 cleared",no edit indicator anywhere,regression; pass
+D1,D1,D1 layer toggle clears edit,editingL1 active on L1,tap S3 (layer toggle),"layer = L2, editingL1 cleared",encoder scrolls focusHead (does NOT nudge L2 cell); no edit indicator,primary fix; pass
+D1,D1-r1,D1 regression: layer toggle preserves selection,selection on L1 col 0,tap S3,"layer = L2, selection still active",selection box visible after toggle,"regression; it is not possible to swap layers in selection, as desired. subdisplay is occupied"
+D1,D1-r2,D1 regression: layer toggle preserves mark,marking_end on L1 col 0,tap S3,"layer = L2, mark cursor still live",marker indicator survives toggle,"regression; it is not possible to swap layers in mark, as desired. subdisplay is occupied"
+H6,H6,H6 caret on latch,"nav, internal clock",shift+S2 (enter latch),"bpmLabel reads ""> BPM 120"" (chevron prefix)",chevron visible; softkey reads BPM* too,primary fix; pass
+H6,H6-r1,H6 caret on ext clock,"latched, ext clock with 5 Hz source",shift+S2 then twist,"""> BPM ext 150"" while dialing",chevron present even in ext mode,coverage; it is not possible to latch bpm with ext clock. as desired
+H6,H6-r2,H6 caret clears on unlatch,"latched, ""> BPM 120"" visible",bare S2 (exit latch),"""BPM 120"" (no chevron)",chevron gone; softkey reverts,unlatch check; pass
+H6,H6-r3,H6 caret survives UP exit,"latched, ""> BPM 120"" visible",UP,"takeover dismissed; re-enter takeover, bpmLabel = ""BPM 120"" no caret",onHide clears latch state,exit path; pass
+H8,H8,H8 dial toggles step during bulk,"selection extended on col 1 (cv1 column), editStepMode = fine",tap dial button,editStepLabel reads COARSE,label visible during bulk; encoder ticks now move by coarse step,primary fix; pass
+H8,H8-alt,H8 dial toggle on col 5 (transpose),"selection on col 5, editStepMode = fine (= 1.0 semi)",tap dial then twist,values step by coarse (12 semi/tick),label shows COARSE; values audibly octave-jumping,coverage; pass
+H8,H8-r1,H8 regression: dial outside edit/bulk still no-ops,"nav, no selection, no editingL1",tap dial button,nothing changes; no label,editStepMode unchanged; returns false,regression; pass? not sure what tap dial button means
+H8,H8-r2,H8 regression: dial inside editingL1 still toggles,"editingL1 on col 1, editStepMode = fine",tap dial,label flips to COARSE,unchanged behavior from pre-batch,regression; pass
+H8,H8-r3,H8 regression: BPM dial toggle still wins,bpmLatched,tap dial,"bpmStepMode toggles, editStepMode unchanged","""> COARSE"" on the step label",regression; pass
