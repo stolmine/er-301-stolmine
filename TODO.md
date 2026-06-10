@@ -1,5 +1,33 @@
 # TODO
 
+## Status: stolmine fork on AM335x is feature-complete (2026-06-09, v0.7.0-stolmine.9.5.0)
+
+The ER-301 stolmine fork on AM335x hardware is feature-complete as of the
+**9.5.0** release. All forward firmware development moves to the next-
+generation **CM4 / bcdevices** hardware platform (see `feature/` branches
+in `bcd_ui_301` and the audio path planning docs on the `rpidev` branch).
+
+The items below are kept for posterity. Most will not be revisited on
+AM335x; a small number have already shipped silently in the 9.2.1 /
+9.4.x polish cycles but were not pruned from this list at the time. If
+the fork ever takes one more pass, this list is the menu.
+
+Items already shipped (would have been the next pass otherwise):
+
+- Chain UI replace picker favorites-mode bug (9.2.1)
+- Sequencer BPM latch exit gestures + onHide release (9.4.0.16)
+- Sequencer mark mode vs edit mode collision (modal sweep, 9.4.x)
+- TXo top-level passthrough toggle (9.2.1)
+- Sequencer ext-clock phase 6.6 persistence (2026-06-08)
+- Sequencer modal sweep follow-ups F4 / D1 / H6 / H8 (9.4.0.29)
+- Sequencer terminal-edit + encoder coarse/fine LEDs (9.4.0.35)
+
+Everything below is preserved as-of-2026-06-09 design intent. Some of
+it overlaps with what's planned for the CM4 platform; refer back here
+only if the AM335x fork ever needs another cycle.
+
+---
+
 ## Favorites System in Unit Picker
 Shift toggles favorites editing mode while browsing units by category. Sub-display shows three controls:
 - **S1: Tag/untag** — toggle the currently highlighted unit as a favorite
