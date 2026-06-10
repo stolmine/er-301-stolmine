@@ -14,7 +14,7 @@ and hitting `shift+ENTER`.
 2. The grid shows 6 columns and 6 visible rows. Top row is the column
    header; cells below show L1 values.
 3. Encoder scrolls the focus head; `M1..M6` jump the column cursor.
-4. Pressing `ENTER` while focused on a cell has different effects in L1 and L2. In L1, this enters edit mode where the encoder adjusts the value in-step. In L2 it opens the expression editor for the given cell.
+4. Pressing `ENTER` (or tapping the focused column's M-key) on a cell behaves differently per layer. In L1 it enters in-line edit mode where the encoder adjusts the cell value. In L2 it opens the cell-editor modal.
 5. `S1` starts/stops all slots together. The slot's CV and gates show
    up on the chain picker as `seqN.cv1`, `seqN.cv2`, `seqN.gate1`,
    `seqN.gate2` (slot `N` is 1..4).
@@ -53,26 +53,42 @@ the transposed value is what the cv1 audio buffer carries.
 
 | Button | Behavior (grid view) |
 |---|---|
-| `ENTER` | Enters edit mode/modal on given cell |
+| `ENTER`, or tap focused column's M-key | Enter edit (L1) or open the cell-editor modal (L2) |
 | Encoder | Scroll focus head (one row per click) |
 | `shift+Encoder` | Build a row-range selection on the focused column |
 | `M1..M6` | Jump column cursor to column 1..6 |
 | `shift+M2..M5` | Switch to slot 1..4 |
 | `HOME` | Jump focus to row 0 |
-| `UP` | Unselect, leave modal, etc |
+| `UP` | Unselect, leave modal, exit edit |
+| `CANCEL` | Exit current modal/edit without committing |
 | `S2` (default sub bar) | mark start/end |
 | `S3` (default sub bar) | toggle layer |
 | `shift+ENTER` | Toggle takeover on/off |
+
+Entry into any modal (edit / selection / mark / BPM latch) commits or
+clears the prior modal cleanly. The encoder always has exactly one
+owner: whichever modal is active drives it.
 
 Focus-head and column-cursor together define the **active cell**, drawn
 as a thin box. `ENTER` starts the cell-edit modal for the given position.
 
 ## Editing L1 cells
 
-`ENTER` on an L1 cell enters inline-edit mode: the encoder nudges the
-value, M-keys still jump columns (committing the in-flight edit and
-focusing the new cell), `ENTER` again moves down a cell and stays in edit mode for convenience. 
-Up exits edit mode and commits value, cancel exits edit mode without committing.
+`ENTER` (or tapping the focused column's M-key) on an L1 cell enters
+in-line edit mode. The encoder nudges the cell value. `ENTER` again
+commits and advances down one row, staying in edit. `UP` commits and
+exits. `CANCEL` exits without committing. Tapping a different
+column's M-key commits and column-switches in one gesture.
+
+Same-column M-tap during edit advances the row. Same-column M-tap on
+a column with an active selection navigates to `selectionEnd` and
+drops the selection.
+
+While editingL1, the sub-bar S-keys rebind to edit-specific actions
+(see "Sub bar by state" below). Edit becomes a terminal modal:
+gestures that normally enter mark, BPM latch, or layer-toggle are
+silenced. Exits are explicit: `UP`, `CANCEL`, different-column M-tap,
+or slot-switch (`shift+M2..M5`).
 
 Per-column nudge sizes:
 
@@ -84,8 +100,10 @@ Per-column nudge sizes:
 | stL (ticks) | 1 tick | 4 ticks | 1 tick | 16 ticks |
 | tr (semitones) | 1 semi | 1 oct | 1 semi | 2 oct |
 
-`dial` toggles fine/coarse. `shift+Encoder` while editing picks the
-"super" variant.
+`dial` toggles fine/coarse. The encoder's coarse/fine indicator LEDs
+light up to reflect the current step mode while editing, bulk-editing,
+or while the BPM latch is engaged. `shift+Encoder` picks the "super"
+variant of whichever step is active.
 
 `shift+HOME` inside an L1 cell editor zeros the focused cell.
 
@@ -147,19 +165,25 @@ Example rules:
 - `=8 : *0`: at step 8 on the host, jump every column's playhead to
   row 0.
 
-## Selection, clipboard, transport
+## Sub bar by state
 
 | state | S1 | S2 | S3 |
 |---|---|---|---|
 | Default, L1 | `start/stop` | `mark` | `L2` (toggle) |
 | Default, L2 | `start/stop` | `mark` | `L1` (toggle) |
-| `shift` held, default | (paste if clipboard) | `BPM` latch | `clr` cell |
-| `shift+S2` held / latched | encoder routes to BPM | -- | -- |
+| `shift` held, default | `paste` (if clipboard) | `BPM` latch | `clr` cell |
+| Editing L1 | `dupe^` (copy from row above) | step back one row | `rand` (column-aware) |
+| Editing L1, `shift` held | `paste` (if clipboard) | (blank; BPM latch blocked) | `clr` cell |
 | Selection active | `copy` | `cut` | `rand` |
-| Mark modal | `start/stop` | `end` (commit) | `unify` (all cols will get same start/end as proposed) |
+| Mark modal | `start/stop` | `end` (commit) | `unify` (apply to all 6 columns) |
+| BPM latched | (blank) | `BPM*` (release on tap) | (blank) |
 
-`hold shift+S2` latches the BPM fader: tap S2 to release. Fine = 0.1 BPM
-per tick, coarse = 1.0 BPM per tick.
+Tap `shift+S2` to engage the BPM latch. The encoder routes to BPM; a
+`>` chevron prefix appears on the BPM readout. `dial` toggles fine
+(0.1 BPM) and coarse (1.0 BPM); `shift+encoder` picks the super
+variant of each (1 BPM fine-super, 10 BPM coarse-super). Tap bare
+`S2` to release; the value persists. `UP` and exiting the takeover
+also release.
 
 `shift+S3` (default sub bar, no selection, no marking) clears the
 focused cell: L1 writes 0.0; L2 removes the rule (sets `present =
@@ -168,8 +192,11 @@ false`, distinct from authoring a no-op rule).
 Selection is built by holding `shift` while scrolling: the focus head
 becomes the moving end, the anchor stays where shift was first
 pressed. `copy`, `cut`, and `rand` operate on the whole row range.
-Paste lands at the focus head and extends past the pasted region.
-L1 and L2 clipboards are distinct (cross-layer paste refuses).
+A bare encoder twist while selection is active bulk-edits the cell
+values across the range; `dial` toggles the bulk-edit step between
+fine and coarse the same way it does in single-cell edit. Paste
+lands at the focus head and extends past the pasted region. L1 and
+L2 clipboards are distinct (cross-layer paste refuses).
 
 Mark modal: press `S2` to plant the first marker at the focus head;
 encoder + `HOME` live-update the second marker; press `S2` again to
@@ -181,16 +208,55 @@ the `unifyConfirm` Setting for safety).
 
 - `S1` starts or stops all 4 slots together. Transport state is
   unified across slots.
-- Global BPM is a single value applied to all slots; latched edit via
-  `shift+S2`. Persists in System Settings.
+- Global BPM is a single value applied to all slots. Internal-mode BPM
+  is editable via the `shift+S2` latch and persists in System Settings.
+  In external-clock mode the displayed BPM is derived from the input
+  rate.
 - Quicksave round-trips every column's length, markers, L1 cell values,
-  and L2 rules. Schema is versioned (`schemaVersion = 2`); v0.1
-  quicksaves migrate automatically on load.
+  L2 rules, and the clock configuration (source picks, dividers,
+  int/ext choice). Schema is versioned (`schemaVersion = 3`); older
+  v1 and v2 quicksaves migrate automatically on load.
 - System Settings (under the `Sequencer` subheading):
+  - `sequencerClockSource` (internal/external, default internal):
+    picks the clock source for all sequencer slots. External mode
+    draws from the source set under Admin → Sequencer Clock.
   - `unifyConfirm` (yes/no, default yes): prompts before mark-modal
     Unify fans markers across all columns.
   - `quickSaveRestoresSequencerTransport` (yes/no, default no): when
     yes, slots resume their saved running state on quicksave load.
+
+## External clock
+
+The sequencer can be driven by an external CV/gate source. Open
+**Admin → Sequencer Clock** to configure it. Six plies on a
+horizontal strip:
+
+| ply | function |
+|---|---|
+| 1 | Clock source picker + global divider (1..16) |
+| 2 | Reset source picker |
+| 3..6 | Per-slot divider (1..16) for slots 1..4 |
+
+On the clock ply, `S1` opens a source picker (any global source: an
+external CV input, a gate from another sequencer, etc). `S2` focuses
+the threshold readout; `S3` focuses the global divider readout. The
+ply also renders a MiniScope of the live input. Pressing `S2` on a
+focused threshold simulates a rising edge for testing.
+
+On the reset ply, `S1` picks a reset source. The reset is rising-edge,
+hard-reset, frame-quantized. Optional: leave unpicked to run with no
+reset.
+
+PPQN is locked at 4 (1/16 note pulses).
+
+Switch on the external clock from **Settings → Sequencer → Clock
+source = external**. The GridView BPM readout switches to `BPM ext N`
+(or `BPM ext --` if no pulse has arrived). The displayed value is the
+ext rate divided by PPQN, smoothed by a windowed EMA across the most
+recent pulses.
+
+Internal BPM stays authorable while in external mode; it just isn't
+audibly applied. The `shift+S2` latch is silent in ext mode (no-op).
 
 ## Random distributions per column
 
@@ -242,7 +308,6 @@ Each slot exposes exactly 4 patchable outputs in the chain picker:
   length is per-column, 1 to 64 rows).
 - L2 cells store one predicate + one action per row. Compound
   predicates (AND/OR/NOT) are out of scope for v0.1/v2.
-- External clock-in is not wired up; BPM is internal only.
 - A live playhead-scrub gesture is not exposed.
 - The cell editor's `@[a, b]` step-range predicate is reserved but not
   yet authorable (engine has `PRED_STEP_RANGE`, no operand2 in the

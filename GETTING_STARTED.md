@@ -26,7 +26,7 @@ under `original`, so nothing is lost.
 
 ### Try it
 
-1. Insert or replace a unit anywhere in a chain — the picker opens
+1. Insert or replace a unit anywhere in a chain. The picker opens
    automatically. It starts on the **recents** sort, no filters.
    (you can pick a default sort method in system settings)
 2. **Turn the encoder** to move the row cursor up and down the list.
@@ -66,7 +66,7 @@ the top.
 ## 2. Sequencers
 
 Four concurrent sequencers, each with two CV lanes, two gates, an
-independent step-length column, and a transpose column — plus a second
+independent step-length column, and a transpose column, plus a second
 "rules" layer (a simple `IF condition : THEN action` per cell). The
 sequencers are a firmware service, not a chainable unit; their outputs
 appear in the source picker as `seqN.cv1`, `seqN.cv2`, `seqN.gate1`,
@@ -98,15 +98,49 @@ appear in the source picker as `seqN.cv1`, `seqN.cv2`, `seqN.gate1`,
   randomization).
 - **`S2`** opens the **mark** modal to set the per-column loop region.
 - **`shift`+`S2`** latches a **BPM** fader onto the encoder.
-- **`UP`** toggles between layer **L1** (the values) and **L2** (the
-  rules). On an L2 cell, `ENTER` opens the expression editor.
+- **`S3`** (default sub bar) toggles between layer **L1** (the values)
+  and **L2** (the rules). On an L2 cell, `ENTER` opens the expression
+  editor.
 
 The L2 rules layer is where this gets deep (conditional retriggers,
 playhead jumps, cross-column math, probability). It has its own full
 treatment.
 
-➜ **Full reference:** [`SEQUENCER.md`](SEQUENCER.md) — every column type,
-nudge size, predicate/action, clipboard state, and persistence detail.
+### Clocking
+
+All four slots run on a single clock. You can drive that clock from
+the internal BPM or from an external source.
+
+**Internal clock (default).** Each slot ticks from a shared internal
+BPM. To set it, open the grid view and tap `shift`+`S2`. The encoder
+latches onto the BPM readout and a `>` chevron appears next to it. Turn
+to dial the tempo; `dial` toggles fine (0.1 BPM) and coarse (1.0 BPM)
+step. Tap bare `S2` to release the latch; the value persists in
+System Settings. `UP` and leaving the takeover also release.
+
+**External clock.** Patch a gate or CV signal as the clock source.
+Open **admin menu → Sequencer Clock**. Six plies sit on a horizontal
+strip:
+
+| ply | use |
+|---|---|
+| 1 | clock source (`S1` picks); threshold (`S2`); global divider (`S3`) |
+| 2 | reset source (`S1` picks; optional) |
+| 3..6 | per-slot divider (1..16) for slots 1..4 |
+
+Pick your clock source on ply 1 with `S1`. Optionally pick a reset
+source on ply 2. Then flip **Settings → Sequencer → Clock source =
+external**. The grid BPM readout switches to `BPM ext N` (or `BPM ext
+--` while no pulse has arrived).
+
+PPQN is fixed at 4: one input pulse = one 1/16 note. A 2 Hz clock
+gives 120 BPM at the engine level.
+
+Source picks, dividers, and the int/ext choice persist with the patch.
+
+➜ **Full reference:** [`SEQUENCER.md`](SEQUENCER.md). Every column
+type, nudge size, predicate/action, clipboard state, persistence
+detail, and the full external-clock setup.
 
 ---
 
@@ -135,22 +169,22 @@ to leave; your base values are intact.
 
 Left to right across the softkeys:
 
-- **`M1` — Morph.** The crossfader. With it focused, the encoder sweeps
+- **`M1`: Morph.** The crossfader. With it focused, the encoder sweeps
   the blend between the **A** (upper extreme) and **B** (lower extreme)
   scenes. `S2`/`S3` focus its gain and bias readouts; **`S1`** dives
   into a sub-chain where you can insert a CV source (LFO, sequencer,
   envelope) to drive the morph automatically. You can also pick
   external CV sources as input here, and process them with the chain.
-- **`M2` / `M3` — A and B selectors.** Each picks which scene sits at
+- **`M2` / `M3`: A and B selectors.** Each picks which scene sits at
   that end of the crossfader and can itself be CV-driven (`S1` dives a
   per-role CV branch; `S2`/`S3` set its gain/bias). Wire an LFO here and
   the A or B endpoint sweeps through your scene bank on its own.
   **NB**: A and B fader throws scale with the number of scenes
   created. Scenes do not have absolute positions on the faders; the
   faders address a fractional amount of extant 'scene-space'.
-- **`M4..M6+` — Scene slots**, one per scene (up to 16). The cursor
+- **`M4..M6+`: Scene slots**, one per scene (up to 16). The cursor
   moves here as you turn the encoder past the selectors. A trailing
-  **`+`** slot appears when there's room — **tap its `M`** to create a
+  **`+`** slot appears when there's room. **Tap its `M`** to create a
   new scene.
 
 ### Author and perform
@@ -168,7 +202,7 @@ A typical pass:
 1. **Create** a couple of scenes by tapping the `+` slot.
 2. Cursor over to a scene, press **`S3` edit**. You're now in the normal edit
    surface (subtitle shows which scene). Turn any controls you want this
-   scene to move — each is captured as a delta. `UP`/`CANCEL` to return to Performance.
+   scene to move; each is captured as a delta. `UP`/`CANCEL` to return to Performance.
    **NB**: Certain actions are fenced off in scene editing, you cannot create or delete
    units, you cannot adjust sub-display parameters like modulation gain, you cannot
    modify subchain inputs.
