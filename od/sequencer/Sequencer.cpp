@@ -108,6 +108,7 @@ void Slot::init(int slotIdx)
   }
 
   samplesUntilTick = 0;
+  externalTickCount = 0;
   running          = false;
   heldCV1 = heldCV2 = 0.0f;
   heldGate1Len = heldGate2Len = 0.0f;
@@ -344,8 +345,29 @@ void Slot::externalTick(float bpm, float sampleRate)
   if (!running) return;
   cachedBpm        = bpm;
   cachedSampleRate = sampleRate;
-  // Discard returned samples-per-tick: external clock owns scheduling.
-  (void)fireTick();
+
+  // Atomic-tick semantics. Each surviving external pulse increments
+  // the counter; the slot only advances its playhead when the current
+  // row's stL is satisfied. PPQN=4 base: 1 tick = 0.25 beats = 1/16
+  // note. stL is stored as 0.25 * integer_ticks (user can only author
+  // integer-tick values via the UI; clamp floors at one tick).
+  //
+  // Without this gating, every surviving pulse fires fireTick() and
+  // every row advances on every pulse regardless of stL -- the bug
+  // reported on 9.5.0 bench.
+  ++externalTickCount;
+
+  Column& stC      = columns[kColStepLen];
+  float   stLBeats = stC.l1[stC.playhead].value;
+  if (stLBeats <= 0.0f) stLBeats = 0.25f;  // safety: avoid deadlock
+  int     stLTicks = static_cast<int>(stLBeats * 4.0f + 0.5f);  // round
+  if (stLTicks < 1) stLTicks = 1;
+
+  if (externalTickCount >= stLTicks) {
+    externalTickCount = 0;
+    // Discard returned samples-per-tick: external clock owns spacing.
+    (void)fireTick();
+  }
 }
 
 void Slot::setL1(int col, int row, float value)
@@ -419,6 +441,7 @@ void Slot::reset()
     columns[c].lastL2FiredRow = -1;
   }
   samplesUntilTick = 0;
+  externalTickCount = 0;
   heldCV1 = heldCV2 = 0.0f;
   heldTranspose = 0.0f;
   heldGate1Amp = heldGate2Amp = 0.0f;

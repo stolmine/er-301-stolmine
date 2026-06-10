@@ -215,6 +215,12 @@ public:
   Column        columns[kNumColumns];
   std::mt19937  rng;
   int           samplesUntilTick = 0;
+  // External-clock atomic tick counter. Each surviving ext pulse
+  // (after master + per-slot dividers) increments this; when it
+  // reaches the current row's stL (in ticks at the locked PPQN=4
+  // base), fireTick() runs and the counter resets to 0. Unused in
+  // internal-clock mode, which uses samplesUntilTick instead.
+  int           externalTickCount = 0;
   bool          running          = false;
 
   // Sample-and-hold of column values, refreshed on every tick:
