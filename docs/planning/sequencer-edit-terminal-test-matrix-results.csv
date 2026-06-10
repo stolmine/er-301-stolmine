@@ -1,0 +1,19 @@
+Section,Test ID,Section Name,Starting State,Gesture,Expected End State,Watch For,Notes
+H4,H4-1,H4 LED neutral in nav,"nav, no edit, no latch, no selection",(idle),both encoder LEDs off,LED_DIAL1 + LED_DIAL2 off; Encoder.set(Neutral) state,baseline; pass
+H4,H4-2,H4 LED Fine in edit (default),"editingL1, editStepMode=fine",ENTER on col 0 to enter edit,LED_DIAL1 on / LED_DIAL2 off,Fine LED lights as edit becomes active,primary; pass
+H4,H4-3,H4 LED swap via dial press,"editingL1, editStepMode=fine, LED_DIAL1 on",tap dial button,LED_DIAL2 on / LED_DIAL1 off,immediate swap; matches editStepLabel chip,primary; pass
+H4,H4-4,H4 LED Fine in BPM latch,"nav, bpmStepMode=fine",shift+S2 (enter latch),LED_DIAL1 on,Fine LED reflects bpmStepMode (independent of editStepMode),primary; pass
+H4,H4-5,H4 LED off on bare-S2 latch exit,bpmLatched + LED_DIAL1 on,bare S2 (exit latch),both LEDs off,Neutral when nothing owns encoder,exit path; pass
+H4,H4-6,H4 LED Fine during bulk-edit,"selection extended on col 1, editStepMode=fine",(idle),LED_DIAL1 on,Fine LED while bulk-edit active; same step mode as editingL1,primary; pass
+H4,H4-7,H4 LED off on takeover dismiss,"bpmLatched, LED_DIAL1 on",UP (dismiss takeover),both LEDs off after re-entry,onHide forces Neutral; LED doesn't persist into next view,exit path; pass
+C1,C1-1,C1 dupe^ from row above,"editingL1 on col 1 row 5 (cell value X), row 4 value Y",bare S1 tap,"row 5 cell = Y, still editing","""dupe^"" label visible; cell value matches row 4",primary; pass
+C1,C1-2,C1 dupe^ no-op at row 0,"editingL1 on col 1 row 0 (cell value X)",bare S1 tap,no change,no error; cell unchanged; still editing,edge case; pass
+C1,C1-3,C1 step back one row,"editingL1 on col 1 row 5",bare S2 tap,"focusHeadRow = 4, still editing","""step"" label visible; row indicator moves up; LED stays Fine/Coarse",primary; pass
+C1,C1-4,C1 step back clamp at row 0,"editingL1 on col 1 row 0",bare S2 tap,no change,row stays 0; still editing,edge case; pass
+C1,C1-5,C1 randomize cell,"editingL1 on col 0 (cv1)",bare S3 tap,cell value = random semitone in -60..60 / 12,"""rand"" label visible; value plausible for column type",primary; pass
+E2,E2-1,E2 BPM-latch entry blocked,editingL1 active,shift+S2,no latch entry; still editingL1,"sub-bar stays ""dupe^/step/rand""; no ""BPM*"" cue",gate; pass
+E2,E2-2,E2 mark entry blocked (bare S2 is now step),editingL1 active,bare S2,step-back fires (NOT mark entry),no marker indicator on the column; row decremented,gate; pass
+E2,E2-3,E2 layer toggle blocked (bare S3 is now rand),editingL1 active,bare S3,rand fires (NOT layer toggle),layer stays L1; cell randomized,gate; pass
+E2,E2-4,E2 paste preserved,"editingL1, clipboard contains values",shift+S1,paste applies,clipboard contents pasted starting at focusHead,preserved; pass
+E2,E2-5,E2 clr preserved,editingL1 on col 1 row 5 (cell value X),shift+S3,cell zeroed,cell value = 0; still editing,preserved; pass
+E2,E2-6,E2 UP exits cleanly,editingL1 + LED_DIAL1 on,UP,exit edit; encoder returns to scroll,edit indicator off; LED Neutral on next state-sync,exit; pass
