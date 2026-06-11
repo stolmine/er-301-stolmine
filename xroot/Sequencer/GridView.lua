@@ -795,9 +795,14 @@ function GridView:refresh()
     local m2 = seq:marker2(self.slot, col)
     local loopLo, loopHi = math.min(m1, m2), math.max(m1, m2)
 
-    -- Header row indicator: 1-indexed for the user (row 0 internally
-    -- renders as "01"). Storage + audio-thread paths stay 0-indexed.
-    self.headerLabels[c]:setText(string.format("%s:%02d", kColNames[c], playhead + 1))
+    -- Header row indicator. Most columns are 0-indexed since 0 is a
+    -- valid cell value for them (cv1=0V, cv2=0V, gate-len=0=mute,
+    -- tr=0 semitones). stL is the exception: 0 is not a valid step
+    -- length (minimum is 1 tick), so its header reads 1-indexed to
+    -- avoid suggesting otherwise. Storage + audio-thread paths stay
+    -- 0-indexed across all columns.
+    local headerRow = (col == 4) and (playhead + 1) or playhead
+    self.headerLabels[c]:setText(string.format("%s:%02d", kColNames[c], headerRow))
     self.headerLabels[c]:setForegroundColor(
       (col == self.columnCursor) and kHeaderActive or kHeaderInactive)
 
