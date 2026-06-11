@@ -512,9 +512,12 @@ end
 -- g1L / g2L: [0, 4.0]. 4.0 is the TIE sentinel (engine threshold 3.999);
 --            any newV > 4.0 snaps to exactly 4.0 so dialing up always
 --            lands on TIE cleanly without "overshoot" floats.
--- stL:       floor at 0.0625 (= "1/16" per fmtBeats) -- the engine's
---            safety fallback at 0 catches accidents, but preventing
---            authoring of 0 or negative step-len in the UI is cleaner.
+-- stL:       floor at 0.25 (= 1 tick at PPQN=4). 0 and sub-tick values
+--            are not valid step lengths; they'd render as "0" in the
+--            grid and either deadlock the external-clock accumulator
+--            or jump the slot to a sub-tick rate the engine doesn't
+--            actually emit at. Engine-side normalizeL1Value enforces
+--            the same minimum on every write path.
 -- tr:        [-60, +60] semitones (5 octaves either way). Beyond that
 --            cv1 + tr/12 leaves any sensible V/oct range anyway.
 -- Other columns: pass through unclamped (CV columns have no hardware-
@@ -524,7 +527,7 @@ local function clampForColumn(col, newV)
     if newV > 4.0 then return 4.0 end
     if newV < 0.0 then return 0.0 end
   elseif col == 4 then
-    if newV < 0.0625 then return 0.0625 end
+    if newV < 0.25 then return 0.25 end
   elseif col == 5 then
     if newV > 60.0 then return 60.0 end
     if newV < -60.0 then return -60.0 end
@@ -792,7 +795,9 @@ function GridView:refresh()
     local m2 = seq:marker2(self.slot, col)
     local loopLo, loopHi = math.min(m1, m2), math.max(m1, m2)
 
-    self.headerLabels[c]:setText(string.format("%s:%02d", kColNames[c], playhead))
+    -- Header row indicator: 1-indexed for the user (row 0 internally
+    -- renders as "01"). Storage + audio-thread paths stay 0-indexed.
+    self.headerLabels[c]:setText(string.format("%s:%02d", kColNames[c], playhead + 1))
     self.headerLabels[c]:setForegroundColor(
       (col == self.columnCursor) and kHeaderActive or kHeaderInactive)
 

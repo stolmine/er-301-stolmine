@@ -109,6 +109,7 @@ void Slot::init(int slotIdx)
 
   samplesUntilTick = 0;
   externalTickCount = 0;
+  externalFirstPending = true;
   running          = false;
   heldCV1 = heldCV2 = 0.0f;
   heldGate1Len = heldGate2Len = 0.0f;
@@ -349,16 +350,28 @@ void Slot::externalTick(float bpm, float sampleRate)
   // Atomic-tick semantics. Each surviving external pulse increments
   // the counter; the slot only advances its playhead when the current
   // row's stL is satisfied. PPQN=4 base: 1 tick = 0.25 beats = 1/16
-  // note. stL is stored as 0.25 * integer_ticks (user can only author
-  // integer-tick values via the UI; clamp floors at one tick).
+  // note. normalizeL1Value clamps stL >= 1 tick on every write path.
   //
-  // Without this gating, every surviving pulse fires fireTick() and
-  // every row advances on every pulse regardless of stL -- the bug
-  // reported on 9.5.0 bench.
+  // First-pulse-after-start fires unconditionally so row 0's S&H
+  // values land immediately. Without that, a stL[0] > 1 would leave
+  // the slot silent through its first hold period.
+  if (externalFirstPending) {
+    externalFirstPending = false;
+    externalTickCount = 0;
+    (void)fireTick();
+    return;
+  }
+
   ++externalTickCount;
 
+  // Read stL from the row currently being emitted (currentRow), NOT
+  // from playhead. After fireTick, playhead has already advanced to
+  // the next row; the currently-held row is currentRow. Gating
+  // against playhead's stL would honor the NEXT row's value instead
+  // of the held row's, making transitions arrive at the wrong time
+  // relative to the visible highlight.
   Column& stC      = columns[kColStepLen];
-  float   stLBeats = stC.l1[stC.playhead].value;
+  float   stLBeats = stC.l1[stC.currentRow].value;
   if (stLBeats <= 0.0f) stLBeats = 0.25f;  // safety: avoid deadlock
   int     stLTicks = static_cast<int>(stLBeats * 4.0f + 0.5f);  // round
   if (stLTicks < 1) stLTicks = 1;
@@ -442,6 +455,7 @@ void Slot::reset()
   }
   samplesUntilTick = 0;
   externalTickCount = 0;
+  externalFirstPending = true;
   heldCV1 = heldCV2 = 0.0f;
   heldTranspose = 0.0f;
   heldGate1Amp = heldGate2Amp = 0.0f;
