@@ -108,6 +108,8 @@ void Slot::init(int slotIdx)
   }
 
   samplesUntilTick = 0;
+  externalTickCount = 0;
+  externalFirstPending = true;
   running          = false;
   heldCV1 = heldCV2 = 0.0f;
   heldGate1Len = heldGate2Len = 0.0f;
@@ -344,8 +346,41 @@ void Slot::externalTick(float bpm, float sampleRate)
   if (!running) return;
   cachedBpm        = bpm;
   cachedSampleRate = sampleRate;
-  // Discard returned samples-per-tick: external clock owns scheduling.
-  (void)fireTick();
+
+  // Atomic-tick semantics. Each surviving external pulse increments
+  // the counter; the slot only advances its playhead when the current
+  // row's stL is satisfied. PPQN=4 base: 1 tick = 0.25 beats = 1/16
+  // note. normalizeL1Value clamps stL >= 1 tick on every write path.
+  //
+  // First-pulse-after-start fires unconditionally so row 0's S&H
+  // values land immediately. Without that, a stL[0] > 1 would leave
+  // the slot silent through its first hold period.
+  if (externalFirstPending) {
+    externalFirstPending = false;
+    externalTickCount = 0;
+    (void)fireTick();
+    return;
+  }
+
+  ++externalTickCount;
+
+  // Read stL from the row currently being emitted (currentRow), NOT
+  // from playhead. After fireTick, playhead has already advanced to
+  // the next row; the currently-held row is currentRow. Gating
+  // against playhead's stL would honor the NEXT row's value instead
+  // of the held row's, making transitions arrive at the wrong time
+  // relative to the visible highlight.
+  Column& stC      = columns[kColStepLen];
+  float   stLBeats = stC.l1[stC.currentRow].value;
+  if (stLBeats <= 0.0f) stLBeats = 0.25f;  // safety: avoid deadlock
+  int     stLTicks = static_cast<int>(stLBeats * 4.0f + 0.5f);  // round
+  if (stLTicks < 1) stLTicks = 1;
+
+  if (externalTickCount >= stLTicks) {
+    externalTickCount = 0;
+    // Discard returned samples-per-tick: external clock owns spacing.
+    (void)fireTick();
+  }
 }
 
 void Slot::setL1(int col, int row, float value)
@@ -419,6 +454,8 @@ void Slot::reset()
     columns[c].lastL2FiredRow = -1;
   }
   samplesUntilTick = 0;
+  externalTickCount = 0;
+  externalFirstPending = true;
   heldCV1 = heldCV2 = 0.0f;
   heldTranspose = 0.0f;
   heldGate1Amp = heldGate2Amp = 0.0f;

@@ -138,8 +138,9 @@ void apply(Slot& slot, const Action& a, int hostCol)
     case ACTION_MUTE:
       // Persistent zero of the target cell. Semantic alias for
       // ACTION_SET with operand 0; the M symbol conveys intent more
-      // clearly in the cell editor.
-      tc.l1[row].value = 0.0f;
+      // clearly in the cell editor. normalizeL1Value clamps stL up
+      // to 1 tick since 0 is not a valid step length.
+      tc.l1[row].value = normalizeL1Value(target, 0.0f);
       break;
 
     case ACTION_NONE:

@@ -76,6 +76,20 @@ inline float normalizeL1Value(int col, float v) {
     float n = (float)(-(int)(-v + 0.5f));
     return n;
   }
+  if (col == kColStepLen) {
+    // stL: integer tick count at the PPQN=4 base (0.25 beats / tick).
+    // Floor at 1 tick (0.25 beats). 0 and sub-tick values would render
+    // as "0" in the grid and break the external-clock accumulator (a
+    // step with stL=0 would never yield), so all write paths -- setL1,
+    // L2 arithmetic actions, mute -- snap to the 1-tick minimum.
+    if (v != v) return 0.25f;  // NaN -> 1 tick
+    if (v < 0.25f) return 0.25f;
+    // Snap to nearest integer tick.
+    float ticks = v * 4.0f;
+    int n = (int)(ticks + 0.5f);
+    if (n < 1) n = 1;
+    return (float)n * 0.25f;
+  }
   return v;
 }
 
@@ -215,7 +229,18 @@ public:
   Column        columns[kNumColumns];
   std::mt19937  rng;
   int           samplesUntilTick = 0;
-  bool          running          = false;
+  // External-clock atomic tick counter. Each surviving ext pulse
+  // (after master + per-slot dividers) increments this; when it
+  // reaches the current row's stL (in ticks at the locked PPQN=4
+  // base), fireTick() runs and the counter resets to 0. Unused in
+  // internal-clock mode, which uses samplesUntilTick instead.
+  int           externalTickCount   = 0;
+  // First-pulse-after-start sentinel. Forces an unconditional
+  // fireTick() on the first surviving ext pulse so row 0's S&H +
+  // gate envelopes load immediately rather than waiting for
+  // stL[0] ticks to accumulate against silent defaults.
+  bool          externalFirstPending = true;
+  bool          running             = false;
 
   // Sample-and-hold of column values, refreshed on every tick:
   float heldCV1       = 0.0f;  // cv1Raw + heldTranspose / 12 (pre-applied)
