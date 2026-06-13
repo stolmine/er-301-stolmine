@@ -278,6 +278,49 @@ Alternate text entry method using the 6 main buttons as column selectors:
 - Sub-display unchanged from existing keyboard: S1 bksp, S2 cursor, S3 space
 - Symbol set per column: A-Z, a-z, 0-9, common punctuation (-, _, ., /)
 
+## Audio Editor: Selection-Scoped Operations (idea, 2026-06-13)
+
+The sample editor today is geared mostly toward slicing. The rudiments
+for a more featured destructive editor are already in place: a
+shift+scroll selection mechanic that scopes any subsequent action to
+the highlighted range.
+
+Idea: layer Audacity/Audition-style operations on top of the existing
+selection convention. When nothing is selected, an action operates on
+the whole sample. When a selection is active, the same action operates
+only on the range. Same button, two scopes, same code path with a
+"start/end" pair the action consumes.
+
+Candidate actions (per crumb dinger, WIGL):
+
+- **Copy / Cut / Paste** between samples in the pool (cross-sample
+  paste is the interesting bit; needs a sample-side clipboard or a
+  shared scratch buffer)
+- **Reverse** in place
+- **Gain** as a multiply with a one-knob amount picker
+- **Pitch / time stretch** (granular or PSOLA; complex enough to gate
+  behind its own design pass)
+
+Sub-bar would dispatch via the M-keys with contextually-relevant
+labels: nothing selected = global operations, selection active =
+range operations. The visual mode switch is already familiar from the
+sequencer's selection-active sub-bar swap.
+
+Out of scope for the idea phase:
+
+- Undo/redo (large): destructive edits in a 0.7-era engine need
+  either an undo journal or a separate "edit buffer" the user
+  commits from. Both are real surface area; pick before building.
+- Non-destructive edit layer: probably the right model long-term,
+  but it changes the sample pool semantics meaningfully. Out of
+  scope for a first pass.
+- Loop region authoring: distinct enough from edit-region selection
+  that it should stay where it is.
+
+Conversation reference: crumb dinger + Carson, 2026-06-13. The
+existing slicing focus stays; this adds a layer rather than replacing
+it.
+
 Advantages over single-cursor keyboard: up to 6 characters visible and selectable at once, no lateral cursor movement needed for sequential entry, encoder travel per character is minimal since columns can show contextual/frequent symbols.
 
 ## Intro Video
