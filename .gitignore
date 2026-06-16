@@ -49,3 +49,32 @@ tmp/
 
 # Notes
 PLATFORM_PORT_NOTES.md
+
+# Local-only operational notes that contain rig-specific identifiers
+# (IP addresses, usernames, host paths). Kept on disk for personal
+# reference; never tracked.
+docs/dev-rig-procedures.md
+
+# Hardware-platform-specific docs + planning live in a separate private
+# repo. Defensive ignores in case stray files land here on a workspace
+# mistake.
+docs/planning/audio-path-*.md
+docs/planning/audio-spi-*.md
+docs/planning/bcdevices-*.md
+docs/planning/bcdupdate-*.md
+docs/planning/carson-*.md
+docs/planning/display-wiring-*.md
+docs/planning/emu-soft-restart-*.md
+docs/planning/hci-*.md
+docs/planning/loom-reference/
+docs/planning/loom-*.md
+docs/planning/*loom*.md
+docs/planning/pi-to-loom-*.md
+docs/planning/portable-hardware-*.pdf
+docs/planning/uconsole-*.md
+docs/planning/unified-firmware-update-*.md
+docs/planning/parallel-dsp-mvp.md
+docs/planning/redesign/
+
+# Local-only personal study manual (lives in a separate private repo).
+docs/manual/

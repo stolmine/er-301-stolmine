@@ -3,9 +3,8 @@
 ## Status: stolmine fork on AM335x is feature-complete (2026-06-09, v0.7.0-stolmine.9.5.0)
 
 The ER-301 stolmine fork on AM335x hardware is feature-complete as of the
-**9.5.0** release. All forward firmware development moves to the next-
-generation **CM4 / bcdevices** hardware platform (see `feature/` branches
-in `bcd_ui_301` and the audio path planning docs on the `rpidev` branch).
+**9.5.0** release. All forward firmware development moves to a
+next-generation hardware platform tracked privately.
 
 The items below are kept for posterity. Most will not be revisited on
 AM335x; a small number have already shipped silently in the 9.2.1 /
@@ -317,7 +316,7 @@ Out of scope for the idea phase:
 - Loop region authoring: distinct enough from edit-region selection
   that it should stay where it is.
 
-Conversation reference: crumb dinger + Carson, 2026-06-13. The
+Conversation reference: 2026-06-13 design discussion. The
 existing slicing focus stays; this adds a layer rather than replacing
 it.
 
