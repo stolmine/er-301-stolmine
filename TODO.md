@@ -387,6 +387,12 @@ fixes it on both firmwares.
   being downstream, or whether the stereo mix alone reproduces it.
 - Report upstream to odevices since the issue affects vanilla.
 
+**Status 2026-06-15:** Bram cannot reproduce locally with the
+described setup. Following up with the user to gather more info
+(broken quicksave file, exact unit versions, link/unlink state,
+sample player config feeding the stereo mix, whether the failure
+appears on first patch build or only after some operation).
+
 ## Chain-Reference Invalidation on Stereo Link/Unlink (pre-v9.1.0)
 Stereo link/unlink in user mode destroys and recreates chain objects, but only
 `UserMode` subscribes to `channelsModified`. `LocalChooser` (and its wrapper
