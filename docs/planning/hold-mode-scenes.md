@@ -2,7 +2,7 @@
 
 **Status:** brainstorm capture (2026-05-31). No engineering scope
 locked. Source: a Discord conversation between Bram (crumb dinger)
-and Carson about how hold mode could become a usable performance
+and an external collaborator about how hold mode could become a usable performance
 surface instead of the under-used pinset-assignment chore it is now.
 
 ## Why we're rethinking hold mode
@@ -151,7 +151,7 @@ the dense unit picker.
   vs base, useful for at-a-glance "is this scene full or
   sparse").
 
-## Carson's caveat
+## External collaborator's caveat
 
 > "This is the exact type of thing that when I am thinking about
 > it conceptually in my brain I think I know what I want, but

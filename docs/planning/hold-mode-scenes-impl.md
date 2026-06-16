@@ -351,7 +351,7 @@ Five phases, each independently testable.
   perform, save, reload)
 
 Total estimate: ~9-14 days of focused work, plus an unknowable
-amount of "hands-on the thing" iteration as Carson warned.
+amount of "hands-on the thing" iteration as the external collaborator warned.
 
 ---
 
