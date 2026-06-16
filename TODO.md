@@ -336,6 +336,57 @@ Investigate crash with the following repro characteristics:
 Collect: crashdump from device, exact unit list + order, whether link/unlink
 state matters, whether removing TXo or Teletype changes reproducibility.
 
+## Bug Report: Stereo Mix Output Drops on Quicksave Load (pre-v9.1.0)
+
+User-reported bug, 2026-06-15. Reproduces on both stolmine **and**
+vanilla v0.7.0, so it lives upstream (not a stolmine regression). The
+quicksave persists the broken state; rebuilding the chain manually
+fixes it on both firmwares.
+
+**Setup:**
+- One stereo (linked) channel.
+- Stereo Mix unit with both inputs occupied (some audio source going
+  into both L and R, e.g. `/home/bram/Downloads/plumbutter.mp3` for
+  the user's bench).
+- Mono Mix unit following the stereo mix, no inputs, intended as a
+  passthrough.
+
+**Symptom:**
+- Audio cuts out at the stereo mix's outputs. Scope on the stereo
+  mix output reads silent.
+- Input to the stereo mix's subchain visualizes correctly (signal is
+  arriving at the subchain inputs).
+- Mono mix downstream also passes silence (consistent with its input
+  being the now-silent stereo mix output).
+- Quicksave + reload does NOT fix it. The broken state persists.
+- Loading the same quicksave on vanilla v0.7.0 reproduces the same
+  failure.
+- Deleting both units and rebuilding the chain manually fixes it on
+  both firmwares.
+
+**Likely shape:**
+- An internal state on the stereo mix unit (or its sub-chain) gets
+  into a wedged configuration that serialize/deserialize round-trips
+  faithfully (so quicksave reload preserves the wedge).
+- Whatever happens during a fresh insert from the picker initializes
+  state correctly, so the rebuilt chain works.
+- The "fresh chain works, restored chain doesn't" split points at
+  something in the unit's `onLoadGraph` vs. its `serialize` /
+  `deserialize` pair not lining up.
+
+**To investigate:**
+- Capture a copy of the broken quicksave (the user's
+  plumbutter-loaded version). It's needed to reproduce.
+- Diff the unit-internal state of a broken-quicksave-loaded stereo
+  mix against a freshly-inserted one. Look for: input/output
+  connection map, sub-chain head pointer, gain or pan parameters at
+  out-of-band values.
+- Check whether unlinking + relinking the channel resets the failure
+  (would point at the link/unlink chain rebuild path).
+- Check whether the failure depends specifically on the mono Mix
+  being downstream, or whether the stereo mix alone reproduces it.
+- Report upstream to odevices since the issue affects vanilla.
+
 ## Chain-Reference Invalidation on Stereo Link/Unlink (pre-v9.1.0)
 Stereo link/unlink in user mode destroys and recreates chain objects, but only
 `UserMode` subscribes to `channelsModified`. `LocalChooser` (and its wrapper
