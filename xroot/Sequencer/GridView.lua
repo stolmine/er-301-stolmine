@@ -331,6 +331,14 @@ function GridView:init(chain)
   -- CANCEL restores from preEditValues; UP commits (drops both tables).
   self.preEditValues     = {}
   self.editedCells       = {}
+  -- Single-cell editingL1 revert state. Snapshots the focused cell's
+  -- value-before-edit ({col, row, val}) on edit-entry and re-snapshots
+  -- whenever focus moves to a new cell while still editing (ENTER
+  -- commit+advance, S2 step-back). CANCEL restores it; every commit
+  -- path (UP, column switch, layer switch, entering another modal)
+  -- drops it. Mirrors the bulk-edit preEditValues contract above, but
+  -- scoped to the one cell currently under the cursor.
+  self.editBackup        = nil   -- {col, row, val} or nil
   -- Cursor-box easing state. Floats track the current rendered position
   -- of the cursor; each refresh eases them toward the logical target by
   -- kCursorEase. nil means "snap on next render" (used on first show
@@ -1211,6 +1219,12 @@ function GridView:onHide()
       Settings.set("bpm", string.format("%.2f", seq:getBpm()))
     end
   end
+  -- Release a sticky L1 edit as a commit (the engine already holds the
+  -- dialed value); drop the revert snapshot so a re-show starts clean.
+  if self.editingL1 then
+    self.editingL1  = false
+    self.editBackup = nil
+  end
 end
 
 -- ---- input handlers ----
@@ -1284,7 +1298,10 @@ end
 
 function GridView:_commitOtherModalsBefore(entering)
   if entering ~= "editingL1" and self.editingL1 then
-    self.editingL1 = false
+    -- Entering another modal commits the edit in flight (value stays);
+    -- drop the revert snapshot so it can't leak into the next session.
+    self.editingL1  = false
+    self.editBackup = nil
   end
   if entering ~= "selectionActive" and self.selectionActive then
     self.preEditValues   = {}
@@ -1315,6 +1332,31 @@ function GridView:_revertMark()
   self.markingMode   = "idle"
   self.markBackup    = nil
   self.markFirstMark = nil
+end
+
+-- Snapshot the currently-focused L1 cell's value so CANCEL can revert
+-- it. Called on edit-entry and whenever focus moves to a new cell while
+-- editing continues (each move implicitly commits the cell left behind).
+function GridView:_snapshotEditCell()
+  local seq = app.AudioThread.getSequencerTask()
+  if not seq then self.editBackup = nil; return end
+  self.editBackup = {
+    col = self.columnCursor,
+    row = self.focusHeadRow,
+    val = seq:l1Value(self.slot, self.columnCursor, self.focusHeadRow),
+  }
+end
+
+-- Restore the focused cell to its pre-edit value and clear the snapshot.
+-- No-op (beyond clearing) if no snapshot is held. Symmetric with
+-- _revertMark; called from CANCEL while editingL1.
+function GridView:_revertEdit()
+  local seq = app.AudioThread.getSequencerTask()
+  if seq and self.editBackup then
+    seq:setL1(self.slot, self.editBackup.col, self.editBackup.row,
+              self.editBackup.val)
+  end
+  self.editBackup = nil
 end
 
 -- Paste clipboard.values into rows starting at focusHead, in the
@@ -1559,6 +1601,9 @@ function GridView:subReleased(i, shifted)
       -- ENTER's commit + advance for a natural up/down editing loop.
       if self.focusHeadRow > 0 then
         self.focusHeadRow = self.focusHeadRow - 1
+        -- Like the advance, leaving a cell commits it; snapshot the
+        -- cell we just stepped onto for CANCEL revert.
+        self:_snapshotEditCell()
         self:refresh()
       end
       return true
@@ -1662,7 +1707,7 @@ function GridView:subReleased(i, shifted)
     -- concept (it uses the CellEditor modal), so carrying the edit
     -- flag across leaves a null state: encoder routes to nudge but
     -- the user is staring at L2 cells.
-    if self.editingL1 then self.editingL1 = false end
+    if self.editingL1 then self.editingL1 = false; self.editBackup = nil end
     self.layer = (self.layer == "L1") and "L2" or "L1"
     self:refresh()
     return true
@@ -1914,7 +1959,9 @@ function GridView:mainReleased(i, shifted)
     -- it shouldn't survive a BPM-edit context. Mirrors UP / onHide
     -- semantics.
     if self.editingL1 then
-      self.editingL1 = false
+      -- Column switch commits the edit (value stays); drop the snapshot.
+      self.editingL1  = false
+      self.editBackup = nil
     end
     if self.bpmLatched then
       self.bpmLatched = false
@@ -1976,6 +2023,9 @@ function GridView:enterReleased(shifted)
   end
   if self.editingL1 then
     self.focusHeadRow = clamp(self.focusHeadRow + 1, 0, kMaxRow)
+    -- Commit+advance: the cell we just left keeps its edited value;
+    -- re-snapshot the newly focused cell so CANCEL reverts only it.
+    self:_snapshotEditCell()
   else
     -- Commit any in-flight mark / selection / BPM latch before
     -- entering edit. The helper folds all three exits into one
@@ -1984,6 +2034,9 @@ function GridView:enterReleased(shifted)
     -- handling).
     self:_commitOtherModalsBefore("editingL1")
     self.editingL1 = true
+    -- Capture the cell's value before any encoder/S-key nudge so
+    -- CANCEL can roll it back to its pre-edit state.
+    self:_snapshotEditCell()
   end
   self:refresh()
   return true
@@ -2008,8 +2061,12 @@ function GridView:cancelReleased(shifted)
     self:refresh()
     return true
   end
-  -- Edit mode takes priority -- CANCEL exits edit first.
+  -- Edit mode takes priority -- CANCEL exits edit first, reverting the
+  -- focused cell to its pre-edit value (symmetric with the bulk-edit
+  -- and mark modals, whose CANCEL also rolls back). UP is the commit
+  -- counterpart that keeps the edited value.
   if self.editingL1 then
+    self:_revertEdit()
     self.editingL1 = false
     self:refresh()
     return true
@@ -2060,8 +2117,11 @@ function GridView:upReleased(shifted)
     self:refresh()
     return true
   end
+  -- UP = implicit COMMIT of the L1 edit: keep the edited value, drop
+  -- the revert snapshot (counterpart to CANCEL's revert above).
   if self.editingL1 then
-    self.editingL1 = false
+    self.editingL1  = false
+    self.editBackup = nil
     self:refresh()
     return true
   end
