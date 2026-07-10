@@ -1,0 +1,333 @@
+# er-301-stolmine ledger — the single machine-readable source of truth for work items.
+#
+# This file is TRUTH. `planning/TODO.md` is GENERATED from it (`scripts/dev
+# render`) — never hand-edit that doc. The gate (`scripts/dev check`, run before
+# every commit) reconciles this ledger against the code and tests.
+#
+# Each item is one INDEPENDENTLY-VERIFIABLE behavior (the BDG grain: a test, a
+# screenshot, or a gate) — not per-function, not per-subsystem.
+#
+# Fields:
+#   id      stable kebab slug, unique, immutable (code references it as [stol:<id>])
+#   title   one line
+#   status  todo | wip | done | blocked
+#   area    ui | sequencer | scenes | i2c | dsp | emu | docs | infra
+#   rev     integer, bump when the item's intent changes (default 1)
+#   verify  { kind = "test"|"screenshot"|"manual", ref = "<test-case name | png | note>" }
+#           kind="test" is HARD-gated: a `done` item's ref must name a real TEST_CASE.
+#           (No test harness exists yet — tests/ is future work — so use
+#           manual/screenshot + attested until one lands.)
+#   tests   optional list of ADDITIONAL TEST_CASE names this item owns (beyond
+#           verify.ref). Every TEST_CASE in tests/ must be claimed by some item
+#           (verify.ref or tests[]) — you can't add a test without ledgering it.
+#   attested  REQUIRED for a `done` item whose verify.kind is NOT "test": a non-empty
+#           string is a conscious, auditable claim (no silent soft-done).
+#   anchor  optional; if true, a `done` item must carry a [stol:<id>] tag in the
+#           source tree (od/xroot/emu/hal/mods)
+#   links   optional { depends_on = [...], supersedes = [...] }
+#   note    optional free text
+#
+# Tool invocations go through the blessed entrypoint: `scripts/dev {check,render,
+# status,now,commit,...}`. Never write a date from memory — ask `scripts/dev now`.
+
+[[item]]
+id = "infra-ledger-regime"
+title = "Ledger + BDG regime stood up (gate, render, hooks, blessed entrypoint)"
+status = "done"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "scripts/dev check exits 0; planning/TODO.md renders from ledger" }
+attested = "2026-07-09: ported ledger.py, scripts/dev, gate/stop hooks from Ligature per planning/ledger-regime-portable.md; check+render+status validated clean"
+
+# Backfill inventory fragment for er-301-stolmine — ER-301 eurorack firmware fork.
+#
+# Drafted 2026-07-09. One [[item]] per independently-verifiable behavior.
+# No test harness exists in this repo yet, so every verify.kind is "manual" or
+# "screenshot" (never "test"). Every `done` item carries an `attested` line whose
+# date + tag/sha come from actual git history (git tag -l, git log).
+#
+# Areas used: {ui, sequencer, scenes, i2c, dsp, emu, docs, infra}
+# The bootstrap item `infra-ledger-regime` is intentionally NOT included here.
+
+# ─────────────────────────── Part 1: shipped feature set (done) ───────────────────────────
+
+[[item]]
+id = "i2c-txo-master"
+title = "TXo I2C master output: interrupt-driven CV/gate TX with gain + V/Oct mode"
+status = "done"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "i2c"
+verify = { kind = "manual", ref = "instantiate TXo TR/CV units; scope TXo expander outputs while driving gate + V/Oct pitch; confirm gain control scales output" }
+attested = "2026-03-20 (commit 19bf34f 'Add TXo I2C master output mod'): interrupt-driven I2C master TX to TXo output expanders, with per-unit gain control and V/Oct mode. This is the fork's flagship feature. Bench-validated on hardware against a TXo expander (I2C master addr 0x60, configurable 0x60-0x67). Cannot be exercised in emu (no I2C bus emulation)."
+note = "Master takes over the I2C2 CON register during TX; see i2c-teletype-coexist for the shared-peripheral handoff."
+
+[[item]]
+id = "i2c-teletype-coexist"
+title = "Teletype slave RX coexists with TXo master TX on the shared I2C2 peripheral"
+status = "done"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "i2c"
+verify = { kind = "manual", ref = "with a Teletype leading and a TXo following, confirm ER-301 receives SC.CV/SC.TR from Teletype (slave 0x31) while simultaneously driving the TXo (master 0x60); no crash" }
+attested = "2026-03-20 (commit 19bf34f, refined through the 9.x line): single I2C2 peripheral shared between slave (Teletype, addr 0x31) and master (TXo). Master claims the CON register during TX, then restoreSlaveMode() re-enables slave RX after. Documented in docs/KNOWLEDGE.md 'I2C System'. Hardware-verified; the README warns users to pick leading OR following per patch since doing both has shown crashes in some faderbank bursts (F8R issue still open)."
+links = { depends_on = ["i2c-txo-master"] }
+note = "F8R/16n faderbank at 400kHz still fails as a leader (open, tracked in KNOWLEDGE.md); Crow + Teletype work."
+
+[[item]]
+id = "infra-swig-vanilla-compat"
+title = "SWIG pinned to 4.2.1 + runtime version bridge so vanilla community packages load"
+status = "done"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "install a community package compiled against upstream v0.7.0 firmware (e.g. a mutable-instruments/habitats .pkg); confirm it loads, instantiates, and shares SWIG types without hang" }
+attested = "2026-03-25 (commit e9870e5 'Pin SWIG 4.2.1 for runtime v4 compatibility' + 0ed9bad 'Add SWIG runtime version bridge'; bridge restored in 874d224 after a regression): SWIG pinned at 4.2.1 with a runtime version bridge so packages built against upstream firmware share the same SWIG type registry and load correctly. Method dispatch is name-based so appending non-virtual methods is safe; details in docs/KNOWLEDGE.md 'ABI & Compatibility'."
+
+[[item]]
+id = "infra-package-diagnostics"
+title = "Detailed package load diagnostics for .pkg archive + .so ELF failures"
+status = "done"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "attempt to install a corrupt archive and an .so with an unresolved symbol; confirm the error screen names the specific failure (unresolved symbol, corrupt archive, header mismatch) rather than a generic error" }
+attested = "2026-04-04 (commit 6eabaa8 'Add detailed error diagnostics for package archive and ELF load failures'): package manager surfaces specific reasons for archive-open and dynamic-link failures (unresolved symbols, corrupt archives, header mismatches) instead of a generic failure. Listed in README 'What's different from upstream'."
+
+[[item]]
+id = "ui-favorites-picker"
+title = "Favorites in the unit picker: shift-toggle edit mode, own category above Recents"
+status = "done"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "in the unit picker hold shift to enter favorites-edit; S1 tags/untags the highlighted unit; confirm a Favorites category appears above Recents and persists across a reboot/quicksave" }
+attested = "2026-04-09 and earlier, shipped in v0.7.0-stolmine.9.0.0 (tag 0df7a03, 2026-04-09): shift-toggle favorites-edit in the picker with in-place border toggle (no list rebuild) and deferred save on mode exit; favorites render as their own category above Recents; clear-all guarded by a settings-toggleable confirmation. Documented in docs/KNOWLEDGE.md 'Favorites system'."
+
+[[item]]
+id = "ui-readout-name-table"
+title = "Readout/Fader mapped display text via addName()/clearNames()"
+status = "done"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "call addName() on a Readout to map a value to text; confirm the display shows the mapped label instead of the numeric value" }
+attested = "2026-04-03 (commit b76b65b 'Add name table support to Readout widget' + 32c4a20 'Add addName/clearNames API'): Readout widgets can map value ranges to display text via addName()/clearNames(). Listed in README 'What's different from upstream'; SWIG-usage note in docs/KNOWLEDGE.md."
+
+[[item]]
+id = "ui-readout-threshold-labels"
+title = "Readout/Fader threshold labels map float ranges to descriptive text"
+status = "done"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "call addThresholdLabel(0.0,'LP')/(0.33,'BP')/(0.66,'HP') on a filter mode control; confirm the readout shows LP/BP/HP across the range" }
+attested = "2026-04-07 (commit abb92b7 'Add threshold label mapping for float controls on Readout'): addThresholdLabel(float,string)/clearThresholdLabels() on both Readout and Fader. Priority order name-table > threshold-labels > min/max text > numeric, per docs/KNOWLEDGE.md 'Readout threshold labels'."
+links = { depends_on = ["ui-readout-name-table"] }
+
+[[item]]
+id = "ui-master-output-scale"
+title = "Master output scale: percentage-based output level in admin settings"
+status = "done"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "in Admin settings set master output scale to 100/75/50/25/10%; confirm the OUT levels scale accordingly" }
+attested = "2026-03-28 (commit 4049ead 'Add output scale control and screensaver preview action'): percentage-based master output level control (100/75/50/25/10%) in admin settings. Listed in README 'What's different from upstream'."
+
+[[item]]
+id = "ui-screensavers"
+title = "Screensaver suite: snow, rain, forest, maze, perlin, voronoi + cycle mode"
+status = "done"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "ui"
+verify = { kind = "screenshot", ref = "let the device idle past the screensaver timeout; capture each of snow/rain/forest/maze/perlin/voronoi and confirm cycle mode rotates between them" }
+attested = "2026-03-28 onward (commit b805029 'Add snow, rain, and forest screensavers' + f65889e 'Add pipes, maze, and bonsai'; forest z-layer/godrays through 228d1ff which adds cycle mode): snow, rain, forest, maze, perlin noise, voronoi screensavers with automatic cycle mode. Pipes/bonsai later removed. Documented in docs/KNOWLEDGE.md 'Screensavers'."
+
+[[item]]
+id = "ui-screensaver-doom"
+title = "Doom screensaver: doomgeneric with autoplay bot, letterboxed to 102x64"
+status = "done"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "ui"
+verify = { kind = "screenshot", ref = "select the Doom screensaver manually (not in the cycle list); confirm the bot plays, renders 320x200 letterboxed into a 102x64 viewport, and auto-restarts on death" }
+attested = "2026-04-07/08 (commit a1b6fdb 'Add Doom screensaver with autoplay bot' + 685f99e ZCajun bot port + d022c69 'Fix Doom death-screen freeze and remove from screensaver cycle'): vendored doomgeneric (GPL-2.0) with a ZCajun-derived bot writing directly to ticcmd_t, 320x200 rendered to a 102x64 letterboxed viewport, auto-restart on death, manual-selection-only. WAD at front/ER-301/doom/DOOM1.WAD. Full notes in docs/KNOWLEDGE.md 'Doom screensaver'."
+links = { depends_on = ["ui-screensavers"] }
+
+[[item]]
+id = "ui-slot-machine-text"
+title = "Slot-machine text input: 6 columns under M1-M6, hold-to-focus + encoder scroll"
+status = "done"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "switch keyboard mode to 'slot' in Interface settings; hold an M-key to focus its column, scroll the encoder to a symbol, release to insert; confirm idle encoder scrolls all columns together" }
+attested = "2026-04-07 (commit dc259ce 'Add slot machine text input as alternate keyboard method'): alternate keyboard with 6 SlidingList columns under M1-M6; hold a button to focus a column, encoder scrolls it, release inserts; idle encoder scrolls all columns; grid/slot toggle in Interface settings; history supported. Documented in docs/KNOWLEDGE.md 'Slot machine text input'."
+
+[[item]]
+id = "ui-quicksave-overwrite-confirm"
+title = "Quicksave overwrite confirmation + 48 quicksave slots"
+status = "done"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "save over an occupied quicksave slot; confirm a settings-toggleable overwrite-confirmation dialog appears; confirm 48 slots are available" }
+attested = "shipped in the early 9.x line (documented in docs/KNOWLEDGE.md 'Quicksave overwrite confirmation'): confirmation dialog when saving over an occupied slot (toggleable in settings) and 48 quicksave slots (up from the original count)."
+
+[[item]]
+id = "ui-dense-unit-picker"
+title = "Dense 2-column unit picker: type glyphs, alphabet ribbon, sort/filter, M-key gestures"
+status = "done"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "ui"
+verify = { kind = "screenshot", ref = "Admin > Settings > Units > Unit picker style: dense; capture the 2-column layout with type glyphs, alphabet jump ribbon, and section dividers; cycle M2 sort modes and M3 type filter" }
+attested = "2026-05-30, released as v0.7.0-stolmine.9.3.0 (tag aa8429d): dense 2-column picker as an admin-selectable alternative to the classic Mondrian view (dense is default). 8-10 visible units, alphabet jump ribbon, category-first/keyword-fallback type glyphs (~ source / > effect / $ modulate / * timing / . utility / ? unknown), section dividers, M-key gesture set (M2 sort cycle, M3 type filter, M5/M6 hide/fav edit, hold-M2/M3 + encoder for live scrub), sequencer-style cursor easing. Recency persists in ~/.od/rear/recencyHistory.lua. Full CHANGELOG under v0.7.0-stolmine.9.3.0."
+links = { depends_on = ["ui-favorites-picker"] }
+
+[[item]]
+id = "dsp-parallel-dsp"
+title = "Parallel DSP via BUILDOPT_PARALLEL_DSP WorkerPool"
+status = "done"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "build with BUILDOPT_PARALLEL_DSP enabled; run a multi-chain CPU-heavy patch and confirm inter-chain/branch parallelism reduces xruns vs the serial build; confirm am335x still builds with the gate compiled out" }
+attested = "2026-04-28 (per project memory; WorkerPool gated in commit 67df6cd 'WorkerPool: gate impl under BUILDOPT_PARALLEL_DSP for am335x build'): inter-chain + branch parallelism behind the BUILDOPT_PARALLEL_DSP build flag, with the am335x build compiling the WorkerPool impl out. Primarily targets the next-gen multi-core platform; am335x remains single-core."
+
+[[item]]
+id = "scenes-hold-mode"
+title = "Hold-mode scenes with CV-selectable A/B via SceneIndexArbiter"
+status = "done"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "scenes"
+verify = { kind = "manual", ref = "build a hold-mode PinSet with A/B scene states; assign a CV source to the A/B selector; confirm the crossfade/select follows the CV with GainBias semantics and survives quicksave" }
+attested = "2026-06-04, released as v0.7.0-stolmine.9.4.0 (tag 7168d39 'Merge feature/hold-mode-scenes'): CV-controllable A/B scene selection via M2/M3 and a SceneIndexArbiter, with kIndex normalized and audio-thread autonomy (arbiter CV rides on top of bias, delta-since-entry). Scene mode defaults on for new installs. Consolidated tracker docs/planning/hold-mode-scenes-todos.md."
+
+[[item]]
+id = "sequencer-external-clock"
+title = "Grid sequencer external clock + reset with per-slot stL honoring"
+status = "done"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "sequencer"
+verify = { kind = "manual", ref = "under AdminMode enable the grid sequencer external clock; feed an external clock + reset; confirm each slot advances on ticks honoring its stL (step length) via the atomic tick counter, and BPM readout locks" }
+attested = "2026-06-05 external-clock bring-up (merge 4aec4da, shipped in v0.7.0-stolmine.9.5.0, tag 0f36ac7 2026-06-10) with the stL regression fixed in v0.7.0-stolmine.9.5.1 (tag e75334f 2026-06-10, commit 33620b1 'external clock honors stL via atomic tick counter' + 8048032): 6-ply SpottedStrip with external clock, reset, and 4 division faders; slot advance counts atomic ticks against each currentRow's stL. This was the last firmware feature before the RPi/CM4 port."
+
+[[item]]
+id = "sequencer-modal-sweep-hardening"
+title = "Sequencer modal-mutual-exclusion sweep: single encoder owner, no colliding modes"
+status = "done"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "sequencer"
+verify = { kind = "manual", ref = "run the 40-row modal sweep matrix: enter/exit mark mode, L1 edit, selection, BPM latch in every collision order; confirm exactly one encoder owner at all times and no ambiguous cursor/sub-bar state" }
+attested = "2026-06-09 (commit f76a666 'sequencer modal-mutual-exclusion sweep: single encoder owner', plus follow-ups F4/D1/H6/H8 in the 9.4.0.29 dev line): 40-row modal collision matrix bench-validated, all 8 collisions pass. Recorded in project memory 'Seq modal sweep test results 2026-06-09'."
+
+[[item]]
+id = "sequencer-terminal-edit-leds"
+title = "Sequencer terminal L1 cell edit + encoder coarse/fine LEDs"
+status = "done"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "sequencer"
+verify = { kind = "manual", ref = "enter L1 inline cell edit; confirm editingL1 is a terminal modal (S2 mark, layer toggle etc. commit-and-exit first); confirm encoder coarse/fine state drives the panel LEDs from GridView" }
+attested = "2026-06-09, released in v0.7.0-stolmine.9.5.0 (merge 7569864 'feature/sequencer-edit-terminal', commit bb8f63b 'C1+E2 terminal edit mode + S-key rebind'): editingL1 made a terminal modal; encoder coarse/fine LEDs driven from GridView. 18/18 bench matrix pass, recorded in project memory 'Seq edit terminal + LEDs shipped 2026-06-09'."
+links = { depends_on = ["sequencer-modal-sweep-hardening"] }
+
+[[item]]
+id = "sequencer-l1-cancel-revert"
+title = "Sequencer L1 CANCEL reverts a cell edit to its pre-edit value"
+status = "done"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "sequencer"
+verify = { kind = "manual", ref = "start editing an L1 cell, nudge the value, press CANCEL; confirm the cell reverts to the pre-edit value; confirm UP still commits" }
+attested = "2026-06-29, released as v0.7.0-stolmine.9.5.2 (tag d7b5287 'fix(sequencer): CANCEL reverts L1 cell edit to pre-edit value'): GridView.lua snapshots an editBackup on edit entry and restores it on CANCEL, while UP commits. Patch release; recorded in project memory 'Release 9.5.2 shipped 2026-06-29'."
+links = { depends_on = ["sequencer-terminal-edit-leds"] }
+
+[[item]]
+id = "emu-ui-pacer-fix"
+title = "Emulator UI loop pacer hits real 55 fps (matches hardware refresh)"
+status = "done"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "emu"
+verify = { kind = "manual", ref = "run the emulator under load; measure the UI frame rate; confirm ~55 fps (matching GRAPHICS_REFRESH_RATE) rather than the previous 45 fps best-case" }
+attested = "2026-06-04 (commit f0a0bb8 'emu: fix UI loop pacer; achieves real 55 fps (was 45 fps best-case)', building on a85850c 'GRAPHICS_REFRESH_RATE = 55 Hz'): fixed a wallclock/ticks type confusion + start-before-delay bug that collapsed the pacer to always-sleep-full-target. Animations now match hardware timing. Recorded in project memory 'emu UI loop pacer fix 2026-06-04'."
+
+# ─────────────────────────── Part 2: headless scriptable emu roadmap (todo) ───────────────────────────
+
+[[item]]
+id = "emu-headless-boot"
+title = "Emulator boots with --headless (no SDL window), firmware runs, clean exit"
+status = "todo"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "emu"
+verify = { kind = "manual", ref = "run emu.elf --headless with SDL_VIDEODRIVER=dummy; confirm firmware boots to the running state and exits cleanly with no window and no X/Wayland dependency" }
+note = "Foundation for scripted/CI use. Select the SDL dummy video driver so no window is created; keep the audio + Lua interpreter threads running as normal."
+
+[[item]]
+id = "emu-control-channel"
+title = "Line-oriented control channel read inside the emulator loop"
+status = "todo"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "emu"
+verify = { kind = "manual", ref = "pipe newline-delimited commands into the emulator's control FIFO/stdin; confirm each line is dequeued and dispatched from within the emulator loop without blocking the render/audio threads" }
+note = "A simple text protocol (one command per line) read from a FIFO or stdin, polled non-blocking in the emu loop. All Part-2 command items dispatch through this channel."
+links = { depends_on = ["emu-headless-boot"] }
+
+[[item]]
+id = "emu-cmd-buttons"
+title = "Button press/release commands with hold duration via Gpio_write"
+status = "todo"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "emu"
+verify = { kind = "manual", ref = "send 'press <button> [ms]' / 'release <button>' commands; confirm the firmware sees the front-panel button down/up (e.g. ENTER opens a menu) and that hold duration triggers repeat behaviors" }
+note = "Drive the front-panel buttons through Gpio_write. IMPORTANT: the GPIO logic is inverted — a key-DOWN writes false, key-UP writes true. Mirror the mapping the SDL key handler already uses (BUTTON_*_KEY in emu.config)."
+links = { depends_on = ["emu-control-channel"] }
+
+[[item]]
+id = "emu-cmd-encoder"
+title = "Encoder turn command adjusts encoderValue"
+status = "todo"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "emu"
+verify = { kind = "manual", ref = "send 'encoder <delta>'; confirm the focused control's value moves by the corresponding amount (delta scaled like the SDL wheel/arrow handlers)" }
+note = "Apply the delta to encoderValue the same way the mouse-wheel / arrow-key path does, honoring the coarse/fine scale factors."
+links = { depends_on = ["emu-control-channel"] }
+
+[[item]]
+id = "emu-cmd-toggles"
+title = "Storage / mode toggle-switch commands"
+status = "todo"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "emu"
+verify = { kind = "manual", ref = "send storage-focus and mode-focus toggle commands; confirm the emulator enters storage/mode contexts exactly as the Z/X keys do in the SDL build" }
+note = "The STORAGE and MODE switches are the two hardware toggles (Z/X in emu.config). Expose them as explicit set/toggle commands so scripts can reach admin + scope contexts."
+links = { depends_on = ["emu-control-channel"] }
+
+[[item]]
+id = "emu-capture-fb"
+title = "Capture command dumps the framebuffers decoded to PNG"
+status = "todo"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "emu"
+verify = { kind = "screenshot", ref = "send 'capture planning/captures/<name>.png'; confirm the main (256x64 4bpp) and sub (128x64 1bpp) DisplayBuffers are decoded pixel-exact to PNG, matching what emu/Window.cpp update() renders on screen" }
+note = "Decode reference is emu/Window.cpp update(): main display is 256x64 at 4 bits/pixel (16 gray levels), sub display is 128x64 at 1 bit/pixel. Write both (or a composite) to a PNG under planning/captures/. This is the observable output that makes headless runs verifiable."
+links = { depends_on = ["emu-headless-boot"] }
+
+[[item]]
+id = "emu-capture-deterministic"
+title = "Same UI state produces a byte-identical capture"
+status = "todo"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "emu"
+verify = { kind = "screenshot", ref = "drive the emulator to a fixed UI state, settle, and capture twice; confirm the two PNGs are byte-identical (diff clean); document the settle convention for animated elements" }
+note = "Requires a settle convention: pause/step animations (cursor easing, screensavers, scope sweeps, blink phases) to a canonical frame before capture, or capture after N idle frames. This is the BDG keystone for the emu — a golden-master screenshot is only useful if it is deterministic."
+links = { depends_on = ["emu-capture-fb"] }
+
+[[item]]
+id = "emu-lua-eval"
+title = "Lua expression command routed to the app interpreter (phase 2)"
+status = "todo"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "emu"
+verify = { kind = "manual", ref = "send 'lua <expr>'; confirm the expression runs on the app's Lua interpreter and its result/side-effect is observable (readback or a subsequent capture)" }
+note = "Phase 2, optional. Thread safety: the control channel is read off the emu/render thread but the app Lua state belongs to the UI/app thread — route the expression through a queued execution that runs it on the owning thread (do NOT call the interpreter directly from the channel reader), the same discipline used for queued edits elsewhere."
+links = { depends_on = ["emu-control-channel"] }
+
+# ─────────────────────────── Part 3: known open bug (blocked) ───────────────────────────
+
+[[item]]
+id = "dsp-stereo-mix-quicksave-drop"
+title = "Stereo Mix output drops to silence after quicksave load"
+status = "blocked"
+stamped = "2026-07-09T20:28:42-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "load the user's plumbutter-loaded quicksave (stereo linked channel, Stereo Mix with both inputs occupied, Mono Mix passthrough downstream); confirm/deny that the Stereo Mix output scopes silent while its subchain inputs read signal" }
+attested = "2026-06-15 (TODO.md 'Bug Report: Stereo Mix Output Drops on Quicksave Load', commits 0f1265f + 55f771a filing the report and 70edea1 'cannot repro, gathering more info'): user-reported, reproduces on both stolmine AND vanilla v0.7.0 so it is upstream, not a stolmine regression. The wedged state serialize/deserialize round-trips faithfully (quicksave reload preserves the break); deleting and rebuilding the units by hand fixes it on both firmwares. Bram cannot reproduce locally; blocked pending the broken quicksave file + exact unit versions from the reporter."
+note = "Suspected onLoadGraph vs serialize/deserialize mismatch on the Stereo Mix unit or its subchain. Needs the reporter's quicksave to reproduce. Report upstream to odevices once reproduced."

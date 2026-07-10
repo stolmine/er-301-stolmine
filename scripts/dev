@@ -1,0 +1,237 @@
+#!/usr/bin/env bash
+# scripts/dev — the blessed developer entry point for er-301-stolmine.
+#
+# All build / test / commit / push go through here so the machine (not memory)
+# runs the gate: emulator builds are parallelism-capped (a raw -j can OOM the
+# whole session), commits reconcile the ledger against the tree and regenerate
+# planning/TODO.md, and nothing drifted gets committed. Raw `git commit/push`
+# are blocked by a PreToolUse hook that redirects here (`make` stays unblocked).
+#
+# NOTE: this repo commits directly to `develop` by convention — the commit path
+# does NOT refuse the default branch and does NOT build (build via `scripts/dev
+# build` / `make` explicitly). There is no test harness yet.
+#
+# Usage:
+#   scripts/dev build            build the emulator, capped at -j4
+#   scripts/dev test             (no test harness yet — prints a note, exits 0)
+#   scripts/dev check            ledger gate (fast, structural)
+#   scripts/dev render           regenerate planning/TODO.md from the ledger
+#   scripts/dev status           short ledger summary (used by the session hook)
+#   scripts/dev now              the current date/time (ISO-8601, local + offset)
+#                                — NEVER write a date from memory; ask this
+#   scripts/dev ledger-append F  validate + append a fragment file to the ledger (stamps items)
+#   scripts/dev claim <item...>  lease an item's write-footprint on this branch
+#   scripts/dev release [item..] release this branch's leases (no args = all)
+#   scripts/dev claims           list live write-footprint leases
+#   scripts/dev commit "msg"     stamp + render + check + git add + fence -> git commit
+#   scripts/dev push             ledger check -> git push
+#   scripts/dev integrate <br>   merge queue: rebase+fragments+gate+FF+push+release
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+# Job cap: an explicit STOL_JOBS always wins. Otherwise, when a parallel wave is
+# declared via STOL_SLOTS, default to -j2 so N slots * 2 jobs stays under the OOM
+# ceiling; a solo session (STOL_SLOTS unset) keeps -j4.
+if   [ -n "${STOL_JOBS:-}" ];  then JOBS="$STOL_JOBS"
+elif [ -n "${STOL_SLOTS:-}" ]; then JOBS=2
+else JOBS=4; fi                       # capped: a raw -j16 build OOM-killed the session
+SLOTS="${STOL_SLOTS:-3}"              # size of the shared build semaphore
+SLOT_DIR="${XDG_RUNTIME_DIR:-/tmp}/stolmine-build-slots"
+TRAILER="Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+
+log()  { printf '\033[1m▸ %s\033[0m\n' "$*"; }
+die()  { printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
+
+# ── build-slot semaphore ─────────────────────────────────────────────────────
+# N parallel worktree builds at -j4 recreate the -j16 OOM. Every compile grabs
+# one of SLOTS flock'd slots first; a solo session takes slot 0 instantly (no
+# behavior change beyond that), N+1 concurrent builds make the extra ones wait.
+_slot_fd=
+acquire_slot() {
+  mkdir -p "$SLOT_DIR"
+  local i announced=0
+  while true; do
+    for ((i=0; i<SLOTS; i++)); do
+      exec {_slot_fd}>"$SLOT_DIR/$i.lock"
+      if flock -n "$_slot_fd"; then return 0; fi
+      exec {_slot_fd}>&-; _slot_fd=
+    done
+    [ "$announced" = 0 ] && { log "waiting for build slot (all $SLOTS busy)"; announced=1; }
+    # block up to 1s on slot 0, then re-scan every slot (no busy-poll / sleep)
+    exec {_slot_fd}>"$SLOT_DIR/0.lock"
+    flock -w 1 "$_slot_fd" && return 0
+    exec {_slot_fd}>&-; _slot_fd=
+  done
+}
+release_slot() { [ -n "$_slot_fd" ] && { exec {_slot_fd}>&-; _slot_fd=; }; return 0; }
+
+do_build() {
+  acquire_slot
+  log "make emu -j$JOBS"; make emu -j"$JOBS"
+  release_slot
+}
+
+do_test() {
+  echo "no test harness yet (tests/ pending)"
+  return 0
+}
+
+do_check()  { python3 tools/ledger.py check; }
+do_render() { python3 tools/ledger.py render; }
+do_status() { python3 tools/ledger.py status; }
+do_now()    { python3 tools/ledger.py now; }    # the ONE way to learn the date/time
+
+# Parallel infra: append a fragment file's [[item]] array to the ledger (validated,
+# verbatim) + re-render. Parallel agents emit fragments instead of racing the
+# shared ledger tail; the integrator (or a solo agent) applies them with this.
+do_ledger_append() {
+  local frag="${1:-}"
+  [ -n "$frag" ] || die "usage: scripts/dev ledger-append <fragment.toml>"
+  [ -f "$frag" ] || die "fragment not found: $frag"
+  python3 tools/ledger.py append "$frag"
+}
+
+# Parallel infra: item claims + write-footprint leases. One agent per FOOTPRINT
+# is the contention law; claims.toml commits like the ledger. The current branch
+# is the lease holder.
+do_claim() {
+  local branch; branch="$(git rev-parse --abbrev-ref HEAD)"
+  python3 tools/ledger.py claim --branch "$branch" "$@"
+}
+do_release() {
+  local branch; branch="$(git rev-parse --abbrev-ref HEAD)"
+  python3 tools/ledger.py release --branch "$branch" "$@"
+}
+do_claims() { python3 tools/ledger.py claims "$@"; }
+
+do_commit() {
+  local msg="${1:-}"
+  [ -n "$msg" ] || die "commit needs a message: scripts/dev commit \"subject\""
+  local branch; branch="$(git rev-parse --abbrev-ref HEAD)"
+  # This repo commits directly to develop by convention — no default-branch
+  # refusal. Only a detached HEAD is refused (a commit there would be lost).
+  [ "$branch" = "HEAD" ] && die "detached HEAD — checkout a branch first"
+  # NO build in the commit path (build explicitly: scripts/dev build / make).
+  python3 tools/ledger.py stamp         # machine truth: stamp new/status-changed items
+  do_render                             # regenerate the TODO from the ledger first...
+  do_check                              # ...then reconcile (schema, orphan tests/tags, render-diff)
+  git add -A
+  git diff --cached --quiet && die "nothing staged to commit"
+  # OPT-IN fence: no-op (byte-identical) unless this branch holds claims; then the
+  # staged diff must stay inside the claimed footprint. Additive, after the gate.
+  python3 tools/ledger.py fence \
+    || die "commit fence: staged changes fall outside this branch's claimed footprint (see above)"
+  log "commit on $branch"
+  git commit -m "$msg" -m "$TRAILER"
+}
+
+do_push() {
+  do_check
+  local branch; branch="$(git rev-parse --abbrev-ref HEAD)"
+  log "push $branch"
+  git push -u origin "$branch"
+}
+
+# Parallel infra: the merge queue. Serial integration is the correctness backbone;
+# this makes it one command. Run from the shared feature branch:
+#   rebase <branch> onto HEAD -> apply+retire its fragments -> regenerate TODO ->
+#   full gate (build+test+check) -> fast-forward the shared branch + push ->
+#   release the branch's claims. A rebase conflict aborts cleanly, naming the
+#   branch + files so the coordinator bounces it back to its agent (never hand-
+#   resolves blind).
+do_integrate() {
+  local br="${1:-}"
+  [ -n "$br" ] || die "usage: scripts/dev integrate <branch>"
+  local shared; shared="$(git rev-parse --abbrev-ref HEAD)"
+  [ "$shared" = "HEAD" ] && die "integrate runs from a branch, not a detached HEAD"
+  git rev-parse --verify --quiet "$br" >/dev/null || die "no such branch: $br"
+  git diff --quiet && git diff --cached --quiet || die "working tree dirty — commit or stash first"
+
+  log "fetch"; git fetch --quiet origin || true
+
+  log "rebase $br onto $shared"
+  if ! git rebase "$shared" "$br"; then
+    # GENERATED-file conflicts are the integrator's to eat: TODO.md is regenerated
+    # after the rebase (policy: regenerated, never merged), so a conflict touching
+    # ONLY TODO.md auto-resolves (either side — content is thrown away) and the
+    # rebase continues. Any other conflict still bounces to the agent.
+    # COORDINATION-generated files (TODO.md regenerated post-rebase; claims.toml
+    # released post-integrate) never bounce a lane — content is derived/thrown
+    # away. Bounce only if a conflict touches a file OUTSIDE this set.
+    local coord="planning/TODO.md planning/claims.toml"
+    local conflicted f real
+    while [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; do
+      conflicted="$(git diff --name-only --diff-filter=U)"
+      real=""
+      for f in $conflicted; do
+        case " $coord " in *" $f "*) ;; *) real="$real $f";; esac
+      done
+      if [ -n "$real" ]; then
+        git rebase --abort
+        git checkout --quiet "$shared"
+        die "rebase conflict: branch '$br' bounced on:${real} — resolve on the agent branch, then re-integrate"
+      fi
+      for f in $conflicted; do
+        log "auto-resolving coordination-file conflict: $f"
+        git checkout --ours "$f" 2>/dev/null || git checkout --theirs "$f"
+        git add "$f"
+      done
+      GIT_EDITOR=true git rebase --continue >/dev/null 2>&1 || true
+    done
+  fi
+  # HEAD is now on $br, rebased onto $shared.
+
+  shopt -s nullglob
+  local frags=(planning/fragments/*.toml) f applied=0
+  for f in "${frags[@]}"; do
+    log "ledger-append $f"
+    python3 tools/ledger.py append "$f" || { git checkout --quiet "$shared"; die "fragment append failed: $f"; }
+    git rm --quiet "$f"; applied=$((applied+1))
+  done
+  do_render                             # TODO is REGENERATED, never merged
+  if ! git diff --quiet || ! git diff --cached --quiet; then
+    git add -A
+    git commit -m "integrate($br): apply $applied fragment(s) + regenerate TODO" -m "$TRAILER"
+  fi
+
+  log "gate: build + test + check"
+  do_build
+  do_test
+  do_check
+
+  log "fast-forward $shared -> $br"
+  git checkout --quiet "$shared"
+  git merge --ff-only "$br" || die "cannot fast-forward $shared to $br (it diverged from $shared)"
+  git push -u origin "$shared"
+
+  python3 tools/ledger.py release --branch "$br"   # lease is done — release it
+  if ! git diff --quiet planning/claims.toml 2>/dev/null; then
+    git add planning/claims.toml
+    git commit -m "integrate($br): release claims" -m "$TRAILER"
+    git push -u origin "$shared"
+  fi
+  log "integrated $br into $shared (fragments applied, claims released)"
+}
+
+# Dispatch only when executed, not when sourced (sourcing exposes the helpers —
+# e.g. the build-slot semaphore — to a test harness without running a command).
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  build)  do_build "$@";;
+  test)   do_test "$@";;
+  check)  do_check "$@";;
+  render) do_render "$@";;
+  status) do_status "$@";;
+  now)    do_now "$@";;
+  ledger-append) do_ledger_append "$@";;
+  claim)   do_claim "$@";;
+  release) do_release "$@";;
+  claims)  do_claims "$@";;
+  commit) do_commit "$@";;
+  push)   do_push "$@";;
+  integrate) do_integrate "$@";;
+  *) die "usage: scripts/dev {build|test|check|render|status|now|ledger-append|claim|release|claims|commit|push|integrate}";;
+esac
+fi
