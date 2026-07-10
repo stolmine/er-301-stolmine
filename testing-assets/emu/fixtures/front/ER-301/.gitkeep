@@ -1,0 +1,4 @@
+# Placeholder so the front card's ER-301/ directory is committed (git drops empty
+# dirs). The emulator's xroot/Card/FileSystem.lua init() creates the versioned
+# subtree (v0.7/{meta,quicksaves,presets,screenshots}, logs, tmp, packages,
+# recorded) via Path.createAll on boot, so nothing else needs to ship here.

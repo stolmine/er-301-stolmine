@@ -132,10 +132,47 @@ end
 local shifted = false
 local releaseShifted = false
 
+-- [stol:emu-lua-eval]
+-- Headless/scripted control bridge. Drains the C++ control queue exposed by the
+-- emu module, evaluates each line on this (the Lua) thread, and replies. Only
+-- reached under app.EMULATION, so hardware builds never touch the emu global.
+-- Defined before onDisplayReady so the reference below is not a nil
+-- forward-binding (a local-function forward reference binds the nil global).
+local controlReady = false
+local function drainControl()
+  if not controlReady then
+    controlReady = true
+    emu.pushControlReply("ready")
+  end
+  while emu.hasControlInput() do
+    local line = emu.popControlLine()
+    if line then
+      -- Try expression form first (so `lua 1+1` returns 2), then statement form.
+      local chunk, err = load("return " .. line, "=control")
+      if not chunk then
+        chunk, err = load(line, "=control")
+      end
+      if not chunk then
+        emu.pushControlReply("err " .. tostring(err))
+      else
+        local ok, result = pcall(chunk)
+        if ok then
+          emu.pushControlReply("ok " .. tostring(result))
+        else
+          emu.pushControlReply("err " .. tostring(result))
+        end
+      end
+    end
+  end
+end
+
 local timerDelta = 0.2
 local timerUpdatePeriod = timerDelta * app.GRAPHICS_REFRESH_RATE
 local timerUpdateCount = timerUpdatePeriod
 local function onDisplayReady()
+  if app.EMULATION then
+    drainControl()
+  end
   if timerUpdateCount < timerUpdatePeriod then
     timerUpdateCount = timerUpdateCount + 1
   else

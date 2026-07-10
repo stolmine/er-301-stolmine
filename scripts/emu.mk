@@ -20,8 +20,11 @@ c_sources := $(foreach D,$(src_dirs),$(call rwildcard,$D,*.c))
 
 objects := $(addprefix $(out_dir)/,$(c_sources:%.c=%.o) $(cpp_sources:%.cpp=%.o)) 
 
-# Manually add objects 
+# Manually add objects
 objects += $(out_dir)/od/glue/app_swig.o
+# SWIG-generated emu module (emu/emu.cpp.swig) — exposes emu.* to Lua, including
+# the headless control bridge (hasControlInput/popControlLine/pushControlReply).
+objects += $(out_dir)/emu/emu_swig.o
 objects += $(out_dir)/libs/SDL_FontCache/SDL_FontCache.o
 
 ifeq ($(ARCH),linux)

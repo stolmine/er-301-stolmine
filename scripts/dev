@@ -73,8 +73,21 @@ do_build() {
 }
 
 do_test() {
-  echo "no test harness yet (tests/ pending)"
-  return 0
+  # Run the headless-emu harness when there are tests AND a built emu binary.
+  # The emu core with --headless/control-channel support is a separate work item
+  # (planning/headless-emu-plan.md); until it is built, skip gracefully (exit 0).
+  local emu_bin="${STOL_EMU_BIN:-$ROOT/testing/linux-x86_64/emu/emu.elf}"
+  if ! ls "$ROOT"/tests/emu/*.test >/dev/null 2>&1; then
+    echo "no emu tests found (tests/emu/*.test)"
+    return 0
+  fi
+  if [ ! -x "$emu_bin" ]; then
+    echo "emu tests present but no emu binary ($emu_bin) — skipping."
+    echo "  build it, then: python3 tools/emu_test.py  (or: scripts/dev test)"
+    return 0
+  fi
+  log "python3 tools/emu_test.py"
+  python3 tools/emu_test.py
 }
 
 do_check()  { python3 tools/ledger.py check; }

@@ -80,8 +80,27 @@ plan and code drift, update both.*
 | `lua CODE` | run CODE on the Lua thread; reply = pcall result |
 | `quit` | clean shutdown (same path as SDL_QUIT) |
 
-Commands execute strictly in order; `wait`/`frames` gate the queue, so a
-script is deterministic without host-side sleeps.
+Commands execute strictly in order; `wait`/`frames`/`stable`/`press`/`lua` gate
+the queue, so a script is deterministic without host-side sleeps.
+
+**Reply sigil (as built 2026-07-09).** The firmware logs to *stdout* unprefixed
+(`emu/hal/log.c` → `Uart_write` → `fwrite(stdout)`), so control replies are
+prefixed with `@` and terminated by a newline, letting a harness filter them
+with a `^@` match. Replies:
+
+- `@ready` — unsolicited, pushed once by `Application.lua` the first time the
+  drain runs (boot-complete handshake; scripts wait for it).
+- `@ok` / `@ok <detail>` — command succeeded. `lua`/`cap` carry the tostring'd
+  pcall result (`@ok 2`, `@ok true`); `stable` carries the resolving frame index.
+- `@err <msg>` — parse error, bad/missing argument, unknown command or button,
+  or `@err timeout` when a `stable` gate expires.
+
+`press` replies `@ok` only after its scheduled release fires (it gates the
+queue for the hold). Toggle positions accept `up|center|down` (`middle` aliases
+`center`). `turn N` adds raw detent units to the encoder accumulator (no scale
+factor), matching the SDL arrow-key path. Under `--headless`, EOF on stdin with
+nothing pending and no active gate exits cleanly, so a trailing `quit` is
+optional.
 
 ## 3. Phases → ledger items
 
@@ -117,21 +136,43 @@ golden-baseline convention: scripts + baselines under `testing-assets/emu/`
 settle or are out of golden scope. This is the item that turns
 `verify.kind="screenshot"` into a real BDG gate.
 
-## 4. File touch list
+## 4. File touch list (as built 2026-07-09)
 
-- `emu/Emulator.{h,cpp}` — flag parsing, window null-guards, loop hooks,
-  timed press scheduler
-- `emu/Control.{h,cpp}` (new) — channel, parser, queues
-- `emu/emu.h` + `emu/emu.cpp` — the three Lua-bridge functions (appended;
-  free functions, ABI-safe per repo rules)
-- `xroot/Application.lua` — drain branch (~10 lines, `app.EMULATION`-guarded)
-- `scripts/emu.mk` — add Control.cpp to the emu source list
+- `emu/Emulator.{h,cpp}` — `--headless`/`--control`/`--seed` parsing, window
+  null-guards, control read+dispatch+gate state machine, timed `press`
+  scheduler, `@`-reply helper. Also registers the `emu` Lua module via a local
+  `EmuInterpreter : AppInterpreter` subclass (the base's `L` is `protected`, so
+  the subclass calls `luaL_requiref(L, "emu", luaopen_emu, 1)`) — this avoids
+  touching `od/glue/AppInterpreter.cpp`, keeping kernel.bin untouched.
+- `emu/Control.{h,cpp}` (new) — non-blocking fd (stdin/FIFO) line reader plus
+  the two SPSC `LockFreeQueue<char*>` bridges (loop→lua, lua→loop). Auto-globbed
+  into the build by `emu.mk`'s recursive `*.cpp` wildcard (no manual listing).
+- `emu/emu.h` + `emu/emu.cpp` — the three Lua-bridge free functions (appended,
+  ABI-safe), delegating to the process-wide `controlChannel()`.
+- `emu/hal/rng.c` — `--seed` splitmix64 deterministic mode; `Rng_seed(uint32_t)`
+  is defined here and forward-declared in `Emulator.cpp` (NOT added to
+  `hal/rng.h`, so the firmware header is untouched). Unseeded path unchanged.
+- `xroot/Application.lua` — `drainControl()` helper (defined before
+  `onDisplayReady` to avoid a nil forward-binding) called from `onDisplayReady`
+  under `app.EMULATION`.
+- `scripts/emu.mk` — add `emu/emu_swig.o` (the SWIG `emu` module, previously
+  built only into `libemu.so`) to the `emu.elf` object list.
 - No firmware-side (`od/`, `hal/`) changes at all; kernel.bin unaffected.
 
 ## 5. Risks and conventions
 
-- **SDL dummy audio callback pacing** — the Phase A gate; fallback pacer
-  thread if needed.
+- **SDL dummy audio callback pacing** — RESOLVED 2026-07-09. Measured with a
+  temporary counter in `playCallback` under `SDL_AUDIODRIVER=dummy`: the dummy
+  driver fires the callback at simulated-realtime pace (~400 calls over ~90 UI
+  frames). No fallback pacer thread needed; probe removed after measurement.
+- **GPIO poll cadence / min hold** — measured 2026-07-09. The emulator is NOT
+  polled: `emu/hal/gpio.c` `Gpio_write` pushes the PRESS/RELEASE event
+  synchronously at the edge (no debounce), so any hold ≥0 registers a tap. The
+  only frame-quantized step is `hal/events.cpp` `check()` (button-repeat +
+  encoder delta), run once per `Events_wait()` ≈ once per UI frame (~14–18 ms).
+  REPEAT needs the button held ~`REPEAT_DELAY+REPEAT_PERIOD` = 28 frames
+  (~0.4 s). So the 60 ms `press` default (~3–4 frames) is a safe tap that spans
+  ≥1 frame yet never trips repeat; kept at 60 ms.
 - **Boot-time commands**: the C++ queue accepts input before Lua is up;
   Application.lua pushes an unsolicited `ready` line when the drain starts —
   scripts begin with waiting for `ready`.
@@ -194,3 +235,74 @@ hand-guessing button sequences; the runner can assert arrival via the node
 predicate. Derived from xroot sources + GETTING_STARTED.md + SEQUENCER.md;
 maintained as code changes (it is itself BDG-checkable later via a
 reachability smoke test).
+
+## 9. Harness-layer implementation notes (added 2026-07-09, tools/emu_test.py)
+
+Built alongside the emu core. Where the harness's realized design differs from
+the sketch above, this section is authoritative; reconcile the two when they drift.
+
+- **`!packages NAME` targets the FRONT package repo, not "rear root".** §7 called
+  the sandbox package destination the rear root, but the emu reads its `.pkg`
+  repository from `0:/ER-301/packages` on the FRONT card (`xroot/Package/
+  Manager.lua:51`) and installs into rear libs. The runner therefore copies
+  `NAME-*.pkg` into `<sandbox>/front/ER-301/packages/`. Sources, in order:
+  `$STOL_EMU_PKG_DIR`, `testing/linux-x86_64/mods/`, `~/.od/front/ER-301/
+  packages/`, `~/.od/rear/`. OPEN for integration: whether the emu auto-installs
+  a repo archive on boot, or whether a pre-install step / rear-meta `packages` db
+  entry is also needed for units to appear in the picker.
+
+- **Determinism lever beyond §6:** the settings fixture also sets
+  `animation = "disabled"` (freezes GUI tweens so screens settle at once) and
+  `restoreLastSlotAction = "no"` (the default `prompt` pops a boot dialog that
+  would block scripted boot). Screensaver is set to its max ("1 day") since there
+  is no "off". The breathing-cursor tween is still not frozen — goldens avoid it.
+
+- **`!expect REGEX` asserts on the PRECEDING command's reply**, not a freshly read
+  line — every control command already consumes exactly one reply in lockstep, so
+  "the next reply" is stored as `last_reply` and `!expect` matches it. Escape
+  hatch for pattern-matching a raw reply (e.g. after a `lua`).
+
+- **Reply parsing tolerates two framings.** The runner treats a stdout line
+  starting with `REPLY_SIGIL` (`@`) as a reply and normalizes both `@ok true`
+  and bare `@true` for `!assert` (strips a leading `ok `). Recognize predicates in
+  `ui-map.toml` are written as bare Lua expressions (no `return`/`local`) so they
+  work whether the core evals `lua CODE` as `load("return "..CODE)` or with a
+  return-prefix-then-fallback. The sigil + `READY_TOKEN` are single constants at
+  the top of `tools/emu_test.py` — the integration seam.
+
+- **emu.session hermeticity caveat.** `Emulator::loadConfiguration` overrides
+  XROOT/FRONT_ROOT/REAR_ROOT but NOT `sessionFilename`, which stays
+  `~/.od/emu.session` (window geometry). Harmless for headless app-state
+  determinism (card state is fully sandboxed), but if headless ever persists
+  meaningful state there, route it through the sandbox too.
+
+- **Verified at bench (pre-core):** the current emu boots cleanly on the hermetic
+  fixtures to "Application.loop: entering event loop" with fresh card state (boot
+  count 1, last slot -1) and no `~/.od` bleed; it does not yet emit `@ready`
+  (control channel unlanded), so the watchdog fails the test cleanly with a log
+  tail — the exact expected integration boundary.
+
+## 10. Integration findings (2026-07-09, verified live)
+
+Both agent workstreams integrated and driven against the real emu.elf:
+
+- **Session-bleed determinism bug found + fixed.** `~/.od/emu.session` is NOT
+  sandboxed, and `restoreState`/`saveState` round-trip the STORAGE + MODE toggle
+  GPIO through it. A prior run's toggle state therefore bled into every later
+  boot, changing the boot context (MODE bled → ScopeView vs Chain.Root; STORAGE
+  bled → admin vs user). Fix: headless mode skips restoreState/saveState
+  entirely and sets a fixed default (STORAGE=user, MODE=0 → boots on
+  `user`/`Chain.Root`). This was invisible until live driving — it masked the
+  true boot default in BOTH directions. Lesson for the fixture model: state can
+  leak through paths outside FRONT_ROOT/REAR_ROOT.
+- **Verified boot default:** clean headless boot lands on context `Admin`? no —
+  top window `Chain.Root`, storage state `user`. `animation="disabled"` in the
+  settings fixture freezes tweens, so static screens are golden-stable (admin
+  golden generated and re-matched byte-identical).
+- **Toggle map (verified):** `storage up`→user (Chain.Root), `storage center`→
+  admin (Menu / instance Admin), `storage down`→eject (Card.StatusViewer).
+- **Picker nav still open:** the unit chooser opens from a focused empty insert
+  section only; the chain-cursor gesture to reach it at boot is undiscovered.
+  Parked as tests/emu/20-picker-open.test.todo, owned by emu-ui-map.
+- **Suite status:** 00-boot + 10-admin-nav green against real emu; runner,
+  sandbox, seed, capture, determinism, stable all confirmed on hardware paths.

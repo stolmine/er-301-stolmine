@@ -1,9 +1,26 @@
 #include <emu/emu.h>
 #include <emu/Emulator.h>
+#include <emu/Control.h>
 
 namespace emu
 {
   static Emulator emulator;
+
+  // [stol:emu-lua-eval] Lua-thread side of the control bridge.
+  bool hasControlInput()
+  {
+    return controlChannel().hasLua();
+  }
+
+  const char *popControlLine()
+  {
+    return controlChannel().popLua();
+  }
+
+  void pushControlReply(const char *reply)
+  {
+    controlChannel().pushReply(reply);
+  }
 
   DisplayBuffer *getDisplayBuffer()
   {

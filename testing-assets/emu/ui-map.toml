@@ -1,0 +1,180 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# ER-301 (stolmine) UI map — machine-readable contexts + gestures.
+# Spec: planning/headless-emu-plan.md §8 (ledger item emu-ui-map).
+#
+# NODES = UI contexts. Each has:
+#   desc       one line
+#   recognize  a Lua expression returning true iff that screen is on top. Used
+#              with the harness `!assert <recognize>` directive (tools/emu_test.py
+#              sends `lua <expr>` and requires the reply "true").
+#
+# EDGES = gesture sequences (control-protocol lines, planning/…-plan.md §2) that
+# move from one node to another. `gesture` is a list of literal protocol lines.
+#
+# THE LINCHPIN accessor (verified): the visible screen is the top window of the
+# single visible Context —
+#   require('Application').getVisibleContext():top():getClassName()
+# with getVisibleContext():getInstanceName() as the tie-breaker for the four
+# channel/mode variants that share a class.
+#   Application.getVisibleContext  xroot/Application.lua:74-76,563
+#   Context:top                    xroot/Base/Context.lua:80-82
+#   Object:getClassName            xroot/Base/Object.lua:28-30
+#
+# CONFIDENCE: each recognize/edge is tagged high/medium/low in a comment. I could
+# NOT run the emulator (the core may be unbuilt), so these are code-derived. The
+# planned reachability smoke test (drive each inbound edge from boot, assert the
+# recognize predicate) VALIDATES this map at integration; treat medium/low tags
+# as "verify first".
+#
+# Control-protocol note: chorded gestures (e.g. SHIFT+ENTER) are expressed as an
+# explicit down/press/up sequence. Toggle switches use `mode {up,center,down}`
+# and `storage {up,center,down}` (absolute position). The two toggles are
+# ORTHOGONAL: STORAGE selects the top-level Mode (user/admin/eject), MODE selects
+# the per-channel view (hold/edit/scope). Mappings verified in
+# xroot/boot/app-setup.lua:145-163 and emu/Window.h:133-134.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[meta]
+accessor = "require('Application').getVisibleContext():top():getClassName()"
+tiebreaker = "require('Application').getVisibleContext():getInstanceName()"
+boot_node = "home"
+
+
+# ── nodes ────────────────────────────────────────────────────────────────────
+
+[node.home]
+desc = "Main per-channel chain edit view (default after boot). MODE=edit, STORAGE=user."
+# high — xroot/Chain/Root.lua:14 setClassName; editContext top window is the chain
+# (xroot/Channels/Group.lua:45). Instance name is e.g. "OUT1 edit".
+recognize = "require('Application').getVisibleContext():top():getClassName() == 'Chain.Root'"
+
+[node.scope]
+desc = "Per-channel oscilloscope / overview view. MODE=scope."
+# high — xroot/Chain/ScopeView.lua:9,15; context xroot/Channels/Group.lua:46.
+recognize = "require('Application').getVisibleContext():top():getClassName() == 'Chain.ScopeView'"
+
+[node.sequencer]
+desc = "Grid sequencer takeover (a sub-view of scope mode)."
+# high — xroot/Sequencer/GridView.lua:192 setClassName; xroot/Channels/Group.lua:47.
+recognize = "require('Application').getVisibleContext():top():getClassName() == 'Sequencer.GridView'"
+
+[node.hold]
+desc = "Hold / scene performance view for the current channel. MODE=hold (legacy PinView path)."
+# high for PinView (xroot/PinView/init.lua:12); the scene-mode path shows the
+# SceneView performance view instead when sceneMode='on' — verify that class if
+# scene mode is enabled (medium).
+recognize = "require('Application').getVisibleContext():top():getClassName() == 'PinView'"
+
+[node.admin]
+desc = "Admin / System menu (Sample Pool, Global Chains, Settings, Firmware, …). STORAGE=admin."
+# high — Context('Admin', Menu('Admin')) xroot/AdminMode/init.lua:112; Menu class
+# + instance name xroot/AdminMode/Menu.lua:29-31. Bare expression (no `return`/
+# `local`) so a `lua` eval that wraps code as `return <expr>` works.
+recognize = "require('Application').getVisibleContext():top():getClassName() == 'Menu' and require('Application').getVisibleContext():getInstanceName() == 'Admin'"
+
+[node.unit_picker_dense]
+desc = "Dense 2-column unit chooser (pickerStyle='dense', the fixture default)."
+# high (given the dense setting) — xroot/Unit/Chooser/Dense.lua:236 setClassName.
+recognize = "require('Application').getVisibleContext():top():getClassName() == 'Unit.Chooser.Dense'"
+
+[node.unit_picker_classic]
+desc = "Classic Mondrian unit chooser (pickerStyle='original'; Category/A-to-Z share this class)."
+# high for the Default class (xroot/Unit/Chooser/Default.lua:168); the Preset
+# sub-mode class string ('Unit.Chooser.Preset') was inferred, not read (medium).
+recognize = "require('Application').getVisibleContext():top():getClassName() == 'Unit.Chooser.Default' or require('Application').getVisibleContext():top():getClassName() == 'Unit.Chooser.Preset'"
+
+[node.sample_pool]
+desc = "Sample pool browser (list + detail, load/create/slice)."
+# high — xroot/Sample/Pool/Interface.lua:31 setClassName.
+recognize = "require('Application').getVisibleContext():top():getClassName() == 'SamplePool.Interface'"
+
+[node.quicksave]
+desc = "Quicksave save/load slot grid. Reachable from most screens via SHIFT+MAIN1."
+# high — xroot/Persist/QuickSaver.lua:275 setClassName.
+recognize = "require('Application').getVisibleContext():top():getClassName() == 'QuickSaver'"
+
+
+# ── edges ────────────────────────────────────────────────────────────────────
+
+# home is the boot node; the toggle edges below are absolute so they also serve
+# as "return to a known state" from wherever you are.
+
+[[edge]]
+from = "home"
+to = "scope"
+# high — MODE toggle DOWN => "scope" (app-setup.lua:148-149; Group.lua:154-161).
+gesture = ["mode down", "frames 10"]
+
+[[edge]]
+from = "scope"
+to = "home"
+# high — MODE toggle CENTER => "edit".
+gesture = ["mode center", "frames 10"]
+
+[[edge]]
+from = "home"
+to = "hold"
+# high — MODE toggle UP => "hold" (app-setup.lua:146-147; Group.lua:162-179).
+gesture = ["mode up", "frames 10"]
+
+[[edge]]
+from = "scope"
+to = "sequencer"
+# high — SHIFT+ENTER => commitReleased => Channels.toggleSequencerSubView
+# (xroot/Chain/ScopeView.lua:137-142; Application.lua:306-311). Same gesture
+# toggles back to scope.
+gesture = ["down SHIFT", "press ENTER", "up SHIFT", "frames 10"]
+
+[[edge]]
+from = "home"
+to = "admin"
+# high — STORAGE toggle CENTER => admin (app-setup.lua:160-161; Application.lua:104-105).
+gesture = ["storage center", "frames 10"]
+
+[[edge]]
+from = "admin"
+to = "home"
+# high — STORAGE toggle UP => user (back to the channel edit view).
+gesture = ["storage up", "frames 10"]
+
+[[edge]]
+from = "home"
+to = "unit_picker_dense"
+# medium — on the empty boot chain an InsertControl is focused; ENTER =>
+# activateChooser => UnitChooser:show (xroot/Chain/InsertControl.lua:53-65,62-64).
+# Which class appears is governed by pickerStyle (dense in the fixture). If ENTER
+# does not land on an insert slot at boot, integration adds a focus gesture first.
+gesture = ["press ENTER", "frames 12"]
+
+[[edge]]
+from = "unit_picker_dense"
+to = "home"
+# high — CANCEL (DIAL2) closes the chooser (xroot/Unit/Chooser/init.lua:410-435).
+gesture = ["press DIAL2", "frames 10"]
+
+[[edge]]
+from = "admin"
+to = "sample_pool"
+# medium — Sample Pool is the first Admin menu item (xroot/AdminMode/init.lua:22);
+# the MAIN key under it fires mainReleased => destination:show. Exact MAIN index
+# depends on scroll/layout — verify at integration.
+gesture = ["press MAIN1", "frames 12"]
+
+[[edge]]
+from = "sample_pool"
+to = "admin"
+# high — CANCEL/UP pops the pool window back to the Admin menu.
+gesture = ["press DIAL2", "frames 10"]
+
+[[edge]]
+from = "home"
+to = "quicksave"
+# high — SHIFT+MAIN1 handled at the Context level (xroot/Base/Context.lua:196-213),
+# gated on Card.mounted(). Works over most screens, not just home.
+gesture = ["down SHIFT", "press MAIN1", "up SHIFT", "frames 12"]
+
+[[edge]]
+from = "quicksave"
+to = "home"
+# high — CANCEL closes the quicksaver.
+gesture = ["press DIAL2", "frames 10"]

@@ -1,0 +1,11 @@
+# Boot smoke test: reach the running app, confirm the home screen, exit clean.
+# The runner awaits the unsolicited `ready` reply before this first line, then
+# gates on rendered frames (never wallclock) per planning/headless-emu-plan.md §6.
+
+frames 30
+# Basic app-state sanity: the Lua interpreter is live and in emulation mode.
+!assert app.EMULATION == true
+# Home = the per-channel chain edit view (verified live 2026-07-09 against a
+# clean sandbox: headless boot lands on user/Chain.Root; see ui-map.toml 'home').
+!assert require('Application').getVisibleContext():top():getClassName() == 'Chain.Root'
+quit

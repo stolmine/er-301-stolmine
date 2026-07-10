@@ -1,0 +1,16 @@
+# Admin navigation: home -> admin via the STORAGE toggle (edge in ui-map.toml),
+# confirm arrival with the node's recognize predicate, then golden the menu.
+
+frames 20
+!assert require('Application').getVisibleContext():top():getClassName() == 'Chain.Root'
+
+# STORAGE toggle to center selects AdminMode.
+storage center
+frames 20
+!assert require('Application').getVisibleContext():top():getClassName() == 'Menu' and require('Application').getVisibleContext():getInstanceName() == 'Admin'
+
+# The admin menu is a static screen (animation disabled by the fixture), so it is
+# a valid golden target. First run: STOL_UPDATE_GOLDEN=1 to create the baseline.
+!golden admin
+
+quit
