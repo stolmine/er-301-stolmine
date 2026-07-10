@@ -854,9 +854,10 @@ links = { depends_on = [] }
 [[item]]
 id = "ui-model-facility"
 title = "Deterministic UI model for agent-driven 301 operation (umbrella)"
-status = "todo"
-stamped = "2026-07-10T16:02:55-05:00"
+status = "done"
+stamped = "2026-07-10T16:52:44-05:00"
 area = "emu"
+attested = "2026-07-10: Facility complete: an agent can plan and execute a novel target UI state from the model with the headless emu confirming arrival, no trial-and-error. Children all done: ui-model-{gesture-catalog, introspect, manifest, planner}. Proven live via tools/ui_plan.py --run on the link+insert+focus+control_at goal (the Network-on-M1 scenario generalized to a hermetic core unit). Commit bc6f6a2."
 verify = { kind = "manual", ref = "an agent can, from the UI model, plan and execute a novel target state (e.g. stereo-link 1+2, insert Network, glitch graphic on M1) and the headless emu confirms arrival — no trial-and-error probing" }
 note = "planning/ui-model-plan.md. The 301 UI is a dispatch-by-named-method state machine over a window/context stack; both state and affordances are derivable from Lua (statically) or by reflecting live objects (dynamically). Umbrella over ui-model-{gesture-catalog, introspect, manifest, planner}; done when children close. Motivating proof: the 2026-07-10 Network-on-M1 run derived every gesture from code by hand."
 links = { depends_on = [] }
@@ -898,9 +899,10 @@ links = { depends_on = [] }
 [[item]]
 id = "ui-model-planner"
 title = "Goal -> gesture-sequence path planner, verified by driving the emu"
-status = "todo"
-stamped = "2026-07-10T16:02:55-05:00"
+status = "done"
+stamped = "2026-07-10T16:52:44-05:00"
 area = "emu"
+attested = "2026-07-10: tools/ui_plan.py: goal (link/insert/focus/control_at/context) -> gesture sequence via BFS over ui-map.toml + manifest slot-maps + docs/UI_OPERATION.md gestures, offline with live uiState() fallback for runtime-dependent steps (which MAIN column holds EmptyControl, dense-picker row of a channel-count-filtered unit). Verified: --selftest 15 checks green (offline plan correctness); --run drives the emu and confirms a NOVEL goal end-to-end (link 1+2 + insert Test Osc + focus + control_at M1/M2), all 6 steps PASS live; hermetic test 53-ui-plan-core-insert green. Emits map-growth suggestions (e.g. MAIN4 opens picker on a stereo chain) without auto-editing the map. Commit bc6f6a2."
 verify = { kind = "manual", ref = "tools/ui_plan.py takes a goal (link 1+2, insert Network, glitch on M1), produces a control-protocol sequence via ui-map.toml + the manifest/uiState, and a tests/emu integration executes it and confirms arrival with uiState asserts + a trace-golden" }
 note = "planning/ui-model-plan.md §4. LAST — depends on introspect + manifest as inputs. Context nav = BFS over verified ui-map.toml edges; control actions = manifest (offline) or uiState (live). Failed plan steps become corrected map edges (the map grows from planning failures). The Network-on-M1 scenario is the canonical acceptance test. Held for a follow-up dispatch after 1+2 verify."
 links = { depends_on = ["ui-model-introspect", "ui-model-manifest"] }
