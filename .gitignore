@@ -81,3 +81,7 @@ docs/manual/
 
 # agent worktrees (transient; never commit)
 .claude/worktrees/
+
+# python bytecode cache
+__pycache__/
+*.pyc
