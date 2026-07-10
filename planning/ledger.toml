@@ -680,9 +680,11 @@ links = { depends_on = ["emu-ui-trace-hooks", "emu-harness-runner"] }
 [[item]]
 id = "infra-crash-diag-format"
 title = "Crash report schema v2 + offline symbolication tool"
-status = "todo"
-stamped = "2026-07-09T22:55:14-05:00"
+status = "done"
+stamped = "2026-07-10T08:05:02-05:00"
 area = "infra"
+anchor = true
+attested = "2026-07-10: docs/CRASH_REPORT_FORMAT.md schema v2 + tools/symbolize_crash.py; xroot/CrashReport.lua writes conformant reports. Verified: --selftest 4/4 (resolver, mock-addr2line file:line, graceful degrade); an injected report parses + symbolizes. Commit be4076f."
 verify = { kind = "manual", ref = "feed tools/symbolize_crash.py a sample report (module map + a matching build .so) and confirm it resolves pc/lr offsets to file:line via arm-none-eabi-addr2line" }
 note = "planning/crash-diagnostics-plan.md §2. One text schema written by both the C hook (hardware) and the emu injector (testing), read by the on-device viewer and the host tool. Extends the current front/crash.log block (xroot/Crash.lua). Foundation for everything else."
 links = { depends_on = [] }
@@ -690,9 +692,11 @@ links = { depends_on = [] }
 [[item]]
 id = "infra-crash-diag-module-map"
 title = "Module map: enumerate kernel + loaded package text/data bases"
-status = "todo"
-stamped = "2026-07-09T22:55:14-05:00"
+status = "done"
+stamped = "2026-07-10T08:05:02-05:00"
 area = "infra"
+anchor = true
+attested = "2026-07-10: od::ElfFile public text/data accessors + hal/modulemap.h enumerator, two arch impls (am335x over dlopen mLoaded, emu over dl_iterate_phdr). Verified in emu: map renders non-empty (kernel + 23 objects), test 40 green. am335x runtime path compiles (make firmware exit 0); its live capture is exercised by the hardware half. Commit be4076f."
 verify = { kind = "manual", ref = "emit the module map with several packages loaded; confirm each package's runtime text base+size match the dlopen registry, and a known PC resolves to the correct package+offset" }
 note = "planning/crash-diagnostics-plan.md §0.2. Add public accessors to od::ElfFile (mpTextSpace/mTextSize/mpDataSpace/mDataSize, arch/am335x/hal/dynload/ElfFile.h) and a dlfcn enumerator over mLoaded (dlfcn.cpp:12). Partly emu-verifiable: packages ARE loaded in the emu even though no trap occurs there, so the map itself renders. ElfFile is internal firmware (not SWIG-exposed) so appended accessors are ABI-safe."
 links = { depends_on = ["infra-crash-diag-format"] }
@@ -700,9 +704,11 @@ links = { depends_on = ["infra-crash-diag-format"] }
 [[item]]
 id = "infra-crash-diag-flight-recorder"
 title = "Flight recorder: ring of recent crash-trigger events"
-status = "todo"
-stamped = "2026-07-09T22:55:14-05:00"
+status = "done"
+stamped = "2026-07-10T08:05:02-05:00"
 area = "infra"
+anchor = true
+attested = "2026-07-10: od/extras/FlightRecorder C ring (N=32) + seams at unit insert (Chain/Base) and preset/quicksave load (Persist). Verified: test 44 records a real insert when armed; test 41 confirms zero-cost-when-off. Commit be4076f."
 verify = { kind = "manual", ref = "perform a sequence of unit inserts + engine/mode switches + a preset load; confirm the flight-recorder ring holds the last N events with timestamps and appears in a captured report" }
 note = "planning/crash-diagnostics-plan.md §3. Every historical hardware crash was user-action-triggered (insert, engine/mode switch, preset load). A small fixed-size ring updated at those seams. Emu-verifiable (the events fire in the emu). Zero cost when debug mode off."
 links = { depends_on = ["infra-crash-diag-format"] }
@@ -710,9 +716,11 @@ links = { depends_on = ["infra-crash-diag-format"] }
 [[item]]
 id = "infra-crash-diag-emu-inject"
 title = "Emulator affordance to inject a synthetic crash report"
-status = "todo"
-stamped = "2026-07-09T22:55:14-05:00"
+status = "done"
+stamped = "2026-07-10T08:05:02-05:00"
 area = "emu"
+anchor = true
+attested = "2026-07-10: CrashReport.injectSynthetic(kind), app.EMULATION-guarded, driven via the lua control command; writes a schema-v2 block (canned regs + real emu module map + flight recorder) + a front/crash.pending marker. Verified: independent injection produced a conformant report; tests 42/43 green. Commit be4076f."
 verify = { kind = "manual", ref = "via an emu-only command/setting, drop a canned crash record; confirm the on-boot crash screen and admin viewer render it, driven headless by a tests/emu script" }
 note = "planning/crash-diagnostics-plan.md §1. THE seam that makes the presentation half testable without hardware: the capture can't run in the emu, but a synthetic record lets the UI + format render under the golden/trace harness. Emu-only, app.EMULATION-guarded."
 links = { depends_on = ["infra-crash-diag-format"] }
@@ -720,9 +728,11 @@ links = { depends_on = ["infra-crash-diag-format"] }
 [[item]]
 id = "infra-crash-diag-debug-mode-ui"
 title = "Debug-mode admin toggle + on-boot crash screen + past-report viewer"
-status = "todo"
-stamped = "2026-07-09T22:55:14-05:00"
+status = "done"
+stamped = "2026-07-10T08:05:02-05:00"
 area = "ui"
+anchor = true
+attested = "2026-07-10: enableCrashDiagnostics setting arms the ring; on-boot crash notice (CrashReport.checkPendingOnBoot) + AdminMode 'Crash Reports' viewer (CrashReportViewer.lua). Verified in emu: test 42 asserts the boot notice + golden crash-notice, test 43 lists two injected reports + opens detail scroll. Commit be4076f."
 verify = { kind = "screenshot", ref = "with an injected report present, boot shows a 'crash captured' screen; the admin diagnostics viewer lists and displays past reports; captured as a tests/emu golden/trace" }
 note = "planning/crash-diagnostics-plan.md §3. Arms the capture (sibling to enableDevMode, xroot/Settings/init.lua:121) and surfaces results: on-boot notice (model: xroot/Crash.lua dialog) + an admin viewer to browse front/crash.log reports. Fully emu-verifiable via infra-crash-diag-emu-inject + the tests/emu harness."
 links = { depends_on = ["infra-crash-diag-format", "infra-crash-diag-emu-inject"] }
