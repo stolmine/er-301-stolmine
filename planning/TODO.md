@@ -5,7 +5,7 @@ ER-301-STOLMINE TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**60 items** — 39 done, 19 todo, 2 blocked. *Rendered 2026-07-09.*
+**60 items** — 42 done, 16 todo, 2 blocked. *Rendered 2026-07-09.*
 
 ## Sequencer
 
@@ -73,9 +73,6 @@ check`): a `done` item must have a real test or its named artifact.*
 
 | | id | item | verify |
 |---|---|---|---|
-|   | `emu-trace-golden` | Golden trace comparison: test runs produce transition logs diffable against baselines and the UI map | manual · 2026-07-09 |
-|   | `emu-ui-map` | Machine-readable UI map: contexts as nodes with Lua recognition predicates, gestures as edges | manual · 2026-07-09 |
-|   | `emu-ui-trace-hooks` | UI-seam trace hooks emit frame-stamped structured transition events to the control channel | manual · 2026-07-09 |
 | ✓ | `emu-capture-deterministic` | Same UI state produces a byte-identical capture | screenshot: drive the emulator to a fixed UI state, settle, and capture twice; confirm the two PNGs are byte-identical (diff clean); document the settle convention for animated elements *(attested)* · 2026-07-09 |
 | ✓ | `emu-capture-fb` | Capture command dumps the framebuffers decoded to PNG | screenshot: send 'cap testing-assets/emu/<name>.png'; confirm the PNG matches the on-screen content of a known static screen (both displays composited) *(attested)* · 2026-07-09 |
 | ✓ | `emu-cmd-buttons` | Button press/release commands with hold duration via Gpio_write | manual *(attested)* · 2026-07-09 |
@@ -88,7 +85,10 @@ check`): a `done` item must have a real test or its named artifact.*
 | ✓ | `emu-hermetic-sandbox` | Per-run sandbox: front/rear roots built from committed fixtures, no state bleed between runs | manual *(attested)* · 2026-07-09 |
 | ✓ | `emu-lua-eval` | Lua expression command routed to the app interpreter | manual *(attested)* · 2026-07-09 |
 | ✓ | `emu-seed-flag` | --seed N makes the emulator's RNG deterministic | manual *(attested)* · 2026-07-09 |
+| ✓ | `emu-trace-golden` | Golden trace comparison: test runs produce transition logs diffable against baselines and the UI map | manual *(attested)* · 2026-07-09 |
+| ✓ | `emu-ui-map` | Machine-readable UI map: contexts as nodes with Lua recognition predicates, gestures as edges | manual *(attested)* · 2026-07-09 |
 | ✓ | `emu-ui-pacer-fix` | Emulator UI loop pacer hits real 55 fps (matches hardware refresh) | manual *(attested)* · 2026-07-09 |
+| ✓ | `emu-ui-trace-hooks` | UI-seam trace hooks emit frame-stamped structured transition events to the control channel | manual *(attested)* · 2026-07-09 |
 
 ## Documentation
 
