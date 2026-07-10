@@ -5,7 +5,7 @@ ER-301-STOLMINE TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**58 items** — 27 done, 29 todo, 2 blocked. *Rendered 2026-07-09.*
+**60 items** — 27 done, 31 todo, 2 blocked. *Rendered 2026-07-09.*
 
 ## Sequencer
 
@@ -85,7 +85,9 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `emu-hermetic-sandbox` | Per-run sandbox: front/rear roots built from committed fixtures, no state bleed between runs | manual · 2026-07-09 |
 |   | `emu-lua-eval` | Lua expression command routed to the app interpreter | manual · 2026-07-09 |
 |   | `emu-seed-flag` | --seed N makes the emulator's RNG deterministic | manual · 2026-07-09 |
+|   | `emu-trace-golden` | Golden trace comparison: test runs produce transition logs diffable against baselines and the UI map | manual · 2026-07-09 |
 |   | `emu-ui-map` | Machine-readable UI map: contexts as nodes with Lua recognition predicates, gestures as edges | manual · 2026-07-09 |
+|   | `emu-ui-trace-hooks` | UI-seam trace hooks emit frame-stamped structured transition events to the control channel | manual · 2026-07-09 |
 | ✓ | `emu-ui-pacer-fix` | Emulator UI loop pacer hits real 55 fps (matches hardware refresh) | manual *(attested)* · 2026-07-09 |
 
 ## Documentation

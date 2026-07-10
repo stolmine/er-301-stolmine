@@ -631,3 +631,23 @@ area = "emu"
 verify = { kind = "manual", ref = "testing-assets/emu/ui-map.toml parses; for each mapped node, executing its inbound edge sequence from boot lands on a screen whose recognize predicate returns true through 'lua'" }
 note = "planning/headless-emu-plan.md §8. Nodes: home, admin, unit picker, settings, sequencer takeover, sample pool, etc., each with a recognize lua predicate and fixture assumptions. Edges: control-protocol gesture sequences. Lets scripts and agents plot courses through the UI instead of hand-guessing button sequences; the runner asserts arrival via predicates. Derived from xroot + GETTING_STARTED.md + SEQUENCER.md. Future: a reachability smoke test makes the map itself BDG-checked."
 links = { depends_on = ["emu-lua-eval"] }
+
+[[item]]
+id = "emu-ui-trace-hooks"
+title = "UI-seam trace hooks emit frame-stamped structured transition events to the control channel"
+status = "todo"
+stamped = "2026-07-09T21:23:39-05:00"
+area = "emu"
+verify = { kind = "manual", ref = "with 'trace on', navigating home -> admin -> picker emits @trace lines (frame, kind, detail) for each context/window transition through the control channel; 'trace off' silences them; hardware build unaffected" }
+note = "The UI seams are already centralized choke points (verified 2026-07-09): Application.setVisibleContext (xroot/Application.lua:78) for context switches, Window:show/hide (xroot/Base/Window.lua:23,33) for window lifecycle, Context:add/remove (xroot/Base/Context.lua:107,126) for stack push/pop, and Signal.emit (xroot/Signal.lua:22 — which already carries a commented-out app.TESTING trace hook, so this follows author intent). Design: one Lua trace module wrapping those seams, enabled/disabled via control commands (trace on [signal-filter] / trace off / trace mark LABEL for script-injected markers), emitting async frame-stamped lines (@trace <frame> <kind> <detail>) through the same reply path as emu-lua-eval. Guarded by app.EMULATION + runtime enable: zero hardware impact, zero cost when off. Frame stamps (not wallclock) keep traces deterministic per the plan's clock model. Signal.emit hooking must be filtered (the bus is chatty); default trace set = context/window/stack events only."
+links = { depends_on = ["emu-control-channel", "emu-lua-eval"] }
+
+[[item]]
+id = "emu-trace-golden"
+title = "Golden trace comparison: test runs produce transition logs diffable against baselines and the UI map"
+status = "todo"
+stamped = "2026-07-09T21:23:39-05:00"
+area = "emu"
+verify = { kind = "manual", ref = "a test with '!trace-golden NAME' records the run's @trace stream, normalizes it, and byte-compares against testing-assets/emu/goldens/<test>/<NAME>.trace; a deliberate route change fails with a readable diff; the reachability smoke test cross-checks observed transitions against ui-map.toml edges" }
+note = "The text-artifact complement to pixel goldens: traces diff cleanly, tolerate rendering changes, and diagnose WHERE a run diverged (which transition), not just that it did. Runner side: collect @trace lines per test, normalization pass (strip frame numbers OR bucket them — decide during implementation; raw frames are deterministic per the clock model but brittle to unrelated timing edits), golden compare with STOL_UPDATE_GOLDEN=1 regeneration, unified diff on mismatch. UI-map integration: each ui-map.toml edge may declare an expected arrival event (e.g. 'context:show admin'); the reachability smoke test walks the map and validates edges against observed traces — this makes the UI map itself BDG-checked and eventually allows regenerating map candidates from exploratory walks."
+links = { depends_on = ["emu-ui-trace-hooks", "emu-harness-runner"] }
