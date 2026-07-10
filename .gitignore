@@ -78,3 +78,6 @@ docs/planning/redesign/
 
 # Local-only personal study manual (lives in a separate private repo).
 docs/manual/
+
+# agent worktrees (transient; never commit)
+.claude/worktrees/
