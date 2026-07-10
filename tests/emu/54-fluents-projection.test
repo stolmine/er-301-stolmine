@@ -1,0 +1,70 @@
+# [stol:ui-planner-state-schema] Layer "state schema" -- live projection inputs.
+#
+# Proves that the LIVE UI state produces exactly the readback values that
+# tools/ui_fluents.py projects into fluents. The .test harness runs `lua` asserts
+# only (it cannot call the python projector), so this test certifies the
+# *projection inputs* at each state -- every assert below is annotated with the
+# fluent it certifies -- while tools/ui_fluents.py --selftest independently proves
+# project()/satisfies() over hand-authored bundles that mirror these exact values.
+# Together they close the loop: live state -> readbacks -> fluents -> satisfies.
+#
+# Two states are exercised: the boot Chain.Root state, and the proven
+# sequencer-cv1-at-C3 state (cv1 rows 0..5 == 3.0).
+
+frames 30
+
+# ── BOOT STATE ────────────────────────────────────────────────────────────────
+# topClass Chain.Root  =>  context(home)   (CONTEXT_BY_TOPCLASS mirror)
+!assert require('emu.UIState').topClass() == 'Chain.Root'
+# focus leaf class      =>  focused_class(Chain.Root)
+!assert require('emu.UIState').focusClass() == 'Chain.Root'
+# M-slot map            =>  slot_control(M1,ChainTitleControl) etc.
+!assert require('emu.UIState').controlClassAt('M1') == 'ChainTitleControl'
+!assert require('emu.UIState').controlClassAt('M2') == 'InputControl'
+!assert require('emu.UIState').controlClassAt('M3') == 'EmptySection.EmptyControl'
+# no modals at boot     =>  no modal(...) fluents
+!assert #require('emu.UIState').describe().modals == 0
+# no links at boot      =>  no linked(...) fluents
+!assert tostring(require('Channels').serialize().links.link12) == 'false'
+
+# ── DRIVE TO THE SEQUENCER cv1-at-C3 STATE ────────────────────────────────────
+# mode down -> scope, SHIFT+ENTER -> Sequencer.GridView (the proven recipe).
+mode down
+frames 10
+!assert require('emu.UIState').topClass() == 'Chain.ScopeView'
+down SHIFT
+press ENTER
+up SHIFT
+frames 10
+# topClass Sequencer.GridView  =>  context(sequencer)
+!assert require('emu.UIState').topClass() == 'Sequencer.GridView'
+!assert require('emu.UIState').focusClass() == 'Sequencer.GridView'
+
+# MAIN1 focuses the cv1 column (columnCursor 0). It also enters the editingL1
+# modal; markingMode reads truthy from its "idle" string (both surface as modal()
+# fluents, faithfully mirrored -- they do not affect the C3 goal, a subset).
+press MAIN1
+frames 8
+# columnCursor 0  =>  column_cursor(cv1)   (COLNAMES[0])
+!assert require('Application').getVisibleContext():top().columnCursor == 0
+
+# Set cv1 rows 0..5 to 3.0 directly on the sequencer task (bypasses the edit UI;
+# the projection reads these same cells back via seq:l1Value).
+lua (function() local s=app.AudioThread.getSequencerTask(); for r=0,5 do s:setL1(0,0,r,3.0) end; return true end)()
+frames 6
+
+# seq:l1Value(slot=0, col=0/cv1, row=r) == 3.0  =>  cell(0,cv1,r,3.0), r=0..5.
+# This is the exact set feeding the C3 goal {cell(0,cv1,0,3.0)..cell(0,cv1,5,3.0)}.
+!assert app.AudioThread.getSequencerTask():l1Value(0, 0, 0) == 3.0
+!assert app.AudioThread.getSequencerTask():l1Value(0, 0, 1) == 3.0
+!assert app.AudioThread.getSequencerTask():l1Value(0, 0, 2) == 3.0
+!assert app.AudioThread.getSequencerTask():l1Value(0, 0, 3) == 3.0
+!assert app.AudioThread.getSequencerTask():l1Value(0, 0, 4) == 3.0
+!assert app.AudioThread.getSequencerTask():l1Value(0, 0, 5) == 3.0
+# an untouched neighbouring column stays at its default (=> no stray cell fluent)
+!assert app.AudioThread.getSequencerTask():l1Value(0, 1, 0) == 0.0
+
+# uiState is a pure function of the settled state (determinism sanity).
+!assert require('emu.UIState').json() == require('emu.UIState').json()
+
+quit

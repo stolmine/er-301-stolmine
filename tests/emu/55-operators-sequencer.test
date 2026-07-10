@@ -1,0 +1,51 @@
+# [stol:ui-planner-operators] Operator-library acceptance: sequencer operators.
+#
+# Drives `select_column` then `set_cell` in the grid sequencer, asserting each
+# operator's effect fluent (and the modal(editingL1) the set_cell gesture passes
+# through). Reached via the map nav operators nav_home_to_scope +
+# nav_scope_to_sequencer (SHIFT+ENTER); the sequencer is firmware, no packages.
+#
+#   select_column (source=manifest, verified=static), instantiated col=tr:
+#     pre     context(sequencer) & ~column_cursor(tr)
+#     gesture ["press {col_main}", "frames 6"]  -> {col_main}=MAIN6 ([column_map].tr)
+#     eff     column_cursor(tr)      [ground truth: GridView.columnCursor == 5]
+#
+#   set_cell (source=manifest, verified=needs_crawl), instantiated slot0,col tr,row0,v1:
+#     pre     context(sequencer) & column_cursor(tr)
+#     gesture ["press ENTER", "turn 3", "frames 6"]  (ENTER->editingL1, encoder nudge)
+#     eff     cell(0,tr,0,1.0)       [ground truth: seq:l1Value(0,5,0) == 1.0]
+#   tr (transpose) col fine step = 1.0 clamped to integer semitones, so one encoder
+#   threshold (turn 3 = 3 raw detents) nudges the row-0 cell from 0 to exactly 1.0.
+
+frames 20
+!assert require('emu.UIState').topClass() == 'Chain.Root'
+
+# ── reach context(sequencer): nav_home_to_scope + nav_scope_to_sequencer ──────
+mode down
+frames 12
+!assert require('emu.UIState').topClass() == 'Chain.ScopeView'
+down SHIFT
+press ENTER
+up SHIFT
+frames 12
+!assert require('emu.UIState').topClass() == 'Sequencer.GridView'
+
+# ── select_column(tr): pre ~column_cursor(tr) (starts at cv1=col 0) ───────────
+!assert require('Application').getVisibleContext():top().columnCursor == 0
+press MAIN6
+frames 6
+# effect: column_cursor(tr)  (tr = column index 5)
+!assert require('Application').getVisibleContext():top().columnCursor == 5
+
+# ── set_cell(0,tr,0,1.0): cell starts at 0 ───────────────────────────────────
+!assert string.format('%.4f', app.AudioThread.getSequencerTask():l1Value(0,5,0)) == '0.0000'
+press ENTER
+frames 6
+# the set_cell gesture passes through modal(editingL1)
+!assert require('Application').getVisibleContext():top().editingL1 == true
+turn 3
+frames 6
+# effect: cell(0,tr,0,1.0)
+!assert string.format('%.4f', app.AudioThread.getSequencerTask():l1Value(0,5,0)) == '1.0000'
+
+quit

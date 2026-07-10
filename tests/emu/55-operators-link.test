@@ -1,0 +1,31 @@
+# [stol:ui-planner-operators] Operator-library acceptance: the link operator.
+#
+# Drives operator `link` (source=ui_plan, verified=static) instantiated at a=1,b=2:
+#   pre     context(home) & adjacent(1,2) & ~linked(1,2)
+#   gesture down SELECT1 / frames 6 / down SELECT2 / frames 6 /
+#           up SELECT2 / up SELECT1 / frames 10   (the {a}/{b} chord, substituted)
+#   eff     linked(1,2)
+# The fluent linked(1,2) is ground-truthed by Channels.serialize().links.link12.
+# Boot channels are empty so the link commits with no confirmation dialog and the
+# context is unchanged (a state-only gesture).
+
+frames 20
+# precondition: context(home) & ~linked(1,2)
+!assert require('Application').getVisibleContext():top():getClassName() == 'Chain.Root'
+!assert tostring(require('Channels').serialize().links.link12) == 'false'
+
+# operator gesture (link chord over the adjacent pair 1,2)
+down SELECT1
+frames 6
+down SELECT2
+frames 6
+up SELECT2
+up SELECT1
+frames 10
+
+# effect: linked(1,2)
+!assert tostring(require('Channels').serialize().links.link12) == 'true'
+# context unchanged (state-only operator)
+!assert require('Application').getVisibleContext():top():getClassName() == 'Chain.Root'
+
+quit

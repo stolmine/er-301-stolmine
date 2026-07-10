@@ -17,6 +17,8 @@
 #   scripts/dev check            ledger gate (fast, structural)
 #   scripts/dev ui-model         UI-model manifest gate (extract xroot/mods -> diff
 #                                baseline; STOL_UPDATE_UI_MODEL=1 regenerates)
+#   scripts/dev ui-operators     UI-planner operator-library gate (lift map+manifest
+#                                -> diff baseline; STOL_UPDATE_UI_OPERATORS=1 regen)
 #   scripts/dev render           regenerate planning/TODO.md from the ledger
 #   scripts/dev status           short ledger summary (used by the session hook)
 #   scripts/dev now              the current date/time (ISO-8601, local + offset)
@@ -134,6 +136,30 @@ ui_model_advisory() {
     printf '\033[33m! ui-model manifest is stale (UI changed). Run: scripts/dev ui-model\033[0m\n' >&2
   fi
   rm -f "$tmp"; return 0
+}
+# ── UI-planner operator-library gate (planning/ui-planning-domain-plan.md §4) ─
+# Lift the static-derivable operator library (ui-map edges + ui-model manifest +
+# ui_plan goal-types) and diff it against the committed baseline
+# (testing-assets/emu/ui-operators.toml). Drift means the map/manifest/columns
+# moved under the operators; the human accepts (STOL_UPDATE_UI_OPERATORS=1
+# regenerates in place) or fixes. Same extract-and-diff discipline as ui-model.
+UI_OPERATORS_TOML="testing-assets/emu/ui-operators.toml"
+do_ui_operators() {
+  if [ "${STOL_UPDATE_UI_OPERATORS:-}" = 1 ]; then
+    python3 tools/extract_operators.py -o "$UI_OPERATORS_TOML"
+    log "ui-operators: operator library regenerated; review + commit the diff"
+    return 0
+  fi
+  local tmp; tmp="$(mktemp)"
+  python3 tools/extract_operators.py --stdout > "$tmp"
+  if ! diff -u "$UI_OPERATORS_TOML" "$tmp" >/dev/null 2>&1; then
+    printf '\033[31m✗ ui-operators drift (map/manifest/columns moved):\033[0m\n' >&2
+    diff -u "$UI_OPERATORS_TOML" "$tmp" >&2 || true
+    rm -f "$tmp"
+    die "ui-operators drift: accept with STOL_UPDATE_UI_OPERATORS=1 scripts/dev ui-operators, or fix the code"
+  fi
+  rm -f "$tmp"
+  log "ui-operators: no drift ($UI_OPERATORS_TOML)"
 }
 do_status() { python3 tools/ledger.py status; }
 do_now()    { python3 tools/ledger.py now; }    # the ONE way to learn the date/time
@@ -280,6 +306,7 @@ case "$cmd" in
   test)   do_test "$@";;
   check)  do_check "$@";;
   ui-model) do_ui_model "$@";;
+  ui-operators) do_ui_operators "$@";;
   render) do_render "$@";;
   status) do_status "$@";;
   now)    do_now "$@";;
@@ -290,6 +317,6 @@ case "$cmd" in
   commit) do_commit "$@";;
   push)   do_push "$@";;
   integrate) do_integrate "$@";;
-  *) die "usage: scripts/dev {build|test|check|ui-model|render|status|now|ledger-append|claim|release|claims|commit|push|integrate}";;
+  *) die "usage: scripts/dev {build|test|check|ui-model|ui-operators|render|status|now|ledger-append|claim|release|claims|commit|push|integrate}";;
 esac
 fi

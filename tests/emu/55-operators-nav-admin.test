@@ -1,0 +1,23 @@
+# [stol:ui-planner-operators] Operator-library acceptance: a context-nav operator.
+#
+# Drives operator `nav_home_to_admin` (source=map, verified=static) from a state
+# satisfying its precondition and asserts its effect fluent holds:
+#   pre     context(home)
+#   gesture ["storage center", "frames 10"]
+#   eff     context(admin)
+# The fluent context(admin) is ground-truthed by the ui-map `admin` recognize
+# predicate (top window is the Admin Menu). Proves the extracted gesture template
+# + effect are real, not just text in testing-assets/emu/ui-operators.toml.
+
+frames 20
+# precondition: context(home)
+!assert require('Application').getVisibleContext():top():getClassName() == 'Chain.Root'
+
+# operator gesture (verbatim from the nav_home_to_admin `gesture`)
+storage center
+frames 10
+
+# effect: context(admin)
+!assert require('Application').getVisibleContext():top():getClassName() == 'Menu' and require('Application').getVisibleContext():getInstanceName() == 'Admin'
+
+quit
