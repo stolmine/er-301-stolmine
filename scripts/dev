@@ -15,6 +15,8 @@
 #   scripts/dev build            build the emulator, capped at -j4
 #   scripts/dev test             (no test harness yet — prints a note, exits 0)
 #   scripts/dev check            ledger gate (fast, structural)
+#   scripts/dev ui-model         UI-model manifest gate (extract xroot/mods -> diff
+#                                baseline; STOL_UPDATE_UI_MODEL=1 regenerates)
 #   scripts/dev render           regenerate planning/TODO.md from the ledger
 #   scripts/dev status           short ledger summary (used by the session hook)
 #   scripts/dev now              the current date/time (ISO-8601, local + offset)
@@ -92,6 +94,47 @@ do_test() {
 
 do_check()  { python3 tools/ledger.py check; }
 do_render() { python3 tools/ledger.py render; }
+
+# ── UI-model manifest gate (planning/ui-model-plan.md §3) ────────────────────
+# Extract the static UI behavior manifest from xroot/ + mods/ and diff it against
+# the committed baseline (testing-assets/emu/ui-model.manifest). Drift means the UI
+# changed; the human either accepts (STOL_UPDATE_UI_MODEL=1 regenerates in place)
+# or fixes the code. Mirrors the ledger render/check extract-and-diff discipline.
+UI_MODEL_MANIFEST="testing-assets/emu/ui-model.manifest"
+UI_MODEL_DOC="docs/UI_OPERATION.md"
+do_ui_model() {
+  if [ "${STOL_UPDATE_UI_MODEL:-}" = 1 ]; then
+    python3 tools/extract_ui_model.py --coverage -o "$UI_MODEL_MANIFEST"
+    python3 tools/extract_ui_model.py --sync-doc "$UI_MODEL_DOC"
+    log "ui-model: manifest + doc regenerated; review + commit the diff"
+    return 0
+  fi
+  local tmp; tmp="$(mktemp)"
+  python3 tools/extract_ui_model.py -o "$tmp"
+  if ! diff -u "$UI_MODEL_MANIFEST" "$tmp" >/dev/null 2>&1; then
+    printf '\033[31m✗ ui-model manifest drift (the UI surface changed):\033[0m\n' >&2
+    diff -u "$UI_MODEL_MANIFEST" "$tmp" >&2 || true
+    rm -f "$tmp"
+    die "ui-model drift: accept with STOL_UPDATE_UI_MODEL=1 scripts/dev ui-model, or fix the code"
+  fi
+  rm -f "$tmp"
+  # The manifest matches; also verify the generated block of the catalog doc.
+  if ! python3 tools/extract_ui_model.py --check-doc "$UI_MODEL_DOC"; then
+    die "ui-model drift: $UI_MODEL_DOC generated block is stale; STOL_UPDATE_UI_MODEL=1 scripts/dev ui-model"
+  fi
+  log "ui-model: no drift ($UI_MODEL_MANIFEST + $UI_MODEL_DOC)"
+}
+# Advisory variant for the commit path: warns on drift, never blocks (additive,
+# fail-open; the authoritative gate is `scripts/dev ui-model`).
+ui_model_advisory() {
+  [ -f "$UI_MODEL_MANIFEST" ] || return 0
+  local tmp; tmp="$(mktemp)"
+  if python3 tools/extract_ui_model.py -o "$tmp" 2>/dev/null \
+     && ! diff -q "$UI_MODEL_MANIFEST" "$tmp" >/dev/null 2>&1; then
+    printf '\033[33m! ui-model manifest is stale (UI changed). Run: scripts/dev ui-model\033[0m\n' >&2
+  fi
+  rm -f "$tmp"; return 0
+}
 do_status() { python3 tools/ledger.py status; }
 do_now()    { python3 tools/ledger.py now; }    # the ONE way to learn the date/time
 
@@ -129,6 +172,7 @@ do_commit() {
   python3 tools/ledger.py stamp         # machine truth: stamp new/status-changed items
   do_render                             # regenerate the TODO from the ledger first...
   do_check                              # ...then reconcile (schema, orphan tests/tags, render-diff)
+  ui_model_advisory                     # additive, non-blocking: warn if the UI manifest is stale
   git add -A
   git diff --cached --quiet && die "nothing staged to commit"
   # OPT-IN fence: no-op (byte-identical) unless this branch holds claims; then the
@@ -235,6 +279,7 @@ case "$cmd" in
   build)  do_build "$@";;
   test)   do_test "$@";;
   check)  do_check "$@";;
+  ui-model) do_ui_model "$@";;
   render) do_render "$@";;
   status) do_status "$@";;
   now)    do_now "$@";;
@@ -245,6 +290,6 @@ case "$cmd" in
   commit) do_commit "$@";;
   push)   do_push "$@";;
   integrate) do_integrate "$@";;
-  *) die "usage: scripts/dev {build|test|check|render|status|now|ledger-append|claim|release|claims|commit|push|integrate}";;
+  *) die "usage: scripts/dev {build|test|check|ui-model|render|status|now|ledger-append|claim|release|claims|commit|push|integrate}";;
 esac
 fi

@@ -1,0 +1,49 @@
+# [stol:ui-model-introspect] Layer-1 runtime UI introspection at the boot chain.
+#
+# Exercises xroot/emu/UIState.lua via the `lua` control command. At boot the
+# visible context is the per-channel chain edit view (Chain.Root, "OUT1 edit").
+# Everything asserted here is a pure function of that settled UI state, so it is
+# byte-deterministic (verified by the self-equality assert at the end).
+
+frames 30
+
+# --- module + context sanity -------------------------------------------------
+!assert app.EMULATION == true
+!assert require('emu.UIState').topClass() == 'Chain.Root'
+!assert require('emu.UIState').describe().context.class == 'Context'
+!assert require('emu.UIState').describe().context.name == 'OUT1 edit'
+
+# --- M-slot map (SpottedStrip geometry) --------------------------------------
+# app.getButtonCenter(i) = (i-1)*43+20 resolves the leaf control under each MAIN
+# column exactly as SpottedStrip:mainPressed does. On the empty boot chain the
+# chain title owns M1, the input owns M2, and the empty insert section spans
+# M3-M5, so M3 is the leftmost insert affordance.
+!assert require('emu.UIState').controlClassAt('M1') == 'ChainTitleControl'
+!assert require('emu.UIState').controlClassAt('M3') == 'EmptySection.EmptyControl'
+!assert require('emu.UIState').controlClassAt(3) == 'EmptySection.EmptyControl'
+
+# --- affordance set (the point) ----------------------------------------------
+# main3 is slot-resolved to the control a MAIN3 press routes its spot handler to:
+# the empty insert control (EmptyControl family), which fires activateChooser.
+!assert require('emu.UIState').gestureHandledBy('main3', 'EmptyControl') == true
+!assert require('emu.UIState').gestureBy('main3') == 'EmptySection.EmptyControl'
+# encoder is handled at the window level by the SpottedStrip (Chain.Root).
+!assert require('emu.UIState').gestureBy('encoder') == 'Chain.Root'
+# dialPressed / upPressed are defined on the Context itself (checked before the
+# focus chain in Context:notify), so the primary handler is the Context.
+!assert require('emu.UIState').gestureBy('dialPressed') == 'Context'
+!assert require('emu.UIState').gestureBy('upPressed') == 'Context'
+
+# --- focus chain (sendUp order) ----------------------------------------------
+# On a SpottedStrip the encoder focus is the window itself, so the chain is a
+# single element ending at the window.
+!assert require('emu.UIState').focusClass() == 'Chain.Root'
+!assert #require('emu.UIState').describe().focus.chain == 1
+
+# --- determinism -------------------------------------------------------------
+# Two captures of the same settled state must be byte-identical.
+!assert require('emu.UIState').json() == require('emu.UIState').json()
+# And the JSON is a single line (no embedded newlines) so it rides one @-reply.
+!assert require('emu.UIState').json():find('\n') == nil
+
+quit

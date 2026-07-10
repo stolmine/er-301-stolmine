@@ -1,0 +1,79 @@
+# Canonical UI-model gestures (planning/ui-model-plan.md §1/§5; docs/UI_OPERATION.md).
+# Each control-protocol sequence below is the verified realization of a logical
+# gesture in the catalog; the !assert after it pins the resulting context/state via
+# the linchpin accessor. Regression guard for the gesture -> control-protocol map
+# that docs/UI_OPERATION.md documents. Fixture: pickerStyle=dense, animation off.
+
+# ── boot ─────────────────────────────────────────────────────────────────────
+frames 20
+!assert require('Application').getVisibleContext():top():getClassName() == 'Chain.Root'
+
+# ── link chord: hold SELECT1, tap SELECT2 -> chains 1+2 link ─────────────────
+!assert tostring(require('Channels').serialize().links.link12) == 'false'
+down SELECT1
+frames 6
+down SELECT2
+frames 6
+up SELECT2
+up SELECT1
+frames 10
+!assert tostring(require('Channels').serialize().links.link12) == 'true'
+# context is unchanged by the link (state-only gesture)
+!assert require('Application').getVisibleContext():top():getClassName() == 'Chain.Root'
+# unlink again (both chains empty -> no confirmation dialog) to reset
+down SELECT1
+frames 6
+down SELECT2
+frames 6
+up SELECT2
+up SELECT1
+frames 10
+!assert tostring(require('Channels').serialize().links.link12) == 'false'
+
+# ── enter/exit ADMIN: STORAGE center -> Admin menu; STORAGE up -> back ────────
+storage center
+frames 20
+!assert require('Application').getVisibleContext():top():getClassName() == 'Menu' and require('Application').getVisibleContext():getInstanceName() == 'Admin'
+storage up
+frames 20
+!assert require('Application').getVisibleContext():top():getClassName() == 'Chain.Root'
+
+# ── enter/exit SCOPE: MODE down -> ScopeView; MODE center -> back ─────────────
+mode down
+frames 12
+!assert require('Application').getVisibleContext():top():getClassName() == 'Chain.ScopeView'
+
+# ── enter/exit SEQUENCER: from scope, SHIFT+ENTER -> GridView; again -> scope ─
+down SHIFT
+press ENTER
+up SHIFT
+frames 12
+!assert require('Application').getVisibleContext():top():getClassName() == 'Sequencer.GridView'
+down SHIFT
+press ENTER
+up SHIFT
+frames 12
+!assert require('Application').getVisibleContext():top():getClassName() == 'Chain.ScopeView'
+mode center
+frames 12
+!assert require('Application').getVisibleContext():top():getClassName() == 'Chain.Root'
+
+# ── open/close UNIT PICKER: MAIN3 spot -> dense chooser; CANCEL -> back ───────
+press MAIN3
+frames 14
+!assert require('Application').getVisibleContext():top():getClassName() == 'Unit.Chooser.Dense'
+press DIAL2
+frames 12
+!assert require('Application').getVisibleContext():top():getClassName() == 'Chain.Root'
+
+# ── focus + expand a unit: pick from chooser inserts + focuses a unit ─────────
+!assert require('Channels').getChain(1):length() == 0
+press MAIN3
+frames 14
+press MAIN1
+frames 16
+!assert require('Channels').getChain(1):length() == 1
+# the freshly inserted unit lands focused in its expanded view
+!assert (select(2, require('Channels').getChain(1):getSelection())) == 'expanded'
+
+quit

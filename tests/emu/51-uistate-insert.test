@@ -1,0 +1,39 @@
+# [stol:ui-model-introspect] Layer-1 introspection after inserting a unit.
+#
+# Drives the real insert gesture (open the dense picker from the empty insert
+# spot, then ENTER to pick the highlighted unit), then asserts the introspection
+# reflects the new unit: it becomes the selected section and its header appears
+# in the M-slot map, and the main3 affordance now resolves to the unit header's
+# spot handler instead of the empty-insert control.
+
+# Core mods give the picker real contents; ENTER picks the default highlight
+# (the "Custom Effect" container), deterministically.
+!packages core
+
+frames 20
+# Open the picker from the empty insert spot (MAIN3), then insert the highlight.
+press MAIN3
+frames 15
+!assert require('emu.UIState').topClass() == 'Unit.Chooser.Dense'
+press ENTER
+frames 20
+
+# Back on the chain edit window with the new unit selected (focused).
+!assert require('emu.UIState').topClass() == 'Chain.Root'
+!assert require('emu.UIState').selectionSectionClass() == 'Unit'
+
+# M-slot map: chain title still owns M1; the unit's header now occupies M3
+# (the empty insert control is gone).
+!assert require('emu.UIState').controlClassAt('M1') == 'ChainTitleControl'
+!assert require('emu.UIState').controlClassAt('M3') == 'Unit.Base.Header'
+!assert require('emu.UIState').controlNameAt('M3') == 'Custom Effect'
+
+# The affordance for MAIN3 tracks the slot: it now resolves to the unit header
+# control (which handles the spot press), no longer the EmptyControl.
+!assert require('emu.UIState').gestureBy('main3') == 'Unit.Base.Header'
+!assert require('emu.UIState').gestureHandledBy('main3', 'EmptyControl') == false
+
+# Determinism holds in this state too.
+!assert require('emu.UIState').json() == require('emu.UIState').json()
+
+quit
