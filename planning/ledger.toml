@@ -590,12 +590,12 @@ links = { depends_on = ["infra-ledger-regime"] }
 
 [[item]]
 id = "infra-crash-diagnostics-debug-mode"
-title = "Dev-enabled debug mode captures C-side crash diagnostics (fault PC/registers, module map, symbolizable trace)"
+title = "Dev-enabled debug mode captures C-side crash diagnostics (umbrella)"
 status = "todo"
 stamped = "2026-07-09T20:55:17-05:00"
 area = "infra"
 verify = { kind = "manual", ref = "with debug mode enabled, a deliberately-injected fault in a package .so produces a persisted crash report whose PC/LR resolve via addr2line to the correct package, function, and offset; with debug mode off, steady-state CPU headroom is unchanged" }
-note = "Motivation (researched 2026-07-09 across habitat crash history): the Lua side is already covered — xroot/Crash.lua persists message + traceback + LogHistory to crash.log — but habitat's many crashes are C-side, hardware-only audio-thread traps that today leave ZERO evidence (freeze or silent reboot), so every one cost a multi-day bisect (Ngoma differential-switch saga 2.5.5.92-.98, mi AAPCS/tree-vectorize saga 1.0.3.5-.18, xform-target ABI saga). Recurring root-cause families from habitat lore: -ftree-vectorize NEON alignment-hint traps (top cause), stack-local NEON :64 hints, runtime-branched DSP dispatch with differential bodies, AAPCS spill at audio-thread state swaps, float ulp/wrap edges in delay indexing, SWIG class-size mismatch, package-vs-firmware ABI drift. Firmware crashes by contrast: a handful ever. Capture plan (debug mode = admin toggle, zero steady-state cost when off): (1) ARM abort/undef handlers snapshot PC, LR, SP, CPSR, fault address, and a raw stack window; (2) a module map (kernel base + every loaded package .so base/size) persisted so PC/LR symbolize offline via addr2line against the build artifacts — this single feature would have pointed straight at the trapping vld1 in every NEON saga; (3) audio-thread watchdog heartbeat to catch hangs (several sagas froze rather than trapped) with the same snapshot; (4) flight-recorder ring of recent trigger events (unit insert, engine/mode switch, preset load — every historical crash was user-action-triggered); (5) persistence via a warm-reboot-surviving RAM panic buffer flushed to crash.log on next boot, since writing the card from a fault handler is unsafe. Audit first: what if anything the am335x side does today on data abort (sc.cv bug report assumed a 'crashdump from device' exists — verify). Policy note: AM335x line is patch-only, but this is developer diagnostics serving habitat package dev on real hardware (the crashes do NOT reproduce in emu, so the headless-emu substrate cannot cover this class); also directly portable to the CM4 line where Linux coredumps + the same module-map convention apply. Cross-reference: habitat memory files feedback_disable_tree_vectorize_am335x, feedback_neon_aapcs_call_barrier, feedback_runtime_branched_dsp_dispatch, feedback_neon_hint_surfaces."
+note = "PLANNED + SPLIT 2026-07-09 into planning/crash-diagnostics-plan.md: children infra-crash-diag-{format,module-map,flight-recorder,emu-inject,debug-mode-ui,exc-hook,panic-buffer,hang-watchdog}. This item stays the umbrella; done when the children close. KEY design axis: capture half is am335x-hardware-only (traps don't reproduce in emu), presentation half (UI + format + viewer) is emu-verifiable via the headless harness by injecting a synthetic report. Primitives already exist (verified): SYS/BIOS ARM Exception ExcContext+hook (register/thread capture), the dlopen mLoaded map (module bases), xroot/Crash.lua (persisted report). Motivation (researched 2026-07-09 across habitat crash history): the Lua side is already covered — xroot/Crash.lua persists message + traceback + LogHistory to crash.log — but habitat's many crashes are C-side, hardware-only audio-thread traps that today leave ZERO evidence (freeze or silent reboot), so every one cost a multi-day bisect (Ngoma differential-switch saga 2.5.5.92-.98, mi AAPCS/tree-vectorize saga 1.0.3.5-.18, xform-target ABI saga). Recurring root-cause families from habitat lore: -ftree-vectorize NEON alignment-hint traps (top cause), stack-local NEON :64 hints, runtime-branched DSP dispatch with differential bodies, AAPCS spill at audio-thread state swaps, float ulp/wrap edges in delay indexing, SWIG class-size mismatch, package-vs-firmware ABI drift. Firmware crashes by contrast: a handful ever. Capture plan (debug mode = admin toggle, zero steady-state cost when off): (1) ARM abort/undef handlers snapshot PC, LR, SP, CPSR, fault address, and a raw stack window; (2) a module map (kernel base + every loaded package .so base/size) persisted so PC/LR symbolize offline via addr2line against the build artifacts — this single feature would have pointed straight at the trapping vld1 in every NEON saga; (3) audio-thread watchdog heartbeat to catch hangs (several sagas froze rather than trapped) with the same snapshot; (4) flight-recorder ring of recent trigger events (unit insert, engine/mode switch, preset load — every historical crash was user-action-triggered); (5) persistence via a warm-reboot-surviving RAM panic buffer flushed to crash.log on next boot, since writing the card from a fault handler is unsafe. Audit first: what if anything the am335x side does today on data abort (sc.cv bug report assumed a 'crashdump from device' exists — verify). Policy note: AM335x line is patch-only, but this is developer diagnostics serving habitat package dev on real hardware (the crashes do NOT reproduce in emu, so the headless-emu substrate cannot cover this class); also directly portable to the CM4 line where Linux coredumps + the same module-map convention apply. Cross-reference: habitat memory files feedback_disable_tree_vectorize_am335x, feedback_neon_aapcs_call_barrier, feedback_runtime_branched_dsp_dispatch, feedback_neon_hint_surfaces."
 links = { depends_on = [] }
 
 [[item]]
@@ -676,3 +676,83 @@ attested = "2026-07-09: tools/emu_test.py !trace-golden directive: frame-strippe
 verify = { kind = "manual", ref = "a test with '!trace-golden NAME' records the run's @trace stream, normalizes it, and byte-compares against testing-assets/emu/goldens/<test>/<NAME>.trace; a deliberate route change fails with a readable diff; the reachability smoke test cross-checks observed transitions against ui-map.toml edges" }
 note = "The text-artifact complement to pixel goldens: traces diff cleanly, tolerate rendering changes, and diagnose WHERE a run diverged (which transition), not just that it did. Runner side: collect @trace lines per test, normalization pass (strip frame numbers OR bucket them — decide during implementation; raw frames are deterministic per the clock model but brittle to unrelated timing edits), golden compare with STOL_UPDATE_GOLDEN=1 regeneration, unified diff on mismatch. UI-map integration: each ui-map.toml edge may declare an expected arrival event (e.g. 'context:show admin'); the reachability smoke test walks the map and validates edges against observed traces — this makes the UI map itself BDG-checked and eventually allows regenerating map candidates from exploratory walks."
 links = { depends_on = ["emu-ui-trace-hooks", "emu-harness-runner"] }
+
+[[item]]
+id = "infra-crash-diag-format"
+title = "Crash report schema v2 + offline symbolication tool"
+status = "todo"
+stamped = "2026-07-09T22:55:14-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "feed tools/symbolize_crash.py a sample report (module map + a matching build .so) and confirm it resolves pc/lr offsets to file:line via arm-none-eabi-addr2line" }
+note = "planning/crash-diagnostics-plan.md §2. One text schema written by both the C hook (hardware) and the emu injector (testing), read by the on-device viewer and the host tool. Extends the current front/crash.log block (xroot/Crash.lua). Foundation for everything else."
+links = { depends_on = [] }
+
+[[item]]
+id = "infra-crash-diag-module-map"
+title = "Module map: enumerate kernel + loaded package text/data bases"
+status = "todo"
+stamped = "2026-07-09T22:55:14-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "emit the module map with several packages loaded; confirm each package's runtime text base+size match the dlopen registry, and a known PC resolves to the correct package+offset" }
+note = "planning/crash-diagnostics-plan.md §0.2. Add public accessors to od::ElfFile (mpTextSpace/mTextSize/mpDataSpace/mDataSize, arch/am335x/hal/dynload/ElfFile.h) and a dlfcn enumerator over mLoaded (dlfcn.cpp:12). Partly emu-verifiable: packages ARE loaded in the emu even though no trap occurs there, so the map itself renders. ElfFile is internal firmware (not SWIG-exposed) so appended accessors are ABI-safe."
+links = { depends_on = ["infra-crash-diag-format"] }
+
+[[item]]
+id = "infra-crash-diag-flight-recorder"
+title = "Flight recorder: ring of recent crash-trigger events"
+status = "todo"
+stamped = "2026-07-09T22:55:14-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "perform a sequence of unit inserts + engine/mode switches + a preset load; confirm the flight-recorder ring holds the last N events with timestamps and appears in a captured report" }
+note = "planning/crash-diagnostics-plan.md §3. Every historical hardware crash was user-action-triggered (insert, engine/mode switch, preset load). A small fixed-size ring updated at those seams. Emu-verifiable (the events fire in the emu). Zero cost when debug mode off."
+links = { depends_on = ["infra-crash-diag-format"] }
+
+[[item]]
+id = "infra-crash-diag-emu-inject"
+title = "Emulator affordance to inject a synthetic crash report"
+status = "todo"
+stamped = "2026-07-09T22:55:14-05:00"
+area = "emu"
+verify = { kind = "manual", ref = "via an emu-only command/setting, drop a canned crash record; confirm the on-boot crash screen and admin viewer render it, driven headless by a tests/emu script" }
+note = "planning/crash-diagnostics-plan.md §1. THE seam that makes the presentation half testable without hardware: the capture can't run in the emu, but a synthetic record lets the UI + format render under the golden/trace harness. Emu-only, app.EMULATION-guarded."
+links = { depends_on = ["infra-crash-diag-format"] }
+
+[[item]]
+id = "infra-crash-diag-debug-mode-ui"
+title = "Debug-mode admin toggle + on-boot crash screen + past-report viewer"
+status = "todo"
+stamped = "2026-07-09T22:55:14-05:00"
+area = "ui"
+verify = { kind = "screenshot", ref = "with an injected report present, boot shows a 'crash captured' screen; the admin diagnostics viewer lists and displays past reports; captured as a tests/emu golden/trace" }
+note = "planning/crash-diagnostics-plan.md §3. Arms the capture (sibling to enableDevMode, xroot/Settings/init.lua:121) and surfaces results: on-boot notice (model: xroot/Crash.lua dialog) + an admin viewer to browse front/crash.log reports. Fully emu-verifiable via infra-crash-diag-emu-inject + the tests/emu harness."
+links = { depends_on = ["infra-crash-diag-format", "infra-crash-diag-emu-inject"] }
+
+[[item]]
+id = "infra-crash-diag-exc-hook"
+title = "SYS/BIOS exception hook captures ExcContext + module map (hardware)"
+status = "todo"
+stamped = "2026-07-09T22:55:14-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "with debug mode armed, inject a deliberate fault on am335x hardware; confirm a report is produced with correct fault kind, pc/lr/registers, faulting thread, and the module map" }
+note = "planning/crash-diagnostics-plan.md §0.1. Register Exception.excHookFunc (ti/sysbios/family/arm/exc/Exception.h; set in arch/am335x/sysbios/*.cfg or at runtime). Hook runs in a fault context: NO malloc/card-I/O/locks — only touch the panic buffer and read the dlfcn map. HARDWARE-ONLY verification (traps don't reproduce in emu). Zero cost when debug mode off. Confirm what SYS/BIOS prints on abort today before building (extend, don't duplicate)."
+links = { depends_on = ["infra-crash-diag-format", "infra-crash-diag-module-map", "infra-crash-diag-panic-buffer"] }
+
+[[item]]
+id = "infra-crash-diag-panic-buffer"
+title = "Warm-reboot-surviving panic buffer flushed to crash.log on next boot (hardware)"
+status = "todo"
+stamped = "2026-07-09T22:55:14-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "on hardware: trigger a captured fault, let it reboot, confirm the report written from the panic buffer appears in front/crash.log on the next boot" }
+note = "planning/crash-diagnostics-plan.md §5. Card I/O from an abort context is unsafe, so the hook writes a reserved RAM region that the warm-reboot path (arch/am335x/hal/reboot.c) does not clear; the next boot formats + flushes it to front/crash.log. Confirm the region survives DDR re-init/zero. HARDWARE-ONLY."
+links = { depends_on = ["infra-crash-diag-format"] }
+
+[[item]]
+id = "infra-crash-diag-hang-watchdog"
+title = "Audio-thread heartbeat + WDT catches hangs, not just traps (hardware, later)"
+status = "todo"
+stamped = "2026-07-09T22:55:14-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "on hardware with debug mode armed, induce an audio-thread hang; confirm the watchdog fires, snapshots state to the panic buffer, and the report appears after reboot" }
+note = "planning/crash-diagnostics-plan.md §3. Several habitat sagas FROZE rather than trapped, which the exception hook alone never catches. Audio-thread heartbeat + am335x WDT (arch/am335x/ti/am335x/wdt.h). Deferred follow-on: the trap path (exc-hook + panic-buffer) lands first. HARDWARE-ONLY."
+links = { depends_on = ["infra-crash-diag-exc-hook"] }
