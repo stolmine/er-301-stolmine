@@ -906,3 +906,63 @@ attested = "2026-07-10: tools/ui_plan.py: goal (link/insert/focus/control_at/con
 verify = { kind = "manual", ref = "tools/ui_plan.py takes a goal (link 1+2, insert Network, glitch on M1), produces a control-protocol sequence via ui-map.toml + the manifest/uiState, and a tests/emu integration executes it and confirms arrival with uiState asserts + a trace-golden" }
 note = "planning/ui-model-plan.md §4. LAST — depends on introspect + manifest as inputs. Context nav = BFS over verified ui-map.toml edges; control actions = manifest (offline) or uiState (live). Failed plan steps become corrected map edges (the map grows from planning failures). The Network-on-M1 scenario is the canonical acceptance test. Held for a follow-up dispatch after 1+2 verify."
 links = { depends_on = ["ui-model-introspect", "ui-model-manifest"] }
+
+[[item]]
+id = "ui-planner-domain-facility"
+title = "UI planning domain — deterministic goal-routing over the 301 UI (umbrella)"
+status = "todo"
+stamped = "2026-07-10T17:48:52-05:00"
+area = "emu"
+verify = { kind = "manual", ref = "an agent gives an arbitrary fluent goal (e.g. sequencer cv1 first-6-steps at C3, or link 1+2 + insert Network + glitch on M1) and the solver routes to it over the operator library, executes headless, and confirms arrival — no per-goal code, no looking anything up" }
+note = "planning/ui-planning-domain-plan.md. Builds on the ui-model facility (planning/ui-model-plan.md). THESIS: this is a planning problem, not a learning problem — the UI is deterministic with a fully-observable model (the code) + perfect observation (emu.uiState()), which is exactly the regime where classical planning dominates and ML underperforms AND breaks BDG (AI is never in the gate). ML/LLM only at the authoring boundary (fuzzy intent -> formal fluent goal), upstream of the gate. Umbrella over ui-planner-{state-schema, operators, crawler, solver, goal-corpus}; done when children close."
+links = { depends_on = ["ui-model-facility"] }
+
+[[item]]
+id = "ui-planner-state-schema"
+title = "Fluent state vocabulary + uiState->fluents projection"
+status = "todo"
+stamped = "2026-07-10T17:48:52-05:00"
+area = "emu"
+verify = { kind = "manual", ref = "docs/UI_STATE_SCHEMA.md defines the typed fluents (context/stack/focus/focused-unit/per-slot control/link-state/chain-contents/sequencer cursor+cells/modals); a uiState->fluents normalizer produces a canonical fluent set for a known state (e.g. the C3 sequencer state) that a goal can partially match" }
+note = "planning/ui-planning-domain-plan.md §3. The FAR-END contract: goals are partial assignments of these fluents. Extraction is a host-side normalizer over emu.uiState() JSON (reuse xroot/emu/UIState.lua; no new Lua strictly required). Do first — everything else is expressed in this vocabulary."
+links = { depends_on = ["ui-model-introspect"] }
+
+[[item]]
+id = "ui-planner-operators"
+title = "Typed operator library (precondition->effect + gesture template), BDG-diffed"
+status = "todo"
+stamped = "2026-07-10T17:48:52-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "testing-assets/emu/ui-operators.toml lists operators (id, params, precondition fluents, effect fluents, gesture template) lifted from ui-map.toml edges + manifest handler->targets + ui_plan goal-types; regenerating the static-derivable subset is a no-op diff; a UI change shows as an operator delta" }
+note = "planning/ui-planning-domain-plan.md §4. Operators ARE the manifest's handler->target edges lifted into typed composable actions (link, open-picker, insert, focus, set-cell, context-nav). Static seed from ui-map.toml + ui-model.manifest + tools/ui_plan.py's current goal-types; the dynamic remainder is filled by the crawler."
+links = { depends_on = ["ui-planner-state-schema"] }
+
+[[item]]
+id = "ui-planner-crawler"
+title = "Empirical UI crawler resolves dynamic operators + discovers preconditions (perfect oracle)"
+status = "todo"
+stamped = "2026-07-10T17:48:52-05:00"
+area = "emu"
+verify = { kind = "manual", ref = "the crawler drives candidate gestures from reachable states, observes actual transitions via uiState()/trace, and records empirical operators (pre-fluents -> gesture -> post-fluents); re-crawling an unchanged build is a no-op diff; it converts >=1 previously-'dynamic' manifest target into a verified operator and discovers a precondition (e.g. open-picker column M3 mono vs M4 after stereo link)" }
+note = "planning/ui-planning-domain-plan.md §4. THE highest-value new build: graph exploration with a PERFECT ORACLE (uiState) — no learning, no generalization, just search+observation. Resolves the ~93% of manifest handler targets currently marked 'dynamic'. Must bound the crawl (depth, fluent-hash visited set), avoid destructive/irreversible gestures via a denylist, and log skips. Output is a diffable BDG artifact."
+links = { depends_on = ["ui-planner-operators"] }
+
+[[item]]
+id = "ui-planner-solver"
+title = "Classical planner: arbitrary fluent goal -> gesture sequence, verified by driving"
+status = "todo"
+stamped = "2026-07-10T17:48:52-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "tools/ui_solve.py takes a partial-fluent goal + current state and returns a gesture sequence via A* over the operator library (heuristic = unsatisfied goal-fluent count); --run drives the headless emu and confirms arrival via fluent asserts + a trace-golden; supersedes ui_plan.py's hardcoded goal-types" }
+note = "planning/ui-planning-domain-plan.md §5. Stdlib-only classical search (A*/STRIPS-style) over the operator library. Generalizes tools/ui_plan.py from a few hardcoded goal-types to ANY fluent goal. A failed operator becomes a corrected precondition (self-heals, like ui_plan's map-growth suggestions). No learned component — deterministic search only."
+links = { depends_on = ["ui-planner-crawler"] }
+
+[[item]]
+id = "ui-planner-goal-corpus"
+title = "Worked-example goal corpus (goal/plan/trace goldens) + coverage metric"
+status = "todo"
+stamped = "2026-07-10T17:48:52-05:00"
+area = "emu"
+verify = { kind = "manual", ref = "testing-assets/emu/goals/ holds (goal, plan, trace-golden) triples that regenerate + diff (seeded with the hand-proven ones: Network-glitch-on-M1, sequencer cv1 first-6-at-C3, admin/scope/sequencer entry, picker open/close); a coverage metric reports which fluents/operators have >=1 verified example goal" }
+note = "planning/ui-planning-domain-plan.md §6. The 'example goal coverage' as a BDG artifact: worked examples AND regression goldens in one. Each triple regenerates (plan from the current operator library, execute, diff the trace). Coverage = fraction of fluents/operators with a verified example, tracked in the ledger so 'how much of the UI agents can reach with foreknowledge' is a monotonic number."
+links = { depends_on = ["ui-planner-solver"] }
