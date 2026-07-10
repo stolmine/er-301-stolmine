@@ -248,7 +248,7 @@ status = "todo"
 stamped = "2026-07-09T20:28:42-05:00"
 area = "emu"
 verify = { kind = "manual", ref = "run emu.elf --headless with SDL_VIDEODRIVER=dummy; confirm firmware boots to the running state and exits cleanly with no window and no X/Wayland dependency" }
-note = "Foundation for scripted/CI use. Select the SDL dummy video driver so no window is created; keep the audio + Lua interpreter threads running as normal."
+note = "Foundation for scripted/CI use. Select the SDL dummy video driver so no window is created; keep the audio + Lua interpreter threads running as normal. Full spec: planning/headless-emu-plan.md (Phase A). Open risk to settle in this phase: confirm SDL's dummy AUDIO driver still invokes the audio callback at simulated-realtime pace (it paces the DSP); fallback is a timer-driven pacer thread."
 
 [[item]]
 id = "emu-control-channel"
@@ -296,9 +296,9 @@ title = "Capture command dumps the framebuffers decoded to PNG"
 status = "todo"
 stamped = "2026-07-09T20:28:42-05:00"
 area = "emu"
-verify = { kind = "screenshot", ref = "send 'capture planning/captures/<name>.png'; confirm the main (256x64 4bpp) and sub (128x64 1bpp) DisplayBuffers are decoded pixel-exact to PNG, matching what emu/Window.cpp update() renders on screen" }
-note = "Decode reference is emu/Window.cpp update(): main display is 256x64 at 4 bits/pixel (16 gray levels), sub display is 128x64 at 1 bit/pixel. Write both (or a composite) to a PNG under planning/captures/. This is the observable output that makes headless runs verifiable."
-links = { depends_on = ["emu-headless-boot"] }
+verify = { kind = "screenshot", ref = "send 'cap testing-assets/emu/<name>.png'; confirm the PNG matches the on-screen content of a known static screen (both displays composited)" }
+note = "DESIGN REVISED 2026-07-09 (planning/headless-emu-plan.md Phase E): no new decode code — reuse UIThread::saveScreenShotTo (od/UIThread.cpp:199), which already composites main (256x64 4bpp) + sub (128x64 1bpp) into one grayscale PNG via vendored lodepng and is SWIG-exposed to Lua. 'cap PATH' is sugar for a queued lua call, hence the new dependency on emu-lua-eval. Baselines live under testing-assets/emu/ (NOT testing/, which is build output)."
+links = { depends_on = ["emu-headless-boot", "emu-lua-eval"] }
 
 [[item]]
 id = "emu-capture-deterministic"
@@ -312,12 +312,12 @@ links = { depends_on = ["emu-capture-fb"] }
 
 [[item]]
 id = "emu-lua-eval"
-title = "Lua expression command routed to the app interpreter (phase 2)"
+title = "Lua expression command routed to the app interpreter"
 status = "todo"
 stamped = "2026-07-09T20:28:42-05:00"
 area = "emu"
 verify = { kind = "manual", ref = "send 'lua <expr>'; confirm the expression runs on the app's Lua interpreter and its result/side-effect is observable (readback or a subsequent capture)" }
-note = "Phase 2, optional. Thread safety: the control channel is read off the emu/render thread but the app Lua state belongs to the UI/app thread — route the expression through a queued execution that runs it on the owning thread (do NOT call the interpreter directly from the channel reader), the same discipline used for queued edits elsewhere."
+note = "PROMOTED from optional phase 2 to the design backbone 2026-07-09 (planning/headless-emu-plan.md Phase D) — capture rides on it since 'cap' is sugar over app.UIThread.saveScreenShotTo. Thread safety: expose hasControlInput()/popControlLine()/pushControlReply() on the emu SWIG module; Application.lua drains the queue in its EVENT_DISPLAY_READY branch under app.EMULATION, so all evaluation happens on the Lua thread (never call the interpreter from the channel reader). SWIG lore: C strings only (a C char is a 1-byte Lua string)."
 links = { depends_on = ["emu-control-channel"] }
 
 # ─────────────────────────── Part 3: known open bug (blocked) ───────────────────────────

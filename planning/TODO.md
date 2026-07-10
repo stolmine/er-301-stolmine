@@ -74,13 +74,13 @@ check`): a `done` item must have a real test or its named artifact.*
 | | id | item | verify |
 |---|---|---|---|
 |   | `emu-capture-deterministic` | Same UI state produces a byte-identical capture | screenshot: drive the emulator to a fixed UI state, settle, and capture twice; confirm the two PNGs are byte-identical (diff clean); document the settle convention for animated elements · 2026-07-09 |
-|   | `emu-capture-fb` | Capture command dumps the framebuffers decoded to PNG | screenshot: send 'capture planning/captures/<name>.png'; confirm the main (256x64 4bpp) and sub (128x64 1bpp) DisplayBuffers are decoded pixel-exact to PNG, matching what emu/Window.cpp update() renders on screen · 2026-07-09 |
+|   | `emu-capture-fb` | Capture command dumps the framebuffers decoded to PNG | screenshot: send 'cap testing-assets/emu/<name>.png'; confirm the PNG matches the on-screen content of a known static screen (both displays composited) · 2026-07-09 |
 |   | `emu-cmd-buttons` | Button press/release commands with hold duration via Gpio_write | manual · 2026-07-09 |
 |   | `emu-cmd-encoder` | Encoder turn command adjusts encoderValue | manual · 2026-07-09 |
 |   | `emu-cmd-toggles` | Storage / mode toggle-switch commands | manual · 2026-07-09 |
 |   | `emu-control-channel` | Line-oriented control channel read inside the emulator loop | manual · 2026-07-09 |
 |   | `emu-headless-boot` | Emulator boots with --headless (no SDL window), firmware runs, clean exit | manual · 2026-07-09 |
-|   | `emu-lua-eval` | Lua expression command routed to the app interpreter (phase 2) | manual · 2026-07-09 |
+|   | `emu-lua-eval` | Lua expression command routed to the app interpreter | manual · 2026-07-09 |
 | ✓ | `emu-ui-pacer-fix` | Emulator UI loop pacer hits real 55 fps (matches hardware refresh) | manual *(attested)* · 2026-07-09 |
 
 ## Documentation
