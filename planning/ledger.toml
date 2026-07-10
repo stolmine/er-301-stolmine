@@ -780,9 +780,10 @@ links = { depends_on = [] }
 [[item]]
 id = "crashdiag-fix-flightrec-insert-order"
 title = "Flight recorder records unit insert AFTER the risky work, missing the #1 trigger (H3)"
-status = "todo"
-stamped = "2026-07-10T10:17:40-05:00"
+status = "done"
+stamped = "2026-07-10T10:48:48-05:00"
 area = "infra"
+attested = "2026-07-10: record('insert') moved to the top of loadUnit before UnitFactory.instantiate; added 'insert-ok' after success. Verified in emu: test 44 asserts both events appear and 'insert' precedes 'insert-ok', proving the trigger is recorded BEFORE the risky work. Commit f6c5c5b."
 verify = { kind = "manual", ref = "a crash during UnitFactory.instantiate or the unit's first process() produces a report whose Flight Recorder names the insert that triggered it" }
 note = "Fable review 2026-07-10 (HIGH). xroot/Chain/Base.lua:476-479 records 'insert ...' as the LAST statement of loadUnit, after UnitFactory.instantiate:437 (where mi/Ngoma-class constructors trap) and after insertUnit (audio task can trap on first process()). The crash the ring exists to explain happens BEFORE the event is recorded → silent trigger. Persist seams got it right (record before deserialize/apply). Fix: move record() to the top of loadUnit before instantiate; optionally add an 'insert-ok' event after to show completion. Cheap, emu-verifiable."
 links = { depends_on = [] }
@@ -790,9 +791,10 @@ links = { depends_on = [] }
 [[item]]
 id = "crashdiag-fix-package-symbolication"
 title = "Offline symbolication of package PCs is broken by design — the headline use case (H1)"
-status = "todo"
-stamped = "2026-07-10T10:17:40-05:00"
+status = "done"
+stamped = "2026-07-10T10:48:48-05:00"
 area = "infra"
+attested = "2026-07-10: symbolize_crash.py replicates the loader's ET_REL section-packing (4-byte align, text-space-only, section-header order per ElfFile.cpp) and resolves package PCs via the section symtab. Verified without hardware: a real arm-none-eabi ET_REL fixture resolves beta_fn correctly where the OLD code gave confidently-wrong gamma_fn; --selftest green (section-walk + symtab-as-truth). Also handles the addr2line ET_REL DWARF-ambiguity by corroborating against symtab. Commit f6c5c5b."
 verify = { kind = "manual", ref = "take a real captured PC inside a loaded package, run symbolize_crash.py, and confirm it resolves to the correct file:line (cross-checked against nm/objdump of the .so)" }
 note = "Fable review 2026-07-10 (HIGH, toolchain-only — no hardware risk). am335x packages are ET_REL relocatables built -ffunction-sections; the loader (ElfFile.cpp:171-241) repacks every SHF_ALLOC non-write section sequentially with 4-byte align into mpTextSpace. So pc-textBase is an offset into a repacked blob across hundreds of .text.* sections whose sh_addr are all 0. symbolize_crash.py:115 feeds that to addr2line as a link-time vaddr → ??:0 or CONFIDENTLY WRONG file:line. On-device 'libX.so + off' attribution is still correct; only the offset->file:line step is broken — and packages are exactly the habitat NEON-saga sites the feature targets. The §7 bench test faults in KERNEL code so it never exercises this. Fix: symbolize_crash.py must replicate the loader's deterministic section packing (walk SHF_ALLOC non-write section headers in order, ELF_ALIGNUP(4), find which section the blob offset lands in, addr2line -j <section> <section_offset>, or use the section symtab). All inputs are in the .so it already reads."
 links = { depends_on = ["infra-crash-diag-format"] }
@@ -830,9 +832,10 @@ links = { depends_on = [] }
 [[item]]
 id = "crashdiag-fix-emu-symbolication-base"
 title = "Emu symbolication base off by p_vaddr (M3)"
-status = "todo"
-stamped = "2026-07-10T10:17:40-05:00"
+status = "done"
+stamped = "2026-07-10T10:48:48-05:00"
 area = "emu"
+attested = "2026-07-10: arch/linux/hal/dynload.cpp now reports base=dlpi_addr (was dlpi_addr+p_vaddr), textSize=p_vaddr+memsz so the single text_lo..hi field is both range and correct addr2line base. Verified against /proc/self/maps: reported base equals load base for libc/libm/libgcc_s (3/3). Emu suite green. Commit f6c5c5b."
 verify = { kind = "manual", ref = "symbolize a synthetic/emu report and confirm file:line matches the true source location (base = dlpi_addr, not dlpi_addr+p_vaddr)" }
 note = "Fable review 2026-07-10 (MEDIUM, emu-only — no real traps there). arch/linux/hal/dynload.cpp:54-62 sets textBase = dlpi_addr + p_vaddr(exec seg), so addr-textBase drops p_vaddr; addr2line needs addr-dlpi_addr. With separate-code linking (p_vaddr ~0x1000+) every emu file:line is shifted — confuses anyone validating the toolchain against the emu. Fix: record dlpi_addr as the base (or store p_vaddr so the symbolizer adds it back)."
 links = { depends_on = [] }
@@ -840,9 +843,10 @@ links = { depends_on = [] }
 [[item]]
 id = "crashdiag-review-nits"
 title = "Crash-diag review LOW/NIT cleanup batch"
-status = "todo"
-stamped = "2026-07-10T10:17:40-05:00"
+status = "done"
+stamped = "2026-07-10T10:48:48-05:00"
 area = "infra"
+attested = "2026-07-10: Addressed: static_assert(sizeof(PanicRecord)<=0x4000) (passes ~0x2228), PanicModuleEntry.path 64->128, CRC non-standard-poly comment, panicKindString enum comment, FlightRecorder is now a static-init file-scope global (L1, removes the abort-context lazy-guard), enableCrashDiagnostics text 'requires reboot'->'arms immediately'. Both arches build clean. L4 (silent crash.pending write failure -> no boot notice) consciously WAIVED: cosmetic, and the report still lands in crash.log. Commit f6c5c5b."
 verify = { kind = "manual", ref = "each LOW/NIT from the 2026-07-10 Fable review is addressed or consciously waived with a reason" }
 note = "Fable review 2026-07-10 LOW/NIT. L1: hook constructs FlightRecorder Meyers singleton from abort context if never touched (benign on arm-none-eabi no-threads libstdc++; make it a plain file-scope global to remove the hidden dependency). L2: PanicModuleEntry.path=63 chars truncates long install paths, breaking basename artifact match (hal/crash.h:89). L3: torn flight-recorder entry if hook preempts record() mid-write (accept, don't chase on bench). L4: crash.pending write failure silent → no boot notice though report lands (cosmetic). L5: SysMin UART decode buffer flushes at exit but WDT fires ~30ms after hook, so no live UART dump when auto-reboot armed — the NEXT-boot flush message is the signal (document, don't treat as failure). NITs: CRC poly 0xEDB88720 vs standard 0xEDB88320 (self-consistent, cosmetic); add static_assert(sizeof(PanicRecord)<=0x4000); Settings '(requires reboot)' text wrong (onSet arms immediately, Settings/init.lua:137); panicKindString emits swi/unknown outside documented Kind enum; disarmed seams pay a require+concat per insert (negligible)."
 links = { depends_on = [] }
