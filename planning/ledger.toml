@@ -244,18 +244,22 @@ attested = "2026-06-04 (commit f0a0bb8 'emu: fix UI loop pacer; achieves real 55
 [[item]]
 id = "emu-headless-boot"
 title = "Emulator boots with --headless (no SDL window), firmware runs, clean exit"
-status = "todo"
-stamped = "2026-07-09T20:28:42-05:00"
+status = "done"
+stamped = "2026-07-09T21:49:47-05:00"
 area = "emu"
+anchor = true
+attested = "2026-07-09: boots with --headless (SDL dummy video), no window, runs firmware, clean exit; verified DISPLAY-unset + SDL_AUDIODRIVER=dummy. Fixed a session-state determinism bleed in the same pass (headless skips ~/.od/emu.session; defaults STORAGE=user -> boots on Chain.Root). Commit c788b51."
 verify = { kind = "manual", ref = "run emu.elf --headless with SDL_VIDEODRIVER=dummy; confirm firmware boots to the running state and exits cleanly with no window and no X/Wayland dependency" }
 note = "Foundation for scripted/CI use. Select the SDL dummy video driver so no window is created; keep the audio + Lua interpreter threads running as normal. Full spec: planning/headless-emu-plan.md (Phase A). Open risk to settle in this phase: confirm SDL's dummy AUDIO driver still invokes the audio callback at simulated-realtime pace (it paces the DSP); fallback is a timer-driven pacer thread."
 
 [[item]]
 id = "emu-control-channel"
 title = "Line-oriented control channel read inside the emulator loop"
-status = "todo"
-stamped = "2026-07-09T20:28:42-05:00"
+status = "done"
+stamped = "2026-07-09T21:49:47-05:00"
 area = "emu"
+anchor = true
+attested = "2026-07-09: line protocol over stdin (default) / --control FIFO, drained in Emulator::loop with strict-order gating; @-sigil replies; unsolicited @ready handshake. Commit c788b51."
 verify = { kind = "manual", ref = "pipe newline-delimited commands into the emulator's control FIFO/stdin; confirm each line is dequeued and dispatched from within the emulator loop without blocking the render/audio threads" }
 note = "A simple text protocol (one command per line) read from a FIFO or stdin, polled non-blocking in the emu loop. All Part-2 command items dispatch through this channel."
 links = { depends_on = ["emu-headless-boot"] }
@@ -263,9 +267,11 @@ links = { depends_on = ["emu-headless-boot"] }
 [[item]]
 id = "emu-cmd-buttons"
 title = "Button press/release commands with hold duration via Gpio_write"
-status = "todo"
-stamped = "2026-07-09T20:28:42-05:00"
+status = "done"
+stamped = "2026-07-09T21:49:47-05:00"
 area = "emu"
+anchor = true
+attested = "2026-07-09: press/down/up drive front-panel GPIO (inverted logic); verified gestures reach firmware (SUB3->Card.FileChooser, MAIN2->Source.ExternalChooser). 60ms press = safe tap below the ~28-frame repeat threshold. Commit c788b51."
 verify = { kind = "manual", ref = "send 'press <button> [ms]' / 'release <button>' commands; confirm the firmware sees the front-panel button down/up (e.g. ENTER opens a menu) and that hold duration triggers repeat behaviors" }
 note = "Drive the front-panel buttons through Gpio_write. IMPORTANT: the GPIO logic is inverted — a key-DOWN writes false, key-UP writes true. Mirror the mapping the SDL key handler already uses (BUTTON_*_KEY in emu.config)."
 links = { depends_on = ["emu-control-channel"] }
@@ -273,9 +279,11 @@ links = { depends_on = ["emu-control-channel"] }
 [[item]]
 id = "emu-cmd-encoder"
 title = "Encoder turn command adjusts encoderValue"
-status = "todo"
-stamped = "2026-07-09T20:28:42-05:00"
+status = "done"
+stamped = "2026-07-09T21:49:47-05:00"
 area = "emu"
+anchor = true
+attested = "2026-07-09: turn N adjusts encoderValue; verified focus/value movement in the running app. Commit c788b51."
 verify = { kind = "manual", ref = "send 'encoder <delta>'; confirm the focused control's value moves by the corresponding amount (delta scaled like the SDL wheel/arrow handlers)" }
 note = "Apply the delta to encoderValue the same way the mouse-wheel / arrow-key path does, honoring the coarse/fine scale factors."
 links = { depends_on = ["emu-control-channel"] }
@@ -283,9 +291,11 @@ links = { depends_on = ["emu-control-channel"] }
 [[item]]
 id = "emu-cmd-toggles"
 title = "Storage / mode toggle-switch commands"
-status = "todo"
-stamped = "2026-07-09T20:28:42-05:00"
+status = "done"
+stamped = "2026-07-09T21:49:47-05:00"
 area = "emu"
+anchor = true
+attested = "2026-07-09: storage/mode absolute positioning; verified storage up->user(Chain.Root), center->admin(Menu/Admin), down->eject(Card.StatusViewer). Commit c788b51."
 verify = { kind = "manual", ref = "send storage-focus and mode-focus toggle commands; confirm the emulator enters storage/mode contexts exactly as the Z/X keys do in the SDL build" }
 note = "The STORAGE and MODE switches are the two hardware toggles (Z/X in emu.config). Expose them as explicit set/toggle commands so scripts can reach admin + scope contexts."
 links = { depends_on = ["emu-control-channel"] }
@@ -293,9 +303,11 @@ links = { depends_on = ["emu-control-channel"] }
 [[item]]
 id = "emu-capture-fb"
 title = "Capture command dumps the framebuffers decoded to PNG"
-status = "todo"
-stamped = "2026-07-09T20:28:42-05:00"
+status = "done"
+stamped = "2026-07-09T21:49:47-05:00"
 area = "emu"
+anchor = true
+attested = "2026-07-09: cap PATH = queued app.UIThread.saveScreenShotTo; verified admin-menu PNG written and byte-matches on re-render. Commit c788b51."
 verify = { kind = "screenshot", ref = "send 'cap testing-assets/emu/<name>.png'; confirm the PNG matches the on-screen content of a known static screen (both displays composited)" }
 note = "DESIGN REVISED 2026-07-09 (planning/headless-emu-plan.md Phase E): no new decode code — reuse UIThread::saveScreenShotTo (od/UIThread.cpp:199), which already composites main (256x64 4bpp) + sub (128x64 1bpp) into one grayscale PNG via vendored lodepng and is SWIG-exposed to Lua. 'cap PATH' is sugar for a queued lua call, hence the new dependency on emu-lua-eval. Baselines live under testing-assets/emu/ (NOT testing/, which is build output)."
 links = { depends_on = ["emu-headless-boot", "emu-lua-eval"] }
@@ -303,9 +315,10 @@ links = { depends_on = ["emu-headless-boot", "emu-lua-eval"] }
 [[item]]
 id = "emu-capture-deterministic"
 title = "Same UI state produces a byte-identical capture"
-status = "todo"
-stamped = "2026-07-09T20:28:42-05:00"
+status = "done"
+stamped = "2026-07-09T21:49:47-05:00"
 area = "emu"
+attested = "2026-07-09: two caps in one run on a static screen byte-identical; two separate --seed 301 runs byte-identical (animation=disabled fixture freezes tweens). Admin golden generated + re-matched by the harness. Commit c788b51."
 verify = { kind = "screenshot", ref = "drive the emulator to a fixed UI state, settle, and capture twice; confirm the two PNGs are byte-identical (diff clean); document the settle convention for animated elements" }
 note = "Requires a settle convention: pause/step animations (cursor easing, screensavers, scope sweeps, blink phases) to a canonical frame before capture, or capture after N idle frames. This is the BDG keystone for the emu — a golden-master screenshot is only useful if it is deterministic."
 links = { depends_on = ["emu-capture-fb"] }
@@ -313,9 +326,11 @@ links = { depends_on = ["emu-capture-fb"] }
 [[item]]
 id = "emu-lua-eval"
 title = "Lua expression command routed to the app interpreter"
-status = "todo"
-stamped = "2026-07-09T20:28:42-05:00"
+status = "done"
+stamped = "2026-07-09T21:49:47-05:00"
 area = "emu"
+anchor = true
+attested = "2026-07-09: emu SWIG module hasControlInput/popControlLine/pushControlReply; Application.lua drains under app.EMULATION in onDisplayReady; verified 'lua return 1+1' -> @ok 2 and live app-state introspection. Commit c788b51."
 verify = { kind = "manual", ref = "send 'lua <expr>'; confirm the expression runs on the app's Lua interpreter and its result/side-effect is observable (readback or a subsequent capture)" }
 note = "PROMOTED from optional phase 2 to the design backbone 2026-07-09 (planning/headless-emu-plan.md Phase D) — capture rides on it since 'cap' is sugar over app.UIThread.saveScreenShotTo. Thread safety: expose hasControlInput()/popControlLine()/pushControlReply() on the emu SWIG module; Application.lua drains the queue in its EVENT_DISPLAY_READY branch under app.EMULATION, so all evaluation happens on the Lua thread (never call the interpreter from the channel reader). SWIG lore: C strings only (a C char is a 1-byte Lua string)."
 links = { depends_on = ["emu-control-channel"] }
@@ -586,9 +601,11 @@ links = { depends_on = [] }
 [[item]]
 id = "emu-cmd-stable"
 title = "stable-frames primitive: resolve when N consecutive rendered frames are byte-identical"
-status = "todo"
-stamped = "2026-07-09T21:16:46-05:00"
+status = "done"
+stamped = "2026-07-09T21:49:47-05:00"
 area = "emu"
+anchor = true
+attested = "2026-07-09: stable N [timeout] resolves @ok on a static screen, @err timeout during boot animation/toasts. Commit c788b51."
 verify = { kind = "manual", ref = "send 'stable 5 300' on a static screen (resolves ok) and during an animation (resolves err timeout); confirm frame comparison covers both display planes" }
 note = "planning/headless-emu-plan.md §6. The reliable settle for genuinely static screens (waits out toasts and transition tweens without wallclock sleeps). Compares successive DisplayBuffers (memcmp main+sub) at the point the emulator loop drains renderQ. NOT usable on screens with the global breathing cursor (never settles) — those use fixed 'frames N' gating instead."
 links = { depends_on = ["emu-control-channel"] }
@@ -596,18 +613,21 @@ links = { depends_on = ["emu-control-channel"] }
 [[item]]
 id = "emu-seed-flag"
 title = "--seed N makes the emulator's RNG deterministic"
-status = "todo"
-stamped = "2026-07-09T21:16:46-05:00"
+status = "done"
+stamped = "2026-07-09T21:49:47-05:00"
 area = "emu"
+anchor = true
+attested = "2026-07-09: --seed N -> deterministic splitmix stream in emu/hal/rng.c; unseeded path unchanged; cross-run captures byte-identical. Commit c788b51."
 verify = { kind = "manual", ref = "boot twice with --seed 301 and drive a randomness-consuming screen; confirm identical behavior; boot without --seed and confirm entropy seeding is unchanged" }
 note = "planning/headless-emu-plan.md §6 threat 2. od::Random::init seeds from Rng_read32() — emu/hal/rng.c gains a deterministic PRNG mode when --seed is given. Emu-side only; hardware rng untouched."
 
 [[item]]
 id = "emu-hermetic-sandbox"
 title = "Per-run sandbox: front/rear roots built from committed fixtures, no state bleed between runs"
-status = "todo"
-stamped = "2026-07-09T21:16:46-05:00"
+status = "done"
+stamped = "2026-07-09T21:49:47-05:00"
 area = "emu"
+attested = "2026-07-09: tools/emu_test.py builds per-test FRONT/REAR from testing-assets/emu/fixtures + generated emu.config; settings fixture disables screensaver/confirmations, forces dense picker; verified two runs share no state. Closed the un-sandboxed emu.session leak in emu core. Commit c788b51."
 verify = { kind = "manual", ref = "run the same test twice back-to-back; confirm the second run sees no recents/favorites/boot-count/settings from the first (fixture-defined state only, screensaver disabled)" }
 note = "planning/headless-emu-plan.md §6 threat 1 + §7. Runner assembles temp FRONT_ROOT/REAR_ROOT per test from testing-assets/emu/fixtures/ (settings fixture disables screensaver), generates a per-run emu.config, and points emu.elf at it with -c. Rear-root package population strategy comes from how the emu build installs mods (investigate ~/.od/rear layout)."
 links = { depends_on = ["emu-headless-boot"] }
@@ -615,9 +635,10 @@ links = { depends_on = ["emu-headless-boot"] }
 [[item]]
 id = "emu-harness-runner"
 title = "Automated test runner: discovers tests/emu/*.test, drives headless emu, diffs goldens, TAP output"
-status = "todo"
-stamped = "2026-07-09T21:16:46-05:00"
+status = "done"
+stamped = "2026-07-09T21:49:47-05:00"
 area = "emu"
+attested = "2026-07-09: tools/emu_test.py: discovers tests/emu/*.test, TAP output, !golden/!assert/!expect/!packages, watchdog, STOL_UPDATE_GOLDEN regen; --selftest green (22 checks); 00-boot + 10-admin-nav green against real emu.elf. Commit c788b51."
 verify = { kind = "manual", ref = "scripts/dev test discovers and runs tests/emu/*.test; a passing suite exits 0 with TAP lines; a golden mismatch or err reply exits nonzero naming the test; STOL_UPDATE_GOLDEN=1 regenerates baselines" }
 note = "planning/headless-emu-plan.md §7. tools/emu_test.py, stdlib-only. Test format = control-protocol lines + runner directives (!golden NAME diffs a capture against testing-assets/emu/goldens/, !assert LUA sends lua and requires truthy reply). Per-test hermetic sandbox + watchdog timeout + --seed. When this lands, adapt ledger.py TESTCASE discovery to claim tests/emu/*.test names and flip the orphan-test rule live (separate follow-up commit)."
 links = { depends_on = ["emu-capture-deterministic", "emu-hermetic-sandbox", "emu-cmd-stable"] }
