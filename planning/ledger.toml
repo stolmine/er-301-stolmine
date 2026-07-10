@@ -850,3 +850,53 @@ attested = "2026-07-10: Addressed: static_assert(sizeof(PanicRecord)<=0x4000) (p
 verify = { kind = "manual", ref = "each LOW/NIT from the 2026-07-10 Fable review is addressed or consciously waived with a reason" }
 note = "Fable review 2026-07-10 LOW/NIT. L1: hook constructs FlightRecorder Meyers singleton from abort context if never touched (benign on arm-none-eabi no-threads libstdc++; make it a plain file-scope global to remove the hidden dependency). L2: PanicModuleEntry.path=63 chars truncates long install paths, breaking basename artifact match (hal/crash.h:89). L3: torn flight-recorder entry if hook preempts record() mid-write (accept, don't chase on bench). L4: crash.pending write failure silent → no boot notice though report lands (cosmetic). L5: SysMin UART decode buffer flushes at exit but WDT fires ~30ms after hook, so no live UART dump when auto-reboot armed — the NEXT-boot flush message is the signal (document, don't treat as failure). NITs: CRC poly 0xEDB88720 vs standard 0xEDB88320 (self-consistent, cosmetic); add static_assert(sizeof(PanicRecord)<=0x4000); Settings '(requires reboot)' text wrong (onSet arms immediately, Settings/init.lua:137); panicKindString emits swi/unknown outside documented Kind enum; disarmed seams pay a require+concat per insert (negligible)."
 links = { depends_on = [] }
+
+[[item]]
+id = "ui-model-facility"
+title = "Deterministic UI model for agent-driven 301 operation (umbrella)"
+status = "todo"
+stamped = "2026-07-10T16:02:55-05:00"
+area = "emu"
+verify = { kind = "manual", ref = "an agent can, from the UI model, plan and execute a novel target state (e.g. stereo-link 1+2, insert Network, glitch graphic on M1) and the headless emu confirms arrival — no trial-and-error probing" }
+note = "planning/ui-model-plan.md. The 301 UI is a dispatch-by-named-method state machine over a window/context stack; both state and affordances are derivable from Lua (statically) or by reflecting live objects (dynamically). Umbrella over ui-model-{gesture-catalog, introspect, manifest, planner}; done when children close. Motivating proof: the 2026-07-10 Network-on-M1 run derived every gesture from code by hand."
+links = { depends_on = [] }
+
+[[item]]
+id = "ui-model-introspect"
+title = "Runtime emu.uiState() — context/focus/controls/slots/affordances as structured data"
+status = "todo"
+stamped = "2026-07-10T16:02:55-05:00"
+area = "emu"
+verify = { kind = "manual", ref = "emu.uiState() at boot reports main3.released handled by an EmptyControl targeting the chooser; after inserting Network it reports the glitch control at slot M1; JSON is deterministic (sorted, frame-stamped) and app.EMULATION-guarded; tests/emu asserts these" }
+note = "planning/ui-model-plan.md §2. A read-only 'describe current UI + what I can do here' endpoint over the existing emu bridge (emu SWIG module + Application.lua EVENT_DISPLAY_READY drain, same path as lua/trace). Affordances derived by reflecting handler=obj[event] along the sendUp focus chain + the context, over the fixed gesture vocabulary (§1). controls carry slot (M1-M6/S1-S3/header), name, class, value. Highest-leverage piece: removes agent guesswork (would have saved 4 probes in the Network run)."
+links = { depends_on = ["ui-model-gesture-catalog"] }
+
+[[item]]
+id = "ui-model-manifest"
+title = "Static UI behavior manifest extracted from xroot (extract-and-diff BDG)"
+status = "todo"
+stamped = "2026-07-10T16:02:55-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "tools/extract_ui_model.py emits a deterministic testing-assets/emu/ui-model.manifest listing per-class gesture handlers + static targets + per-unit M1-M6 slot maps; regenerating is a no-op diff; a hand-edit to a handler changes the manifest (gate catches drift)" }
+note = "planning/ui-model-plan.md §3. Offline whole-surface map so agents plan without the emu and UI changes are diff-caught. Walks xroot/ + package unit .lua for gesture-handler method defs (the §1 vocabulary), best-effort static transition targets (:show()/Context:add/doCommand/activateChooser -> named or 'dynamic'), and view=expanded/collapsed slot maps. Wire regenerate+diff into scripts/dev (extract_contract pattern). Cross-checks Layer 1: live uiState().gestures subset of manifest-declared affordances per class."
+links = { depends_on = ["ui-model-gesture-catalog"] }
+
+[[item]]
+id = "ui-model-gesture-catalog"
+title = "Gesture vocabulary + M1-M6 slot-map operator reference (code-derived)"
+status = "todo"
+stamped = "2026-07-10T16:02:55-05:00"
+area = "docs"
+verify = { kind = "manual", ref = "docs/UI_OPERATION.md documents the complete notify gesture vocabulary, the logical-gesture -> control-protocol mapping, the view-list -> M1-M6 slot convention, and the canonical gestures (link chord, open/close picker, focus/expand unit, enter admin/scope/sequencer); each canonical gesture is verified against the headless emu" }
+note = "planning/ui-model-plan.md §1 + §5. The shared contract both other layers emit against, and the human+agent quick-reference. Vocabulary is the fixed notify(event,...) set from Application.lua (shift/encoder/{up,zero,home,commit,enter,cancel,dial}{Pressed,Released,Repeated} + indexed {main,sub,select}). Generated/verified from the manifest so it never drifts. Foundational — the other layers depend on it."
+links = { depends_on = [] }
+
+[[item]]
+id = "ui-model-planner"
+title = "Goal -> gesture-sequence path planner, verified by driving the emu"
+status = "todo"
+stamped = "2026-07-10T16:02:55-05:00"
+area = "emu"
+verify = { kind = "manual", ref = "tools/ui_plan.py takes a goal (link 1+2, insert Network, glitch on M1), produces a control-protocol sequence via ui-map.toml + the manifest/uiState, and a tests/emu integration executes it and confirms arrival with uiState asserts + a trace-golden" }
+note = "planning/ui-model-plan.md §4. LAST — depends on introspect + manifest as inputs. Context nav = BFS over verified ui-map.toml edges; control actions = manifest (offline) or uiState (live). Failed plan steps become corrected map edges (the map grows from planning failures). The Network-on-M1 scenario is the canonical acceptance test. Held for a follow-up dispatch after 1+2 verify."
+links = { depends_on = ["ui-model-introspect", "ui-model-manifest"] }
