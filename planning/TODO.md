@@ -5,7 +5,7 @@ ER-301-STOLMINE TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**81 items** — 51 done, 28 todo, 2 blocked. *Rendered 2026-07-10.*
+**81 items** — 54 done, 25 todo, 2 blocked. *Rendered 2026-07-10.*
 
 ## Sequencer
 
@@ -75,7 +75,6 @@ check`): a `done` item must have a real test or its named artifact.*
 | | id | item | verify |
 |---|---|---|---|
 |   | `ui-model-facility` | Deterministic UI model for agent-driven 301 operation (umbrella) | manual · 2026-07-10 |
-|   | `ui-model-introspect` | Runtime emu.uiState() — context/focus/controls/slots/affordances as structured data | manual · 2026-07-10 |
 |   | `ui-model-planner` | Goal -> gesture-sequence path planner, verified by driving the emu | manual · 2026-07-10 |
 | ✓ | `crashdiag-fix-emu-symbolication-base` | Emu symbolication base off by p_vaddr (M3) | manual *(attested)* · 2026-07-10 |
 | ✓ | `emu-capture-deterministic` | Same UI state produces a byte-identical capture | screenshot: drive the emulator to a fixed UI state, settle, and capture twice; confirm the two PNGs are byte-identical (diff clean); document the settle convention for animated elements *(attested)* · 2026-07-09 |
@@ -95,14 +94,15 @@ check`): a `done` item must have a real test or its named artifact.*
 | ✓ | `emu-ui-pacer-fix` | Emulator UI loop pacer hits real 55 fps (matches hardware refresh) | manual *(attested)* · 2026-07-09 |
 | ✓ | `emu-ui-trace-hooks` | UI-seam trace hooks emit frame-stamped structured transition events to the control channel | manual *(attested)* · 2026-07-09 |
 | ✓ | `infra-crash-diag-emu-inject` | Emulator affordance to inject a synthetic crash report | manual *(attested)* · 2026-07-10 |
+| ✓ | `ui-model-introspect` | Runtime emu.uiState() — context/focus/controls/slots/affordances as structured data | manual *(attested)* · 2026-07-10 |
 
 ## Documentation
 
 | | id | item | verify |
 |---|---|---|---|
 |   | `docs-intro-video` | Produce a short intro video for the stolmine firmware | manual · 2026-07-09 |
-|   | `ui-model-gesture-catalog` | Gesture vocabulary + M1-M6 slot-map operator reference (code-derived) | manual · 2026-07-10 |
 | ✓ | `docs-porting-guide-301` | 301-ecosystem porting guide for the ledger + BDG regime | manual *(attested)* · 2026-07-09 |
+| ✓ | `ui-model-gesture-catalog` | Gesture vocabulary + M1-M6 slot-map operator reference (code-derived) | manual *(attested)* · 2026-07-10 |
 
 ## Infrastructure
 
@@ -117,7 +117,6 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `infra-crash-diag-panic-buffer` | Warm-reboot-surviving panic buffer flushed to crash.log on next boot (hardware) | manual · 2026-07-09 |
 |   | `infra-crash-diagnostics-debug-mode` | Dev-enabled debug mode captures C-side crash diagnostics (umbrella) | manual · 2026-07-09 |
 |   | `infra-v0616-port` | Port the TXo I2C master mod to the v0.6.16 stable firmware base | manual · 2026-07-09 |
-|   | `ui-model-manifest` | Static UI behavior manifest extracted from xroot (extract-and-diff BDG) | manual · 2026-07-10 |
 | ✓ | `crashdiag-fix-flightrec-insert-order` | Flight recorder records unit insert AFTER the risky work, missing the #1 trigger (H3) | manual *(attested)* · 2026-07-10 |
 | ✓ | `crashdiag-fix-package-symbolication` | Offline symbolication of package PCs is broken by design — the headline use case (H1) | manual *(attested)* · 2026-07-10 |
 | ✓ | `crashdiag-review-nits` | Crash-diag review LOW/NIT cleanup batch | manual *(attested)* · 2026-07-10 |
@@ -127,4 +126,5 @@ check`): a `done` item must have a real test or its named artifact.*
 | ✓ | `infra-ledger-regime` | Ledger + BDG regime stood up (gate, render, hooks, blessed entrypoint) | manual *(attested)* · 2026-07-09 |
 | ✓ | `infra-package-diagnostics` | Detailed package load diagnostics for .pkg archive + .so ELF failures | manual *(attested)* · 2026-07-09 |
 | ✓ | `infra-swig-vanilla-compat` | SWIG pinned to 4.2.1 + runtime version bridge so vanilla community packages load | manual *(attested)* · 2026-07-09 |
+| ✓ | `ui-model-manifest` | Static UI behavior manifest extracted from xroot (extract-and-diff BDG) | manual *(attested)* · 2026-07-10 |
 

@@ -864,9 +864,11 @@ links = { depends_on = [] }
 [[item]]
 id = "ui-model-introspect"
 title = "Runtime emu.uiState() — context/focus/controls/slots/affordances as structured data"
-status = "todo"
-stamped = "2026-07-10T16:02:55-05:00"
+status = "done"
+stamped = "2026-07-10T16:27:10-05:00"
 area = "emu"
+anchor = true
+attested = "2026-07-10: xroot/emu/UIState.lua (pure Lua, app.EMULATION-guarded, no C++/ABI change) exposes emu.uiState()/describe() via the lua command: context/stack/focus-chain/controls-with-M1-M6-slots/37-token affordance set/modals as deterministic sorted JSON. Slot resolution mirrors SpottedStrip:mainPressed geometry; affordances reflect obj[event] along the sendUp chain + context (read-only). Verified: tests 50-uistate-boot + 51-uistate-insert green (main3->EmptyControl at boot, glitch/header slot after insert), cross-run byte-identical JSON. Commit a4a90a4."
 verify = { kind = "manual", ref = "emu.uiState() at boot reports main3.released handled by an EmptyControl targeting the chooser; after inserting Network it reports the glitch control at slot M1; JSON is deterministic (sorted, frame-stamped) and app.EMULATION-guarded; tests/emu asserts these" }
 note = "planning/ui-model-plan.md §2. A read-only 'describe current UI + what I can do here' endpoint over the existing emu bridge (emu SWIG module + Application.lua EVENT_DISPLAY_READY drain, same path as lua/trace). Affordances derived by reflecting handler=obj[event] along the sendUp focus chain + the context, over the fixed gesture vocabulary (§1). controls carry slot (M1-M6/S1-S3/header), name, class, value. Highest-leverage piece: removes agent guesswork (would have saved 4 probes in the Network run)."
 links = { depends_on = ["ui-model-gesture-catalog"] }
@@ -874,9 +876,10 @@ links = { depends_on = ["ui-model-gesture-catalog"] }
 [[item]]
 id = "ui-model-manifest"
 title = "Static UI behavior manifest extracted from xroot (extract-and-diff BDG)"
-status = "todo"
-stamped = "2026-07-10T16:02:55-05:00"
+status = "done"
+stamped = "2026-07-10T16:27:10-05:00"
 area = "infra"
+attested = "2026-07-10: tools/extract_ui_model.py extracts a deterministic sorted testing-assets/emu/ui-model.manifest: 107 classes / 444 handlers / 71 units, 95% slot resolution, static transition targets where inline (else 'dynamic'). scripts/dev ui-model is the BDG gate (regenerate+diff, STOL_UPDATE_UI_MODEL=1 to accept). Verified: 2nd run byte-identical no-op; injecting a bogus handler trips the gate with a unified diff; commit-path advisory non-blocking. Anchor tag lives in tools/ (unscanned) so no anchor=true. Commit a4a90a4."
 verify = { kind = "manual", ref = "tools/extract_ui_model.py emits a deterministic testing-assets/emu/ui-model.manifest listing per-class gesture handlers + static targets + per-unit M1-M6 slot maps; regenerating is a no-op diff; a hand-edit to a handler changes the manifest (gate catches drift)" }
 note = "planning/ui-model-plan.md §3. Offline whole-surface map so agents plan without the emu and UI changes are diff-caught. Walks xroot/ + package unit .lua for gesture-handler method defs (the §1 vocabulary), best-effort static transition targets (:show()/Context:add/doCommand/activateChooser -> named or 'dynamic'), and view=expanded/collapsed slot maps. Wire regenerate+diff into scripts/dev (extract_contract pattern). Cross-checks Layer 1: live uiState().gestures subset of manifest-declared affordances per class."
 links = { depends_on = ["ui-model-gesture-catalog"] }
@@ -884,9 +887,10 @@ links = { depends_on = ["ui-model-gesture-catalog"] }
 [[item]]
 id = "ui-model-gesture-catalog"
 title = "Gesture vocabulary + M1-M6 slot-map operator reference (code-derived)"
-status = "todo"
-stamped = "2026-07-10T16:02:55-05:00"
+status = "done"
+stamped = "2026-07-10T16:27:10-05:00"
 area = "docs"
+attested = "2026-07-10: docs/UI_OPERATION.md: the 34-name notify vocabulary, logical-gesture->control-protocol mapping, view-list->M1-M6 slot convention, and canonical gestures (link chord, open/close picker, focus/expand, admin/scope/sequencer entry) each verified by driving the headless emu. Generated block kept in sync with the manifest via the dev ui-model gate. Commit a4a90a4."
 verify = { kind = "manual", ref = "docs/UI_OPERATION.md documents the complete notify gesture vocabulary, the logical-gesture -> control-protocol mapping, the view-list -> M1-M6 slot convention, and the canonical gestures (link chord, open/close picker, focus/expand unit, enter admin/scope/sequencer); each canonical gesture is verified against the headless emu" }
 note = "planning/ui-model-plan.md §1 + §5. The shared contract both other layers emit against, and the human+agent quick-reference. Vocabulary is the fixed notify(event,...) set from Application.lua (shift/encoder/{up,zero,home,commit,enter,cancel,dial}{Pressed,Released,Repeated} + indexed {main,sub,select}). Generated/verified from the manifest so it never drifts. Foundational — the other layers depend on it."
 links = { depends_on = [] }
