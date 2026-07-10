@@ -139,6 +139,10 @@ local releaseShifted = false
 -- Defined before onDisplayReady so the reference below is not a nil
 -- forward-binding (a local-function forward reference binds the nil global).
 local controlReady = false
+-- [stol:emu-ui-trace-hooks] EMULATION-only UI trace module. Loaded lazily so
+-- hardware builds (app.EMULATION false) never touch it. Its frame counter is
+-- advanced once per rendered frame from onDisplayReady below.
+local Trace = app.EMULATION and require "emu.Trace" or nil
 local function drainControl()
   if not controlReady then
     controlReady = true
@@ -171,6 +175,9 @@ local timerUpdatePeriod = timerDelta * app.GRAPHICS_REFRESH_RATE
 local timerUpdateCount = timerUpdatePeriod
 local function onDisplayReady()
   if app.EMULATION then
+    if Trace then
+      Trace.tick()
+    end
     drainControl()
   end
   if timerUpdateCount < timerUpdatePeriod then

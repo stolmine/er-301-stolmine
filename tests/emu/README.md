@@ -43,6 +43,7 @@ must reply `ok …`; an `err …` reply fails the test.
 | `stable N [timeout]` | resolve when N consecutive frames are byte-identical |
 | `cap PATH` | screenshot both displays to PATH (PNG) |
 | `lua CODE` | run CODE on the app Lua thread; reply carries the result |
+| `trace on [filter]` / `trace off` / `trace mark LABEL` | enable/disable UI-seam tracing (context switches + window stack push/pop), or inject a `@trace <frame> mark LABEL`. Emits `@trace` lines on the reply channel; EMULATION-only |
 | `quit` | clean shutdown |
 
 **Runner directives** (interpreted by `tools/emu_test.py`, never sent verbatim):
@@ -53,6 +54,8 @@ must reply `ok …`; an `err …` reply fails the test.
 | `!golden NAME` | `cap` to `<sandbox>/NAME.png`, then byte-compare against `testing-assets/emu/goldens/<test>/NAME.png`. Missing golden fails with an instruction to re-run with `STOL_UPDATE_GOLDEN=1`; that env overwrites/creates it and reports `# updated`. |
 | `!assert LUA` | send `lua LUA`; require the reply value to be `true`, else fail showing the reply. Recognize predicates from `ui-map.toml` go here. |
 | `!expect REGEX` | require the reply of the **preceding** command to match REGEX (an escape hatch for asserting on a raw reply). |
+| `!trace-golden NAME` | compare the run's UI-trace route against `testing-assets/emu/goldens/<test>/<NAME>.trace`. If the test declares any `!trace-golden`, the runner auto-enables tracing (`trace on`) right after boot, siphons every `@trace <frame> <kind> <detail>` line, frame-strips it to a `<kind> <detail>` route signature, and byte-compares. `STOL_UPDATE_GOLDEN=1` (re)creates it; a mismatch prints a unified diff. An explicit `trace on`/`trace mark LABEL` command anywhere is also honored (idempotent). |
+| `!reachability [MAP]` | walk every edge in `ui-map.toml` (default) live: reset to the boot node, path to each edge's `from` via the map, apply the gesture, then assert the destination node's `recognize` predicate **and** that the edge's `arrival` trace line fired. Needs Python 3.11+ (`tomllib`). |
 
 ## Goldens & determinism
 

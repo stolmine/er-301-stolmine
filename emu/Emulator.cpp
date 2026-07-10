@@ -612,6 +612,51 @@ namespace emu
       controlChannel().enqueueLua(code.c_str());
       mGate = ControlGate::Lua; // reply arrives from the Lua drain
     }
+    // [stol:emu-ui-trace-hooks] `trace on [filter] | off | mark LABEL` is sugar
+    // that enqueues the matching emu.Trace call on the Lua thread. The module
+    // emits its own '@trace ...' lines; the enqueued call's '@ok' closes the gate.
+    else if (cmd == "trace")
+    {
+      std::string sub = (tok.size() >= 2) ? upcase(tok[1]) : "";
+      std::string code;
+      if (sub == "ON")
+      {
+        if (tok.size() >= 3)
+          code = "return require('emu.Trace').on('" + tok[2] + "')";
+        else
+          code = "return require('emu.Trace').on()";
+      }
+      else if (sub == "OFF")
+      {
+        code = "return require('emu.Trace').off()";
+      }
+      else if (sub == "MARK")
+      {
+        // Everything after "trace mark " is the label. Escape for a Lua string.
+        std::string label;
+        for (size_t i = 2; i < tok.size(); i++)
+        {
+          if (i > 2)
+            label.push_back(' ');
+          label += tok[i];
+        }
+        std::string esc;
+        for (char c : label)
+        {
+          if (c == '\\' || c == '\'')
+            esc.push_back('\\');
+          esc.push_back(c);
+        }
+        code = "return require('emu.Trace').mark('" + esc + "')";
+      }
+      else
+      {
+        ctlReply("err trace needs on|off|mark");
+        return;
+      }
+      controlChannel().enqueueLua(code.c_str());
+      mGate = ControlGate::Lua;
+    }
     else
     {
       ctlReply("err unknown command %s", cmd.c_str());
@@ -651,7 +696,11 @@ namespace emu
     while (controlChannel().popReply(r))
     {
       ctlReply("%s", r.c_str());
-      if (mGate == ControlGate::Lua && r != "ready")
+      // 'ready' is the unsolicited handshake; '@trace ...' lines are async trace
+      // emissions ([stol:emu-ui-trace-hooks]) that can be interleaved with any
+      // gated command — neither closes a Lua gate.
+      bool isTrace = r.compare(0, 6, "trace ") == 0;
+      if (mGate == ControlGate::Lua && r != "ready" && !isTrace)
         mGate = ControlGate::None;
     }
 

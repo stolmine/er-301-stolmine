@@ -363,3 +363,43 @@ gesture, watch the @trace stream name the context transition instead of guessing
 
 Ledger items: emu-ui-trace-hooks, emu-trace-golden, emu-ui-map. Do NOT self-flip;
 verification + flip happens after review against the running emu.
+
+### 11d. As-built (2026-07-09, verified live) — authoritative where it differs above
+
+- **Trace module = `xroot/emu/Trace.lua`** (require name `emu.Trace`), loaded
+  lazily in Application.lua only under `app.EMULATION`. Wraps
+  `Application.setVisibleContext` (context show/hide) and `Context:add`/`:remove`
+  (window push/pop); Window:show/hide were NOT wrapped (redundant — add/remove
+  already capture every stack change). Emits `trace <frame> <kind> <detail>`
+  (the C++ `ctlReply` adds the `@` sigil). Idempotent on/off; default filter =
+  `context,stack`. Frame stamp is a module counter advanced by `Trace.tick()`
+  called once per frame from `onDisplayReady`.
+- **C++ command `trace on [filter] | off | mark LABEL`** added to
+  `Emulator::handleControlLine` — sugar that enqueues `require('emu.Trace').on/off/mark`
+  on the Lua thread. The reply-drain gate now ignores `@trace ...` lines (like
+  `@ready`) so async trace emission never closes a Lua gate mid-command.
+- **Runner: `!trace-golden NAME`** frame-strips the collected `@trace` stream to a
+  `<kind> <detail>` route signature vs `goldens/<test>/<NAME>.trace` (unified diff
+  on mismatch, `STOL_UPDATE_GOLDEN=1` regen). Auto-enables `trace on` at boot when
+  a test declares any `!trace-golden`. The runner now reads stdout via a raw-fd
+  line buffer (not `TextIOWrapper.readline`, whose read-ahead dropped the reply
+  that follows a siphoned trace line). Selftest extended with trace-golden
+  create/match/mismatch/missing cases (all green).
+- **Reachability = a runner directive `!reachability [map]`** (the "runner mode"
+  option), driven by `tests/emu/30-ui-map-reachability.test`. It BFS-paths to each
+  edge's `from` via the map, applies the gesture, and asserts the destination
+  `recognize` predicate + the edge's new `arrival` field. Needs `tomllib` (3.11+).
+
+- **PICKER-NAV HEADLINE:** the route from boot (`user/Chain.Root`) to
+  `Unit.Chooser.Dense` is **`press MAIN3`**, NOT ENTER. On the empty boot chain the
+  cursor sits on the header; the empty insert section spans MAIN3–MAIN5, and a
+  MAIN-button press selects that spot so its `mainReleased`→`spotReleased` fires
+  `EmptyControl:activateChooser` directly — no cursor-move gesture is needed. This
+  supersedes the §11c guess that a cursor-move + ENTER was required, and the
+  earlier "20-picker-open parked" note in §10.
+- **UI-map corrections from live verification:** `node.hold` recognizes
+  `SceneView.Performance` (scene mode defaults ON in the fixture), not `PinView`;
+  the `admin → sample_pool` gesture is `press MAIN2` (MAIN1 is the header spot),
+  not MAIN1. Every edge now carries a live-verified `arrival` trace line and a
+  `high (verified live)` confidence tag; `node.unit_picker_classic` is documented
+  but unreachable under the dense fixture (no inbound edge, so unwalked).

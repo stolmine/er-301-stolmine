@@ -1,0 +1,14 @@
+# UI-map reachability smoke test (ledger item emu-ui-map).
+#
+# Drives EVERY edge in testing-assets/emu/ui-map.toml against the live emu: for
+# each edge the runner resets to the boot node, paths to the edge's `from` node
+# via the map, applies the edge gesture, then asserts BOTH the destination node's
+# `recognize` predicate AND that the edge's declared `arrival` @trace line was
+# emitted. This makes the UI map itself behavior-diff-gated: a gesture, class, or
+# route drift breaks this test.
+#
+# The core package gives the picker real contents (the unit_picker_dense edge).
+!packages core
+
+frames 20
+!reachability

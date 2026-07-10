@@ -1,0 +1,28 @@
+# Open the dense unit picker from the empty boot chain and confirm arrival.
+# pickerStyle is forced to 'dense' by the settings fixture, so the chooser window
+# is Unit.Chooser.Dense.
+#
+# Route discovered live via the UI trace hooks (planning/headless-emu-plan.md
+# §11c): at boot the chain-cursor sits on the header, but pressing a MAIN button
+# whose screen column falls over the empty insert section selects that spot and
+# its mainReleased -> spotReleased fires EmptyControl:activateChooser directly
+# (xroot/Chain/EmptySection.lua) — no cursor-move gesture needed. On the empty
+# boot chain the insert section spans MAIN3-MAIN5; MAIN3 is its leftmost, most
+# stable column.
+
+# Core mods give the picker real contents (units to list).
+!packages core
+
+frames 20
+!assert require('Application').getVisibleContext():top():getClassName() == 'Chain.Root'
+
+# Select + release the empty insert spot -> activateChooser -> the dense picker.
+press MAIN3
+frames 15
+!assert require('Application').getVisibleContext():top():getClassName() == 'Unit.Chooser.Dense'
+
+# The observed context/stack route from boot to the open picker. Frame numbers are
+# stripped by the runner, so this pins the transition sequence, not the timing.
+!trace-golden picker-route
+
+quit

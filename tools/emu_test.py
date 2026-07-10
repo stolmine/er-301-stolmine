@@ -28,6 +28,7 @@ Environment:
   STOL_EMU_XROOT         xroot for the Lua interp   (default <repo>/xroot)
 """
 
+import difflib
 import os
 import re
 import select
@@ -46,6 +47,11 @@ REPLY_SIGIL = "@"
 # The unsolicited line the firmware emits once the Lua control-drain is live
 # (plan §5). Scripts start only after it arrives.
 READY_TOKEN = "ready"
+# [stol:emu-trace-golden] Async UI-trace lines (plan §11a) share the reply sigil
+# but are NOT command replies: `@trace <frame> <kind> <detail>`. The runner
+# siphons them into a per-test buffer (EmuProcess.trace) and keeps reading for the
+# real reply, so trace emission never desyncs the lockstep command/reply loop.
+TRACE_TOKEN = "trace"
 # ─────────────────────────────────────────────────────────────────────────────
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -88,7 +94,7 @@ class Config:
 # ── test-file model ──────────────────────────────────────────────────────────
 
 class Directive:
-    """A parsed line: kind is 'cmd' | 'golden' | 'assert' | 'expect' | 'packages'."""
+    """A parsed line: kind is 'cmd'|'golden'|'trace-golden'|'assert'|'expect'|'packages'."""
 
     def __init__(self, kind, arg, lineno, raw):
         self.kind = kind
@@ -113,7 +119,7 @@ def parse_test(path):
                 arg = parts[1] if len(parts) > 1 else ""
                 if name == "packages":
                     packages.extend(arg.split())
-                elif name in ("golden", "assert", "expect"):
+                elif name in ("golden", "assert", "expect", "trace-golden", "reachability"):
                     directives.append(Directive(name, arg, i, stripped))
                 else:
                     raise ValueError("%s:%d: unknown directive !%s" % (path, i, name))
@@ -209,6 +215,15 @@ class EmuProcess:
             cwd=REPO_ROOT,
         )
         self.log = []  # captured non-reply lines, for failure diagnostics
+        self.trace = []  # captured '@trace ...' payloads (sigil stripped)
+        self._fd = self.proc.stdout.fileno()
+        # Our own line buffer over the raw fd. We deliberately do NOT use
+        # proc.stdout.readline(): TextIOWrapper reads ahead, so when a siphoned
+        # trace line and the command reply arrive together, readline() pulls both
+        # into the wrapper's private buffer and the next select() on the fd then
+        # reports "empty" — the reply is lost. Reading the raw fd keeps every
+        # pending line visible to select.
+        self._buf = ""
 
     @staticmethod
     def _argv(emu_bin, config_path):
@@ -221,25 +236,49 @@ class EmuProcess:
         self.proc.stdin.write(line + "\n")
         self.proc.stdin.flush()
 
-    def read_reply(self, deadline):
-        """Block until a REPLY_SIGIL line arrives or the deadline passes.
-
-        Non-reply lines are captured as log noise. Returns the reply payload
-        (sigil stripped) or None on timeout / EOF.
-        """
+    def _next_line(self, deadline):
+        """Return the next complete line (newline stripped), or None on
+        timeout/EOF. Buffers the raw fd so no data is read past a line."""
         while True:
+            nl = self._buf.find("\n")
+            if nl >= 0:
+                line = self._buf[:nl]
+                self._buf = self._buf[nl + 1:]
+                return line.rstrip("\r")
             remaining = deadline - _now()
             if remaining <= 0:
                 return None
-            r, _, _ = select.select([self.proc.stdout], [], [], remaining)
+            r, _, _ = select.select([self._fd], [], [], remaining)
             if not r:
                 return None
-            line = self.proc.stdout.readline()
-            if line == "":
-                return None  # EOF: process exited
-            line = line.rstrip("\n")
+            chunk = os.read(self._fd, 4096)
+            if not chunk:
+                # EOF: flush any residual partial line, else signal exit.
+                if self._buf:
+                    line, self._buf = self._buf, ""
+                    return line.rstrip("\r")
+                return None
+            self._buf += chunk.decode("utf-8", "replace")
+
+    def read_reply(self, deadline):
+        """Block until a REPLY_SIGIL line arrives or the deadline passes.
+
+        Non-reply lines are captured as log noise; '@trace ...' lines are
+        siphoned into self.trace. Returns the reply payload (sigil stripped) or
+        None on timeout / EOF.
+        """
+        while True:
+            line = self._next_line(deadline)
+            if line is None:
+                return None
             if line.startswith(REPLY_SIGIL):
-                return line[len(REPLY_SIGIL):].strip()
+                payload = line[len(REPLY_SIGIL):].strip()
+                # Trace lines are async side-channel, not command replies: siphon
+                # them off and keep reading for the actual reply.
+                if payload.split(None, 1)[:1] == [TRACE_TOKEN]:
+                    self.trace.append(payload)
+                    continue
+                return payload
             self.log.append(line)
 
     def kill(self):
@@ -323,6 +362,18 @@ def run_test(cfg, path):
             result.log = emu.log[:]
             return result
 
+        # [stol:emu-trace-golden] If the test declares any !trace-golden, enable
+        # UI tracing right after boot so the whole gesture sequence is captured
+        # (the directive itself usually sits at the END of the script). An
+        # explicit `trace on` command in the script is harmless (Trace.on is
+        # idempotent). Trace lines are collected transparently in read_reply.
+        if any(d.kind == "trace-golden" for d in directives):
+            emu.send("trace on")
+            if emu.read_reply(deadline) is None:
+                result.reason = "watchdog: no reply to auto 'trace on'"
+                result.log = emu.log[:]
+                return result
+
         last_reply = None
         for d in directives:
             if d.kind == "cmd":
@@ -360,6 +411,26 @@ def run_test(cfg, path):
 
             elif d.kind == "golden":
                 ok, reason, detail = _do_golden(cfg, emu, name, d, sandbox, deadline)
+                if not ok:
+                    result.reason = reason
+                    result.log = emu.log[:]
+                    return result
+                if detail:
+                    result.detail = detail
+                last_reply = None
+
+            elif d.kind == "trace-golden":
+                ok, reason, detail = _do_trace_golden(cfg, emu, name, d)
+                if not ok:
+                    result.reason = reason
+                    result.log = emu.log[:]
+                    return result
+                if detail:
+                    result.detail = detail
+                last_reply = None
+
+            elif d.kind == "reachability":
+                ok, reason, detail = _do_reachability(cfg, emu, name, d, deadline)
                 if not ok:
                     result.reason = reason
                     result.log = emu.log[:]
@@ -422,6 +493,186 @@ def _do_golden(cfg, emu, test_name, d, sandbox, deadline):
     return True, "", ""
 
 
+# [stol:emu-trace-golden]
+
+_TRACE_RE = re.compile(r"^" + re.escape(TRACE_TOKEN) + r"\s+\d+\s+(.*)$")
+
+
+def normalize_trace(payloads):
+    """Frame-strip collected '@trace' payloads to a route signature.
+
+    Each payload is `trace <frame> <kind> <detail>`. We drop the leading
+    `trace <frame>` and keep `<kind> <detail>` order, so the golden is robust to
+    unrelated timing edits (the frame numbers) but still pins the transition
+    route. Returns a list of normalized lines.
+    """
+    out = []
+    for p in payloads:
+        m = _TRACE_RE.match(p)
+        out.append(m.group(1).rstrip() if m else p.rstrip())
+    return out
+
+
+def _do_trace_golden(cfg, emu, test_name, d):
+    """Handle `!trace-golden NAME`. Returns (ok, reason, detail)."""
+    trace_name = d.arg.strip()
+    lines = normalize_trace(emu.trace)
+    text = "".join(l + "\n" for l in lines)
+
+    golden = os.path.join(cfg.goldens_dir, test_name, trace_name + ".trace")
+    if cfg.update_golden:
+        os.makedirs(os.path.dirname(golden), exist_ok=True)
+        with open(golden, "w") as f:
+            f.write(text)
+        return True, "", "updated"
+    if not os.path.exists(golden):
+        return (
+            False,
+            "%s:%d trace golden missing: %s (run with STOL_UPDATE_GOLDEN=1 to create)"
+            % (test_name, d.lineno, golden),
+            "",
+        )
+    with open(golden, "r") as f:
+        want = f.read()
+    if want != text:
+        diff = "".join(
+            difflib.unified_diff(
+                want.splitlines(keepends=True),
+                text.splitlines(keepends=True),
+                fromfile="%s (golden)" % trace_name,
+                tofile="%s (observed)" % trace_name,
+            )
+        )
+        return (
+            False,
+            "%s:%d trace golden mismatch: %s (STOL_UPDATE_GOLDEN=1 to accept)\n%s"
+            % (test_name, d.lineno, trace_name, diff.rstrip("\n")),
+            "",
+        )
+    return True, "", ""
+
+
+# [stol:emu-ui-map] reachability walk of testing-assets/emu/ui-map.toml.
+
+
+def _bfs_path(adj, start, goal):
+    """Return a list of edge dicts forming a shortest path start -> goal, or
+    None if unreachable. Empty list means start == goal."""
+    if start == goal:
+        return []
+    from collections import deque
+    q = deque([(start, [])])
+    seen = {start}
+    while q:
+        node, path = q.popleft()
+        for to, edge in adj.get(node, []):
+            if to in seen:
+                continue
+            npath = path + [edge]
+            if to == goal:
+                return npath
+            seen.add(to)
+            q.append((to, npath))
+    return None
+
+
+def _do_reachability(cfg, emu, test_name, d, deadline):
+    """Handle `!reachability [map.toml]`. Walk every edge from its `from` node
+    (pathed from boot via the map itself) and assert the destination predicate
+    plus the declared `arrival` trace line. Returns (ok, reason, detail)."""
+    try:
+        import tomllib
+    except ImportError:
+        return False, "%s:%d reachability needs Python 3.11+ (tomllib)" % (test_name, d.lineno), ""
+
+    map_path = os.path.abspath(d.arg.strip()) if d.arg.strip() else os.path.join(
+        REPO_ROOT, "testing-assets/emu/ui-map.toml")
+    if not os.path.exists(map_path):
+        return False, "%s:%d ui-map not found: %s" % (test_name, d.lineno, map_path), ""
+    with open(map_path, "rb") as f:
+        m = tomllib.load(f)
+
+    meta = m.get("meta", {})
+    boot = meta.get("boot_node", "home")
+    reset = meta.get("reset", [])
+    nodes = m.get("node", {})
+    edges = m.get("edge", [])
+
+    # Adjacency for pathing to each edge's `from` node.
+    adj = {}
+    for e in edges:
+        adj.setdefault(e["from"], []).append((e["to"], e))
+
+    def drive(line):
+        emu.send(line)
+        r = emu.read_reply(deadline)
+        if r is None:
+            return "watchdog on %r" % line
+        if reply_is_err(r):
+            return "%r -> %s" % (line, r)
+        return None
+
+    def predicate_true(node):
+        expr = nodes.get(node, {}).get("recognize")
+        if not expr:
+            return "node %r has no recognize predicate" % node
+        emu.send("lua %s" % expr)
+        r = emu.read_reply(deadline)
+        if r is None:
+            return "watchdog on predicate for %r" % node
+        if reply_value(r) != "true":
+            return "predicate for %r -> %r" % (node, r)
+        return None
+
+    # Enable UI tracing so `arrival` can be cross-checked.
+    err = drive("trace on")
+    if err:
+        return False, "%s: %s" % (test_name, err), ""
+
+    walked = 0
+    for e in edges:
+        src, dst = e["from"], e["to"]
+        # 1. Reset to boot, then path to the edge's `from` node via the map.
+        for line in reset:
+            err = drive(line)
+            if err:
+                return False, "%s: reset %s" % (test_name, err), ""
+        path = _bfs_path(adj, boot, src)
+        if path is None:
+            return False, "%s: no path from boot %r to %r" % (test_name, boot, src), ""
+        for pe in path:
+            for line in pe["gesture"]:
+                err = drive(line)
+                if err:
+                    return False, "%s: pathing %s->%s: %s" % (test_name, pe["from"], pe["to"], err), ""
+        err = predicate_true(src)
+        if err:
+            return False, "%s: reached wrong `from` for %s->%s: %s" % (test_name, src, dst, err), ""
+
+        # 2. Drive the edge gesture; assert destination predicate + arrival trace.
+        mark = len(emu.trace)
+        for line in e["gesture"]:
+            err = drive(line)
+            if err:
+                return False, "%s: edge %s->%s: %s" % (test_name, src, dst, err), ""
+        err = predicate_true(dst)
+        if err:
+            return False, "%s: edge %s->%s did not arrive: %s" % (test_name, src, dst, err), ""
+        arrival = e.get("arrival")
+        if arrival:
+            seen = normalize_trace(emu.trace[mark:])
+            if arrival not in seen:
+                return (
+                    False,
+                    "%s: edge %s->%s missing arrival %r; trace was %s"
+                    % (test_name, src, dst, arrival, seen),
+                    "",
+                )
+        walked += 1
+
+    return True, "", "%d edges" % walked
+
+
 # ── discovery + suite ────────────────────────────────────────────────────────
 
 def discover_tests(cfg, selectors=None):
@@ -453,7 +704,13 @@ def run_suite(cfg, selectors=None, emit=print):
             emit("ok %d - %s%s" % (i, result.name, suffix))
         else:
             all_ok = False
-            emit("not ok %d - %s # %s" % (i, result.name, result.reason))
+            # A reason may carry a multi-line diff (e.g. trace-golden); keep the
+            # first line on the TAP `not ok` line and fold the rest into comments
+            # so the output stays valid TAP.
+            reason_lines = result.reason.split("\n")
+            emit("not ok %d - %s # %s" % (i, result.name, reason_lines[0]))
+            for extra in reason_lines[1:]:
+                emit("# %s" % extra)
             if result.sandbox and os.path.isdir(result.sandbox):
                 emit("# sandbox kept: %s" % result.sandbox)
             for line in result.log[-20:]:
@@ -511,6 +768,14 @@ def main():
         if cmd == "quit":
             reply("ok")
             return
+        elif cmd == "trace":
+            # Synthetic UI-trace emitter: `trace mark LABEL` emits a @trace line
+            # (frame-stamped) then acks; `trace on/off` just ack.
+            sub = arg.split(None, 1)
+            if sub and sub[0] == "mark":
+                label = sub[1] if len(sub) > 1 else ""
+                reply("trace 0 mark %s" % label)
+            reply("ok")
         elif cmd == "hang":
             # never replies -> exercises the watchdog
             while True:
@@ -672,6 +937,41 @@ def _selftest():
     lines = []
     ok = run_suite(make_cfg(), ["expect-fail"], emit=lines.append)
     check(not ok, "!expect mismatch fails")
+
+    # 8. trace-golden: create (update mode), match, mismatch. The fake emits a
+    # `@trace 0 mark <label>` line per `trace mark`; the runner frame-strips it to
+    # `mark <label>`, so the auto `trace on` (frame-stamped side channel) never
+    # pollutes the route signature.
+    write_test("trace-t", "trace mark alpha\ntrace mark beta\n!trace-golden route\nquit\n")
+    cfg = make_cfg()
+    cfg.update_golden = True
+    lines = []
+    ok = run_suite(cfg, ["trace-t"], emit=lines.append)
+    check(ok, "STOL_UPDATE_GOLDEN writes a trace golden and passes")
+    check(any("# updated" in l for l in lines), "trace update reports '# updated'")
+    gpath = os.path.join(goldens, "trace-t", "route.trace")
+    check(os.path.exists(gpath), "trace golden file written")
+    with open(gpath) as f:
+        check(f.read() == "mark alpha\nmark beta\n", "trace golden is frame-stripped route")
+    # match
+    lines = []
+    ok = run_suite(make_cfg(), ["trace-t"], emit=lines.append)
+    check(ok, "trace golden match passes on second run")
+    # mismatch: corrupt the golden
+    with open(gpath, "w") as f:
+        f.write("mark alpha\nmark GAMMA\n")
+    lines = []
+    ok = run_suite(make_cfg(), ["trace-t"], emit=lines.append)
+    check(not ok, "trace golden mismatch fails")
+    check(any("trace golden mismatch" in l for l in lines), "trace mismatch reason surfaced")
+    check(any(l.startswith("# ") and "GAMMA" in l for l in lines), "trace mismatch shows a diff")
+    # missing golden
+    write_test("trace-missing", "trace mark x\n!trace-golden nope\nquit\n")
+    lines = []
+    ok = run_suite(make_cfg(), ["trace-missing"], emit=lines.append)
+    check(not ok, "missing trace golden fails")
+    check(any("trace golden missing" in l and "STOL_UPDATE_GOLDEN" in l for l in lines),
+          "missing trace golden names the update env var")
 
     shutil.rmtree(tmp, ignore_errors=True)
 
