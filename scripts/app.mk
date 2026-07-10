@@ -20,6 +20,13 @@ libraries += $(libs_build_dir)/libne10.a
 libraries += $(libs_build_dir)/liblodepng.a
 libraries += $(libs_build_dir)/libminiz.a
 
+# [stol:infra-crash-diag-exc-hook] Uncomment to build the crash-diagnostics
+# hardware-test firmware: compiles the "1:/CRASH_TEST" boot-time self-trigger
+# into app_task (see planning/crash-diagnostics-plan.md section 6). Leave
+# commented for production — the capture path itself is always present but inert
+# until diagnostics are armed.
+# symbols += BUILDOPT_CRASH_TEST
+
 # sysbios configuration
 XDCLOCAL = $(sysbios_dir)/platforms
 XDCPATH = $(bios_install_dir);$(uia_install_dir);$(XDCLOCAL);

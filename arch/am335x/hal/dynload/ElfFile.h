@@ -28,6 +28,26 @@ namespace od
       return mLastError;
     }
 
+    // [stol:infra-crash-diag-module-map] Public accessors for the loaded segment
+    // bases/sizes so dlfcn's enumerator can emit the crash-report module map.
+    // Appended (ABI-safe): ElfFile is internal firmware, never SWIG-exposed.
+    const uint8_t *textBase() const
+    {
+      return mpTextSpace;
+    }
+    size_t textSize() const
+    {
+      return mTextSize;
+    }
+    const uint8_t *dataBase() const
+    {
+      return mpDataSpace;
+    }
+    size_t dataSize() const
+    {
+      return mDataSize;
+    }
+
   protected:
     std::string mFilename;
     std::string mLastError;

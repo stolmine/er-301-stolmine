@@ -36,6 +36,10 @@ menu:add("Card Console", card)
 local history = require "LogHistory"
 menu:add("Log History", history)
 
+-- [stol:infra-crash-diag-debug-mode-ui] Browse past crash reports (crash.log).
+local crashReports = require "CrashReportViewer"
+menu:add("Crash Reports", crashReports)
+
 -- Reset Scene Mode: clears scene-mode state on every channel
 -- (drops all scenes, clears CV subchains, resets arbiter
 -- Bias/Gain). Inline-action shim that satisfies AdminMode.Menu's

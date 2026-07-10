@@ -1,0 +1,25 @@
+# Flight recorder: zero-cost-when-off invariant + records-when-armed.
+# Default boot has enableCrashDiagnostics off, so the ring is disarmed and
+# record() must be a no-op (nothing captured). Then arming makes it record.
+
+frames 20
+
+# Debug mode OFF by default -> disarmed -> records nothing.
+!assert app.flightRecorderArmed() == false
+lua app.flightRecord('should-be-ignored')
+lua app.flightRecord('also-ignored')
+!assert app.flightRecorderCount() == 0
+
+# Arm (what enableCrashDiagnostics' onSet does) -> now it records.
+lua app.flightRecorderArm(true)
+!assert app.flightRecorderArmed() == true
+lua app.flightRecord('insert sc.cv')
+lua app.flightRecord('quickload slot 1')
+!assert app.flightRecorderCount() == 2
+!assert app.flightRecorderText():find('quickload slot 1') ~= nil
+
+# Clear empties the ring.
+lua app.flightRecorderClear()
+!assert app.flightRecorderCount() == 0
+
+quit

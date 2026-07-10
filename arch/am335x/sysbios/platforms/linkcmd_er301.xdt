@@ -222,10 +222,30 @@ SECTIONS {
     .debug_pubtypes     0 : { *(.debug_pubtypes) }
     .debug_ranges       0 : { *(.debug_ranges) }
 
+    /*
+     * [stol:infra-crash-diag-panic-buffer]
+     * od's runtime heap consumes 'unused_memory' up to __unused_memory_end__
+     * (see arch/am335x/hal/heap.c). Cap it 0x4000 bytes below the top of DDR so
+     * nothing allocates into the reserved panic buffer that follows.
+     */
     unused_memory : ALIGN(0x80) {
         __unused_memory_start__ = .;
-        . = ORIGIN(DDR3) + LENGTH(DDR3);
+        . = ORIGIN(DDR3) + LENGTH(DDR3) - 0x4000;
         __unused_memory_end__ = .;
+    } > DDR3
+
+    /*
+     * [stol:infra-crash-diag-panic-buffer]
+     * 16 KiB warm-reboot-surviving panic buffer at the very top of DDR
+     * (0xA0000000 - 0x4000 .. 0xA0000000). NOLOAD => the boot loader never
+     * writes it and C startup never zeros it (only .bss is zeroed). The ARM
+     * exception hook writes it from a fault context; the next boot flushes it to
+     * front/crash.log. A magic+CRC header makes a scrubbed region fail-safe.
+     */
+    .panicbuf (NOLOAD) : ALIGN(0x80) {
+        __panic_buffer_start__ = .;
+        . = ORIGIN(DDR3) + LENGTH(DDR3);
+        __panic_buffer_end__ = .;
     } > DDR3
 }
 

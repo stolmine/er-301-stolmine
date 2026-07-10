@@ -473,6 +473,10 @@ function ChainBase:loadUnit(loadInfo, position, continuing)
     unit:leftJustify()
     self:emitSignal("contentChanged", self)
   end
+  -- [stol:infra-crash-diag-flight-recorder] Unit insert is the top historical
+  -- crash trigger. record() no-ops when diagnostics are disarmed.
+  require("FlightRecorder").record("insert " ..
+    (loadInfo.moduleName or loadInfo.title or "?"))
   Busy.stop()
   return unit, position
 end

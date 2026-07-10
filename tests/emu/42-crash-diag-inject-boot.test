@@ -1,0 +1,25 @@
+# Inject a synthetic crash report, then run the on-boot pending check and confirm
+# the "a crash was captured" notice appears and is dismissable. The notice text is
+# static, so it is a valid golden target (the report content is not -- addresses
+# and timestamps vary).
+
+frames 20
+!assert app.EMULATION == true
+
+# Inject drops a schema-v2 report into crash.log and a pending marker.
+lua require('CrashReport').injectSynthetic('data-abort')
+!assert require('CrashReport').hasPending() == true
+
+# The on-boot check (same call Application.init makes) shows the notice.
+lua require('CrashReport').checkPendingOnBoot()
+frames 20
+!assert require('Application').getVisibleContext():top():getClassName() == 'MainMessage'
+!golden crash-notice
+
+# Dismiss (ENTER) -> notice closes, pending marker cleared, back on the home screen.
+press ENTER
+frames 20
+!assert require('CrashReport').hasPending() == false
+!assert require('Application').getVisibleContext():top():getClassName() == 'Chain.Root'
+
+quit

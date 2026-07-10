@@ -1,0 +1,21 @@
+# Module map renders non-empty in the emu. The emu loads packages as ordinary
+# shared objects (Lua require -> system linker), so the enumerator walks
+# dl_iterate_phdr; it must always yield the "kernel" (main program) plus at least
+# one shared object. Addresses are ASLR-randomized, so we assert structure, never
+# a golden.
+
+frames 20
+!assert app.EMULATION == true
+
+# The map is a non-empty, multi-line string containing the kernel entry.
+!assert type(app.getModuleMap()) == 'string' and #app.getModuleMap() > 20
+!assert app.getModuleMap():find('kernel') ~= nil
+
+# At least two module lines (kernel + >=1 shared object).
+!assert (select(2, app.getModuleMap():gsub('\n', '\n'))) >= 2
+
+# The parser turns the body into relocatable module records (kernel text=0 is
+# intentionally skipped, so this proves at least one relocated .so was seen).
+!assert #require('CrashReport').parseModuleMap(app.getModuleMap()) >= 1
+
+quit

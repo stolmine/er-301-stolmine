@@ -216,6 +216,8 @@ local function loadUnitPreset(unit, fullpath)
       local task = function(ans)
         if ans then
           Busy.start("Loading unit preset: %s", filename)
+          -- [stol:infra-crash-diag-flight-recorder]
+          require("FlightRecorder").record("preset-unit " .. filename)
           Path.pushWorkingDirectory(path)
           unit:deserialize(preset.data)
           Path.popWorkingDirectory()
@@ -309,6 +311,8 @@ local function loadChainPreset(chain, fullpath)
       local task = function(ans)
         if ans then
           Busy.start("Loading chain preset: %s", filename)
+          -- [stol:infra-crash-diag-flight-recorder]
+          require("FlightRecorder").record("preset-chain " .. filename)
           Path.pushWorkingDirectory(path)
           local wasMuted = chain:muteIfNeeded()
           chain:stop()
@@ -747,6 +751,9 @@ local function quickLoad(slot, i)
       local task = function(ans)
         if ans then
           Busy.start("Loading '%s'...", name)
+          -- [stol:infra-crash-diag-flight-recorder]
+          require("FlightRecorder").record(string.format("quickload slot %d",
+                                                          slot))
           preset:apply()
           metaData["boot"].lastSlot = slot
           writeBootData()

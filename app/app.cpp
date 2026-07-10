@@ -16,6 +16,7 @@
 #include <hal/dma.h>
 #include <hal/heap.h>
 #include <hal/log.h>
+#include <hal/crash.h>
 #include <hal/pump.h>
 #include <od/config.h>
 #include <od/glue/AppInterpreter.h>
@@ -77,6 +78,17 @@ extern "C"
     Timing_init();
     Card_init();
     Config_init("0:/firmware.cfg", "x:", "0:", "1:");
+    // [stol:infra-crash-diag-panic-buffer] Card stack + globalConfig are up now;
+    // if the previous boot captured a crash into the panic buffer, format it to
+    // front/crash.log and clear the magic. No-op when no valid report is present.
+    PanicBuffer_init();
+    PanicBuffer_flushToLog();
+#ifdef BUILDOPT_CRASH_TEST
+    // [stol:infra-crash-diag-exc-hook] Hardware self-test trigger. Only compiled
+    // into the crash-diagnostics test firmware (symbols += BUILDOPT_CRASH_TEST in
+    // scripts/app.mk). See planning/crash-diagnostics-plan.md section 6.
+    PanicBuffer_checkTestTrigger();
+#endif
     Pump_init();
     USB_init();
     Encoder_init();

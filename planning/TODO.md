@@ -5,7 +5,7 @@ ER-301-STOLMINE TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**68 items** — 42 done, 24 todo, 2 blocked. *Rendered 2026-07-09.*
+**68 items** — 42 done, 24 todo, 2 blocked. *Rendered 2026-07-10.*
 
 ## Sequencer
 

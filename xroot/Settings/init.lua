@@ -130,6 +130,19 @@ local defaults = {
       end
     end
   },
+  -- [stol:infra-crash-diag-debug-mode-ui] Arms the crash-diagnostics facility
+  -- (sibling to enableDevMode). On hardware the sibling's exception-hook capture
+  -- keys off this flag; on the emu it gates the flight recorder + injector. The
+  -- onSet arms/disarms the C flight-recorder ring so recording is zero-cost when
+  -- this is off.
+  enableCrashDiagnostics = {
+    category = "General",
+    description = "Enable crash diagnostics? (requires reboot)",
+    value = false,
+    onSet = function(value)
+      app.flightRecorderArm(value and true or false)
+    end
+  },
   unitControlReadoutSource = {
     category = "Units",
     description = "Displayed value for unit control readouts.",

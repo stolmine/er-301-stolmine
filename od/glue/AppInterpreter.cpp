@@ -1,4 +1,5 @@
 #include "AppInterpreter.h"
+#include <od/glue/CrashDiag.h>
 #include <hal/dir.h>
 #include <hal/fileops.h>
 #include <set>
@@ -199,6 +200,10 @@ namespace od
     luaopen_dir(L);
     // Defined by SWIG using app.cpp.swig
     luaopen_app(L);
+
+    // [stol:infra-crash-diag-module-map] Crash-diagnostics accessors go straight
+    // into the app table (no SWIG surface change); present in both arches.
+    registerCrashDiag(L);
 
 #ifdef BUILDOPT_TESTING
     execute("app.TESTING = true");

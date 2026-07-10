@@ -528,6 +528,17 @@ local function init()
     end
   end
 
+  -- [stol:infra-crash-diag-debug-mode-ui] Surface a captured crash on boot.
+  -- Guarded by pcall so a diagnostics glitch never blocks the boot path (a real
+  -- error still lands in the Crash hook installed at the top of init).
+  local okDiag, errDiag = pcall(function()
+    require("CrashReport").checkPendingOnBoot()
+  end)
+  if not okDiag then
+    app.logError("Application.init: crash-diag boot check failed: %s",
+                 tostring(errDiag))
+  end
+
   app.logInfo("Application.init: adc, mod, and audio start")
   app.Adc_start();
   app.Modulation_start();

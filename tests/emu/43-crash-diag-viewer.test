@@ -1,0 +1,29 @@
+# Admin crash-report viewer: inject two reports, open the viewer, confirm it lists
+# them and renders the injected fields in the detail scroll. Report content carries
+# ASLR addresses + wallclock timestamps, so we assert on parsed fields + row text
+# rather than a pixel golden.
+
+frames 20
+
+lua require('CrashReport').injectSynthetic('data-abort')
+lua require('CrashReport').injectSynthetic('undef')
+
+# The parser recovers both reports and their kinds (source of truth for the list).
+!assert #require('CrashReport').parseReports() == 2
+!assert require('CrashReport').parseReports()[1].kind == 'data-abort'
+!assert require('CrashReport').parseReports()[2].kind == 'undef'
+
+# Open the viewer (the AdminMode destination). onShow reloads from crash.log.
+lua require('CrashReportViewer'):show()
+frames 20
+!assert require('Application').getVisibleContext():top():getClassName() == 'CrashReportViewer'
+!assert require('CrashReportViewer'):size() == 2
+!assert require('CrashReportViewer').reportColumn:get(0):find('data%-abort') ~= nil
+
+# Drill into the first report; the detail scroll holds its full text incl. fields.
+press SUB1
+frames 20
+!assert require('Application').getVisibleContext():top():getClassName() == 'CrashReportDetail'
+!assert require('Application').getVisibleContext():top():size() > 5
+
+quit

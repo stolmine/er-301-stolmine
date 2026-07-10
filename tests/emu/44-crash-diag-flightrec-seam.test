@@ -1,0 +1,25 @@
+# Flight-recorder SEAM test: a real unit insert (the top historical crash trigger)
+# must land in the ring when diagnostics are armed. Drives ChainBase:loadUnit --
+# the same path the unit picker commits through -- via the chain API.
+
+frames 20
+
+# Arm diagnostics (what enableCrashDiagnostics' onSet does) and start clean.
+lua app.flightRecorderArm(true)
+lua app.flightRecorderClear()
+!assert app.flightRecorderCount() == 0
+
+# Insert a builtin unit into channel 1's chain -> loadUnit -> flight recorder.
+lua require('Channels').getChain(1):loadUnit(require('Unit.Factory').getBuiltin('TestOscillator'))
+frames 20
+!assert app.flightRecorderCount() >= 1
+!assert app.flightRecorderText():find('insert TestOscillator') ~= nil
+
+# And with diagnostics OFF, the same insert records nothing (zero cost when off).
+lua app.flightRecorderArm(false)
+lua app.flightRecorderClear()
+lua require('Channels').getChain(1):loadUnit(require('Unit.Factory').getBuiltin('TestOscillator'))
+frames 20
+!assert app.flightRecorderCount() == 0
+
+quit

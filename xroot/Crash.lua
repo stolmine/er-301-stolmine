@@ -1,35 +1,25 @@
 local Card = require "Card"
 
+-- [stol:infra-crash-diag-format] The Lua error path now writes a schema-v2 crash
+-- report via the shared CrashReport writer (kind = "lua"). The v2 block keeps the
+-- old "Firmware Version:/Boot Count:/Mount Count:/Error Message:/Recent Log
+-- Messages:" labels so pre-schema readers still cope, while gaining the shared
+-- Module Map + Flight Recorder sections that the C-side hardware capture also
+-- emits. See docs/CRASH_REPORT_FORMAT.md.
 local function saveCrashReport(msg, trace)
-  local reportSaved = false
-  if Card.mounted() then
-    local f = io.open(app.roots.front .. "/crash.log", "a+")
-    if f then
-      local Persist = require "Persist"
-      f:write("---CRASH REPORT BEGIN\n")
-      f:write(string.format("Time Since Boot: %0.3fs\n", app.wallclock()))
-      f:write(string.format("Firmware Version: %s\n",
-                            Persist.meta.boot.firmwareVersion))
-      f:write(string.format("Boot Count: %d\n", Persist.meta.boot.count))
-      f:write(string.format("Mount Count: %d\n", Persist.meta.mount.count))
-      f:write("Error Message:\n")
-      f:write(msg .. "\n")
-      f:write(trace .. "\n")
-      f:write("Recent Log Messages:\n")
-      local LogHistory = require "LogHistory"
-      local count = LogHistory:count()
-      for i = 1, count do
-        f:write(LogHistory:get(i), "\n")
-      end
-      f:write("---CRASH REPORT END\n")
-      f:close()
-      print("Crash report appended to 'crash.log'.")
-      reportSaved = true
-    else
-      print("Failed to write 'crash.log'.")
-    end
+  local CrashReport = require "CrashReport"
+  local ok, reportSaved = pcall(CrashReport.write, {
+    kind = "lua",
+    thread = "ui",
+    luaMessage = msg,
+    luaTrace = trace
+  })
+  if ok and reportSaved then
+    print("Crash report appended to 'crash.log'.")
+    return true
   end
-  return reportSaved
+  print("Failed to write 'crash.log'.")
+  return false
 end
 
 local function showDialog(reportSaved)
