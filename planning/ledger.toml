@@ -920,9 +920,10 @@ links = { depends_on = ["ui-model-facility"] }
 [[item]]
 id = "ui-planner-state-schema"
 title = "Fluent state vocabulary + uiState->fluents projection"
-status = "todo"
-stamped = "2026-07-10T17:48:52-05:00"
+status = "done"
+stamped = "2026-07-10T18:07:25-05:00"
 area = "emu"
+attested = "2026-07-10: docs/UI_STATE_SCHEMA.md defines the fluent vocabulary (context/focused_class/focused_unit/unit_in_chain/linked/slot_control/column_cursor/cell/modal, + adjacent/2 as a precondition-only domain predicate); tools/ui_fluents.py projects a uiState+lua-readback bundle to a canonical sorted fluent set with parse_goal + satisfies (cell tolerance 1e-6). Verified: --selftest 37 checks green (boot + C3 states, goal satisfaction incl. the sequencer cv1-first-6-at-C3 goal); test 54-fluents-projection green. Uses raw ui-map node names. Commit 2d9f567."
 verify = { kind = "manual", ref = "docs/UI_STATE_SCHEMA.md defines the typed fluents (context/stack/focus/focused-unit/per-slot control/link-state/chain-contents/sequencer cursor+cells/modals); a uiState->fluents normalizer produces a canonical fluent set for a known state (e.g. the C3 sequencer state) that a goal can partially match" }
 note = "planning/ui-planning-domain-plan.md §3. The FAR-END contract: goals are partial assignments of these fluents. Extraction is a host-side normalizer over emu.uiState() JSON (reuse xroot/emu/UIState.lua; no new Lua strictly required). Do first — everything else is expressed in this vocabulary."
 links = { depends_on = ["ui-model-introspect"] }
@@ -930,9 +931,10 @@ links = { depends_on = ["ui-model-introspect"] }
 [[item]]
 id = "ui-planner-operators"
 title = "Typed operator library (precondition->effect + gesture template), BDG-diffed"
-status = "todo"
-stamped = "2026-07-10T17:48:52-05:00"
+status = "done"
+stamped = "2026-07-10T18:07:25-05:00"
 area = "infra"
+attested = "2026-07-10: tools/extract_operators.py lifts 20 typed operators (12 map-nav, 4 ui_plan, 4 manifest; 14 static / 6 needs_crawl) into testing-assets/emu/ui-operators.toml (precondition->effect fluents + gesture template). scripts/dev ui-operators is the BDG gate (deterministic no-op regen; drift caught). Verified by DRIVING operators live: nav_home_to_admin, link(1,2), select_column(tr), set_cell(0,tr,0,1.0) all assert their effect fluents. Reconciled with the schema sibling: raw ui-map node names (unit_picker_dense not picker) so nav effects chain into preconditions; adjacent/2 shared. Commit 2d9f567."
 verify = { kind = "manual", ref = "testing-assets/emu/ui-operators.toml lists operators (id, params, precondition fluents, effect fluents, gesture template) lifted from ui-map.toml edges + manifest handler->targets + ui_plan goal-types; regenerating the static-derivable subset is a no-op diff; a UI change shows as an operator delta" }
 note = "planning/ui-planning-domain-plan.md §4. Operators ARE the manifest's handler->target edges lifted into typed composable actions (link, open-picker, insert, focus, set-cell, context-nav). Static seed from ui-map.toml + ui-model.manifest + tools/ui_plan.py's current goal-types; the dynamic remainder is filled by the crawler."
 links = { depends_on = ["ui-planner-state-schema"] }
@@ -966,3 +968,13 @@ area = "emu"
 verify = { kind = "manual", ref = "testing-assets/emu/goals/ holds (goal, plan, trace-golden) triples that regenerate + diff (seeded with the hand-proven ones: Network-glitch-on-M1, sequencer cv1 first-6-at-C3, admin/scope/sequencer entry, picker open/close); a coverage metric reports which fluents/operators have >=1 verified example goal" }
 note = "planning/ui-planning-domain-plan.md §6. The 'example goal coverage' as a BDG artifact: worked examples AND regression goldens in one. Each triple regenerates (plan from the current operator library, execute, diff the trace). Coverage = fraction of fluents/operators with a verified example, tracked in the ledger so 'how much of the UI agents can reach with foreknowledge' is a monotonic number."
 links = { depends_on = ["ui-planner-solver"] }
+
+[[item]]
+id = "emu-admin-golden-fragile"
+title = "10-admin-nav pixel golden is env-fragile (font-dependent render across builds)"
+status = "todo"
+stamped = "2026-07-10T18:07:25-05:00"
+area = "emu"
+verify = { kind = "manual", ref = "tests/emu/10-admin-nav passes on a FRESH clean build (make clean emu), not only on an incrementally-built binary; either the render is made deterministic (pinned font) or the pixel golden is replaced by the already-present state/trace assertions" }
+note = "Observed 2026-07-10 across three independent agent worktrees: 10-admin-nav's admin-menu PNG golden fails on a freshly-built emu (renders slightly differently, likely the FreeSans.ttf font-substitution warning) while passing on the main incrementally-built binary. Reinforces the tiering: prefer uiState (state) + trace-golden (route) over pixel goldens. Cheapest fix: drop the !golden from 10-admin-nav and keep its !assert (admin nav is already state-verified); or pin the font so pixel renders are build-stable. Low risk, unrelated to feature work."
+links = { depends_on = [] }
