@@ -5,7 +5,7 @@ ER-301-STOLMINE TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**52 items** — 27 done, 23 todo, 2 blocked. *Rendered 2026-07-09.*
+**53 items** — 27 done, 24 todo, 2 blocked. *Rendered 2026-07-09.*
 
 ## Sequencer
 
@@ -94,6 +94,7 @@ check`): a `done` item must have a real test or its named artifact.*
 
 | | id | item | verify |
 |---|---|---|---|
+|   | `infra-crash-diagnostics-debug-mode` | Dev-enabled debug mode captures C-side crash diagnostics (fault PC/registers, module map, symbolizable trace) | manual · 2026-07-09 |
 |   | `infra-v0616-port` | Port the TXo I2C master mod to the v0.6.16 stable firmware base | manual · 2026-07-09 |
 | ✓ | `infra-ledger-regime` | Ledger + BDG regime stood up (gate, render, hooks, blessed entrypoint) | manual *(attested)* · 2026-07-09 |
 | ✓ | `infra-package-diagnostics` | Detailed package load diagnostics for .pkg archive + .so ELF failures | manual *(attested)* · 2026-07-09 |
