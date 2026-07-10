@@ -5,7 +5,7 @@ ER-301-STOLMINE TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**53 items** — 27 done, 24 todo, 2 blocked. *Rendered 2026-07-09.*
+**58 items** — 27 done, 29 todo, 2 blocked. *Rendered 2026-07-09.*
 
 ## Sequencer
 
@@ -77,10 +77,15 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `emu-capture-fb` | Capture command dumps the framebuffers decoded to PNG | screenshot: send 'cap testing-assets/emu/<name>.png'; confirm the PNG matches the on-screen content of a known static screen (both displays composited) · 2026-07-09 |
 |   | `emu-cmd-buttons` | Button press/release commands with hold duration via Gpio_write | manual · 2026-07-09 |
 |   | `emu-cmd-encoder` | Encoder turn command adjusts encoderValue | manual · 2026-07-09 |
+|   | `emu-cmd-stable` | stable-frames primitive: resolve when N consecutive rendered frames are byte-identical | manual · 2026-07-09 |
 |   | `emu-cmd-toggles` | Storage / mode toggle-switch commands | manual · 2026-07-09 |
 |   | `emu-control-channel` | Line-oriented control channel read inside the emulator loop | manual · 2026-07-09 |
+|   | `emu-harness-runner` | Automated test runner: discovers tests/emu/*.test, drives headless emu, diffs goldens, TAP output | manual · 2026-07-09 |
 |   | `emu-headless-boot` | Emulator boots with --headless (no SDL window), firmware runs, clean exit | manual · 2026-07-09 |
+|   | `emu-hermetic-sandbox` | Per-run sandbox: front/rear roots built from committed fixtures, no state bleed between runs | manual · 2026-07-09 |
 |   | `emu-lua-eval` | Lua expression command routed to the app interpreter | manual · 2026-07-09 |
+|   | `emu-seed-flag` | --seed N makes the emulator's RNG deterministic | manual · 2026-07-09 |
+|   | `emu-ui-map` | Machine-readable UI map: contexts as nodes with Lua recognition predicates, gestures as edges | manual · 2026-07-09 |
 | ✓ | `emu-ui-pacer-fix` | Emulator UI loop pacer hits real 55 fps (matches hardware refresh) | manual *(attested)* · 2026-07-09 |
 
 ## Documentation

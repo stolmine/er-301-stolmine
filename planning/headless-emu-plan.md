@@ -141,3 +141,56 @@ settle or are out of golden scope. This is the item that turns
   for watching a script drive the UI); `--headless` only controls the window.
 - **`[stol:<id>]` anchors**: each phase's implementation seam gets its item's
   anchor tag; flip `anchor = true` on the item in the same commit.
+
+## 6. Determinacy threat model (added 2026-07-09, pre-implementation)
+
+Verified code facts: UI tweens are FRAME-INDEXED (`od/graphics/Graphic.cpp`
+TWEENSTEP per rendered frame), not wallclock — so all test gating is in frames.
+The global tween (cursor breath) phase = frames-since-boot and never settles;
+goldens avoid breath regions in v1 (option later: a tween-reset helper).
+`od::Random::init` seeds from `Rng_read32()` entropy — headless adds `--seed N`
+(emu/hal/rng.c only, no firmware change). Screensaver idle timer is a setting —
+the harness fixture disables it.
+
+Threats + countermeasures:
+1. Card-state bleed (recents/favorites/settings/boot count in ~/.od) →
+   hermetic per-run sandbox from committed fixtures, generated emu.config.
+2. RNG entropy → --seed.
+3. Breath phase varies with boot wallclock → frame gating post-`ready`;
+   goldens avoid breathing cursors.
+4. Wallclock UI (toasts, hold thresholds, screensaver) → press durations far
+   from gesture thresholds; `stable` primitive; fixture disables screensaver.
+5. Audio-reactive regions (meters/scope/VU) → silent/static fixture patches.
+6. Boot variance → `ready` line + lua-predicate waits, never fixed sleeps.
+7. Host-load pacing → frames not ms.
+8. Version/boot-count text → goldens avoid; release regen is a BDG accept.
+9. Cross-test contamination → one process + fresh sandbox per test.
+10. UI↔audio handshake timing → `!assert` lua predicates for state waits.
+
+New control primitive: `stable N [timeoutFrames]` — resolve when N consecutive
+rendered frames are byte-identical (fails to `err timeout` otherwise).
+
+## 7. Harness layer
+
+- `tools/emu_test.py` (stdlib-only runner): discovers `tests/emu/*.test`
+  (control-protocol scripts + runner directives `!golden NAME` / `!assert LUA`),
+  per test: build sandbox from `testing-assets/emu/fixtures/`, write emu.config,
+  spawn `emu.elf --headless --seed 301`, drive stdin/stdout with a watchdog
+  timeout, compare captures against `testing-assets/emu/goldens/`, TAP output,
+  nonzero exit on any fail. `STOL_UPDATE_GOLDEN=1` regenerates (deliberate only,
+  reason in commit message).
+- `scripts/dev test` runs the harness when `tests/emu/` exists.
+- Ledger: when the harness lands, test names (script basenames) become
+  claimable test cases — the orphan-test rule flips live (adapt TESTCASE
+  discovery in ledger.py to scan tests/emu/*.test).
+
+## 8. UI map
+
+`testing-assets/emu/ui-map.toml`: nodes = UI contexts (home, admin, picker,
+settings, sequencer takeover, ...) each with a `recognize` lua predicate and
+the fixture assumptions it needs; edges = gesture sequences (control-protocol
+lines) between nodes. Scripts/agents plot courses through the graph instead of
+hand-guessing button sequences; the runner can assert arrival via the node
+predicate. Derived from xroot sources + GETTING_STARTED.md + SEQUENCER.md;
+maintained as code changes (it is itself BDG-checkable later via a
+reachability smoke test).
