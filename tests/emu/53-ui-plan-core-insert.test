@@ -1,0 +1,75 @@
+# [stol:ui-model-planner] Layer-3 path-planner acceptance test (hermetic, CORE unit).
+#
+# This is the REALIZED plan that tools/ui_plan.py emits + executes for the goal
+#   {"link":[1,2], "insert":"Test Osc", "focus":"Test Osc",
+#    "control_at":{"M1":"Test Osc","M2":"V/oct"}}
+# The planner drives the same sequence live (`ui_plan.py --run`, closed-loop
+# picker navigation) and confirms arrival via emu.UIState; here it is pinned as a
+# committed gesture script so the suite regression-guards it hermetically. It is
+# the CORE-unit analogue of the manually-verified, NON-hermetic "Network on M1"
+# scenario (docs/UI_OPERATION.md; ui_plan.py docstring): same shape, a core unit
+# whose expanded[1] control is asserted on screen.
+#
+# Layout fact this pins (verified live 2026-07-10): on the chain SpottedStrip a
+# focused, overflowing unit renders with its HEADER at on-screen M1 (the chain
+# title/input scroll off) and its expanded[1] control at M2. Test Osc's
+# expanded[1] is the Pitch control (manifest: TestOscillator M1=Pitch 'tune'),
+# which lands at M2 as 'V/oct'. Fixture: pickerStyle=dense, animation=disabled.
+!packages core
+
+frames 20
+# boot is the per-channel chain edit view
+!assert require('emu.UIState').topClass() == 'Chain.Root'
+
+# ── goal step 1: stereo-link channels 1+2 (the link chord) ───────────────────
+!assert tostring(require('Channels').serialize().links.link12) == 'false'
+down SELECT1
+frames 6
+down SELECT2
+frames 6
+up SELECT2
+up SELECT1
+frames 10
+!assert tostring(require('Channels').serialize().links.link12) == 'true'
+
+# ── goal step 2: open the dense unit picker ──────────────────────────────────
+# After the link the chain is stereo (two input spots), so the empty insert
+# section -- and thus the picker opener -- sits at M4, not M3. The planner
+# resolves this live from uiState (the column holding EmptySection.EmptyControl);
+# pinned here as the literal MAIN4.
+!assert require('emu.UIState').controlClassAt('M4') == 'EmptySection.EmptyControl'
+press MAIN4
+frames 15
+!assert require('emu.UIState').topClass() == 'Unit.Chooser.Dense'
+
+# ── goal step 3: choose "Test Osc" (row 2, left column) ──────────────────────
+# channel-count-2 picker order: row0 Custom Effect|Custom Source,
+# row1 Mono Mix|Stereo Mix, row2 Test Osc|-. Cursor starts at row 0; step down
+# two selectable rows (EncoderThreshold.Default=3 raw detents per row), then pick
+# the LEFT cell (MAIN1). The ~0.12s pick-flash timer needs a settle after.
+turn 3
+frames 6
+turn 3
+frames 6
+press MAIN1
+frames 30
+
+# ── goal step 4: assert focused ──────────────────────────────────────────────
+!assert require('emu.UIState').topClass() == 'Chain.Root'
+!assert require('Channels').getChain(1):length() == 1
+!assert require('emu.UIState').selectionSectionClass() == 'Unit'
+!assert require('Channels').getChain(1):getSelection().title:find('Test Osc', 1, true) == 1
+# the freshly inserted unit lands focused in its expanded view
+!assert (select(2, require('Channels').getChain(1):getSelection())) == 'expanded'
+
+# ── goal step 5: assert the on-screen slot map (control_at) ──────────────────
+# header at M1, expanded[1] (Pitch) at M2 -- the planner's control_at goal.
+!assert require('emu.UIState').controlNameAt('M1') == 'Test Osc'
+!assert require('emu.UIState').controlClassAt('M1') == 'Unit.Base.Header'
+!assert require('emu.UIState').controlClassAt('M2') == 'Unit.ViewControl.Pitch'
+!assert require('emu.UIState').controlNameAt('M2') == 'V/oct'
+
+# uiState is a pure function of the settled state (determinism sanity).
+!assert require('emu.UIState').json() == require('emu.UIState').json()
+
+quit
