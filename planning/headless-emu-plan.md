@@ -306,3 +306,60 @@ Both agent workstreams integrated and driven against the real emu.elf:
   Parked as tests/emu/20-picker-open.test.todo, owned by emu-ui-map.
 - **Suite status:** 00-boot + 10-admin-nav green against real emu; runner,
   sandbox, seed, capture, determinism, stable all confirmed on hardware paths.
+
+## 11. Next phase: UI trace hooks → map completion → picker nav (plan 2026-07-09)
+
+Ordering insight: build the trace hooks FIRST, because they are the tool that
+makes UI-map discovery and the parked picker-nav problem tractable (drive a
+gesture, watch the @trace stream name the context transition instead of guessing).
+
+### 11a. emu-ui-trace-hooks (mostly Lua)
+- New EMULATION-only module (e.g. `xroot/emu/Trace.lua`) that, when enabled,
+  wraps the verified seams and emits `@trace <frame> <kind> <detail>`:
+  - `Application.setVisibleContext` (xroot/Application.lua:78) → `context show/hide`
+  - `Context:add` / `Context:remove` (xroot/Base/Context.lua:107,126; both funnel
+    through the internal `topChanged` at :6 — wrap the public methods, not the
+    local) → `window push/pop <className>`
+  - `Window:show` / `Window:hide` (xroot/Base/Window.lua:23,33) → optional, lower
+    priority; context+stack events are the load-bearing set.
+- Emission is async via `emu.pushControlReply("@trace ...")` — already callable
+  from the Lua thread; NO new C++ bridge needed for output.
+- Frame stamp: reuse/extend the per-frame counter in the onDisplayReady path
+  (xroot/Application.lua:172) so trace frames align with the harness `frames`
+  gate. Deterministic per the §6 clock model.
+- Control command `trace on [filter] | off | mark LABEL`: add to the C++ command
+  parser as sugar that enqueues the corresponding `lua require('emu.Trace')...`
+  call (keeps scripts readable; `mark` injects a `@trace <frame> mark LABEL` line
+  for correlating trace regions with test phases). Default filter = context+stack
+  only (Signal.emit is too chatty; leave it opt-in behind a filter token).
+- Guard: all wrapping installed only under `app.EMULATION` and only while
+  enabled — zero hardware impact, zero cost when off.
+
+### 11b. emu-trace-golden (Python runner)
+- New directive `!trace-golden NAME`: the runner enables trace at the point of
+  the directive (or the test opts in at top), captures the @trace stream for the
+  test, normalizes it (decide: strip frame numbers for a route-only golden, or
+  keep them bucketed — raw frames are deterministic but brittle to unrelated
+  timing edits; default to STRIPPING frames, keeping kind+detail order), and
+  byte-compares against `testing-assets/emu/goldens/<test>/<NAME>.trace`.
+  STOL_UPDATE_GOLDEN=1 regenerates; mismatch prints a unified diff naming the
+  first divergent transition.
+- This is the middle verification tier (route correctness) between `!assert`
+  (state) and `!golden` (pixels).
+
+### 11c. Picker nav discovery + UI-map completion (uses 11a)
+- With trace on, probe chain-cursor gestures from the boot Chain.Root focus to
+  find the route onto an empty insert section (the chooser opens from
+  EmptyControl/InsertControl:activateChooser, xroot/Chain/EmptySection.lua:56, via
+  ENTER/spot/SUB3 once that ply is focused). The unknown is purely the cursor-move
+  gesture; the trace stream will show when Unit.Chooser.Dense is pushed.
+- Verify every edge in testing-assets/emu/ui-map.toml live; correct gestures and
+  confidence levels; add an `arrival` event field per edge (the expected @trace
+  line) so the reachability smoke test can cross-check map vs observed trace.
+- Restore `tests/emu/20-picker-open.test.todo` → `.test` once the route is known;
+  add a `!trace-golden picker-route` to it as the first trace-golden in the suite.
+- Add a reachability smoke test (`tests/emu/30-ui-map-reachability.test` or a
+  runner mode) that walks each map edge and asserts arrival.
+
+Ledger items: emu-ui-trace-hooks, emu-trace-golden, emu-ui-map. Do NOT self-flip;
+verification + flip happens after review against the running emu.
