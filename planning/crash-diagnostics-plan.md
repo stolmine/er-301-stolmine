@@ -194,7 +194,7 @@ crash-diag-*.test`, full suite 9/9). Design decisions / deviations vs the sketch
   device" exists — confirm what (if anything) SYS/BIOS prints on abort today before
   building, so we extend rather than duplicate.
 
-## 6. Hardware test procedure (capture half — run on am335x tomorrow)
+## 7. Hardware test procedure (capture half — run on am335x, staged 2026-07-10)
 
 The capture half (`infra-crash-diag-exc-hook`, `infra-crash-diag-panic-buffer`)
 CANNOT run in the emulator — the traps are hardware-only. This section is the
