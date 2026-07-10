@@ -5,12 +5,16 @@ ER-301-STOLMINE TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**30 items** — 21 done, 8 todo, 1 blocked. *Rendered 2026-07-09.*
+**52 items** — 27 done, 23 todo, 2 blocked. *Rendered 2026-07-09.*
 
 ## Sequencer
 
 | | id | item | verify |
 |---|---|---|---|
+|   | `sequencer-enter-in-edit-toggle` | Admin toggle for ENTER-in-edit behavior (advance vs exit) | manual · 2026-07-09 |
+|   | `sequencer-gate-len-zero-random` | Include 0 (no-gate / rest) in the gate-len random pool | manual · 2026-07-09 |
+|   | `sequencer-shift-home-all-slots` | shift+HOME resets all 4 slot playheads (unified-transport scope) | manual · 2026-07-09 |
+| ✓ | `sequencer-bpm-latch-exit` | Sequencer BPM latch releases on UP and on takeover hide (no sticky encoder routing) | manual *(attested)* · 2026-07-09 |
 | ✓ | `sequencer-external-clock` | Grid sequencer external clock + reset with per-slot stL honoring | manual *(attested)* · 2026-07-09 |
 | ✓ | `sequencer-l1-cancel-revert` | Sequencer L1 CANCEL reverts a cell edit to its pre-edit value | manual *(attested)* · 2026-07-09 |
 | ✓ | `sequencer-modal-sweep-hardening` | Sequencer modal-mutual-exclusion sweep: single encoder owner, no colliding modes | manual *(attested)* · 2026-07-09 |
@@ -20,12 +24,21 @@ check`): a `done` item must have a real test or its named artifact.*
 
 | | id | item | verify |
 |---|---|---|---|
+|   | `scenes-authoring-edit-guards` | Close remaining scene-authoring edit-leak guards (retroactive gain-unfocus + subchain source-picker) | manual · 2026-07-09 |
+|   | `scenes-serialize-roundtrip-verify` | Bench-verify scene serialize/deserialize round-trip end-to-end | manual · 2026-07-09 |
 | ✓ | `scenes-hold-mode` | Hold-mode scenes with CV-selectable A/B via SceneIndexArbiter | manual *(attested)* · 2026-07-09 |
 
 ## UI / interaction
 
 | | id | item | verify |
 |---|---|---|---|
+|   | `ui-audio-editor-selection-ops` | Audio editor: selection-scoped destructive operations (idea) | manual · 2026-07-09 |
+|   | `ui-chain-ref-invalidation-link-unlink` | Chain-reference invalidation on stereo link/unlink (LocalChooser / Source.Chooser) | manual · 2026-07-09 |
+|   | `ui-core-keyword-type-revamp` | Core package keyword + type revamp: sampling glyph + keyword audit | manual · 2026-07-09 |
+|   | `ui-dense-picker-residuals` | Dense picker residual sub-features: I/O-fan sort, admin hidden-units restore list, sub-display preview pane | manual · 2026-07-09 |
+|   | `ui-encoder-capture-saturation` | Encoder capture under UI saturation: instrument then de-couple input from render | manual · 2026-07-09 |
+|   | `ui-screensaver-polish` | Screensaver polish: forest full-screen coverage + rain splash particles | screenshot: run the forest screensaver and confirm full-screen coverage; run the rain screensaver and confirm splash particles on impact · 2026-07-09 |
+| ✓ | `ui-chain-replace-picker-favorites` | Chain-UI replace picker opens in normal browse, not favorites-tagging mode | manual *(attested)* · 2026-07-09 |
 | ✓ | `ui-dense-unit-picker` | Dense 2-column unit picker: type glyphs, alphabet ribbon, sort/filter, M-key gestures | screenshot: Admin > Settings > Units > Unit picker style: dense; capture the 2-column layout with type glyphs, alphabet jump ribbon, and section dividers; cycle M2 sort modes and M3 type filter *(attested)* · 2026-07-09 |
 | ✓ | `ui-favorites-picker` | Favorites in the unit picker: shift-toggle edit mode, own category above Recents | manual *(attested)* · 2026-07-09 |
 | ✓ | `ui-master-output-scale` | Master output scale: percentage-based output level in admin settings | manual *(attested)* · 2026-07-09 |
@@ -34,21 +47,27 @@ check`): a `done` item must have a real test or its named artifact.*
 | ✓ | `ui-readout-threshold-labels` | Readout/Fader threshold labels map float ranges to descriptive text | manual *(attested)* · 2026-07-09 |
 | ✓ | `ui-screensaver-doom` | Doom screensaver: doomgeneric with autoplay bot, letterboxed to 102x64 | screenshot: select the Doom screensaver manually (not in the cycle list); confirm the bot plays, renders 320x200 letterboxed into a 102x64 viewport, and auto-restarts on death *(attested)* · 2026-07-09 |
 | ✓ | `ui-screensavers` | Screensaver suite: snow, rain, forest, maze, perlin, voronoi + cycle mode | screenshot: let the device idle past the screensaver timeout; capture each of snow/rain/forest/maze/perlin/voronoi and confirm cycle mode rotates between them *(attested)* · 2026-07-09 |
+| ✓ | `ui-settings-picker-scene-categories` | Settings menu splits Unit Picker + Scenes into their own categories | screenshot: open Admin > Settings > Interface; confirm a 'Unit Picker' category (pickerStyle, showFavorites, pickerSectionDividers, pickerDefaultSort, pickerPinFavorites, pickerPinRecents) and a 'Scenes' category (sceneMode), distinct from the catch-all 'Units' and from 'Sequencer' / 'QuickSaves' *(attested)* · 2026-07-09 |
 | ✓ | `ui-slot-machine-text` | Slot-machine text input: 6 columns under M1-M6, hold-to-focus + encoder scroll | manual *(attested)* · 2026-07-09 |
 
 ## DSP units
 
 | | id | item | verify |
 |---|---|---|---|
+|   | `dsp-multi-output-followups` | Multi-output framework follow-ups (preset rewriter, picker glyph, topology surfacing, LUT audit) | manual · 2026-07-09 |
+|   | `dsp-stolmine-core-package` | Stolmine Core package: multi-output core units, default install with vanilla Core bundled | manual · 2026-07-09 |
 | ✗ | `dsp-stereo-mix-quicksave-drop` | Stereo Mix output drops to silence after quicksave load | manual *(attested)* · 2026-07-09 |
+| ✓ | `dsp-multi-output-framework` | Multi-output unit framework: units expose sub-outs picked from LocalChooser, vanilla-safe | manual *(attested)* · 2026-07-09 |
 | ✓ | `dsp-parallel-dsp` | Parallel DSP via BUILDOPT_PARALLEL_DSP WorkerPool | manual *(attested)* · 2026-07-09 |
 
 ## I2C / external control
 
 | | id | item | verify |
 |---|---|---|---|
+| ✗ | `i2c-sccv-insert-crash` | Crash when inserting sc.cv at the end of a chain (habitats + TXo + Teletype) | manual · 2026-07-09 |
 | ✓ | `i2c-teletype-coexist` | Teletype slave RX coexists with TXo master TX on the shared I2C2 peripheral | manual *(attested)* · 2026-07-09 |
 | ✓ | `i2c-txo-master` | TXo I2C master output: interrupt-driven CV/gate TX with gain + V/Oct mode | manual *(attested)* · 2026-07-09 |
+| ✓ | `i2c-txo-passthrough-toggle` | TXo TR/CV units expose a top-level passthrough toggle (I2C-pure send vs audio passthrough) | manual *(attested)* · 2026-07-09 |
 
 ## Emulator
 
@@ -64,10 +83,18 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `emu-lua-eval` | Lua expression command routed to the app interpreter (phase 2) | manual · 2026-07-09 |
 | ✓ | `emu-ui-pacer-fix` | Emulator UI loop pacer hits real 55 fps (matches hardware refresh) | manual *(attested)* · 2026-07-09 |
 
+## Documentation
+
+| | id | item | verify |
+|---|---|---|---|
+|   | `docs-intro-video` | Produce a short intro video for the stolmine firmware | manual · 2026-07-09 |
+| ✓ | `docs-porting-guide-301` | 301-ecosystem porting guide for the ledger + BDG regime | manual *(attested)* · 2026-07-09 |
+
 ## Infrastructure
 
 | | id | item | verify |
 |---|---|---|---|
+|   | `infra-v0616-port` | Port the TXo I2C master mod to the v0.6.16 stable firmware base | manual · 2026-07-09 |
 | ✓ | `infra-ledger-regime` | Ledger + BDG regime stood up (gate, render, hooks, blessed entrypoint) | manual *(attested)* · 2026-07-09 |
 | ✓ | `infra-package-diagnostics` | Detailed package load diagnostics for .pkg archive + .so ELF failures | manual *(attested)* · 2026-07-09 |
 | ✓ | `infra-swig-vanilla-compat` | SWIG pinned to 4.2.1 + runtime version bridge so vanilla community packages load | manual *(attested)* · 2026-07-09 |

@@ -331,3 +331,244 @@ area = "dsp"
 verify = { kind = "manual", ref = "load the user's plumbutter-loaded quicksave (stereo linked channel, Stereo Mix with both inputs occupied, Mono Mix passthrough downstream); confirm/deny that the Stereo Mix output scopes silent while its subchain inputs read signal" }
 attested = "2026-06-15 (TODO.md 'Bug Report: Stereo Mix Output Drops on Quicksave Load', commits 0f1265f + 55f771a filing the report and 70edea1 'cannot repro, gathering more info'): user-reported, reproduces on both stolmine AND vanilla v0.7.0 so it is upstream, not a stolmine regression. The wedged state serialize/deserialize round-trips faithfully (quicksave reload preserves the break); deleting and rebuilding the units by hand fixes it on both firmwares. Bram cannot reproduce locally; blocked pending the broken quicksave file + exact unit versions from the reporter."
 note = "Suspected onLoadGraph vs serialize/deserialize mismatch on the Stereo Mix unit or its subchain. Needs the reporter's quicksave to reproduce. Report upstream to odevices once reproduced."
+
+# Consolidation fragment for er-301-stolmine ledger.
+#
+# Drafted 2026-07-09 from an audit of the frozen roadmap TODO.md (840 lines,
+# repo root) against planning/ledger.toml. Every [[item]] here is a section of
+# that TODO.md not yet represented in the ledger. done-item dates + shas come
+# from actual git history (git show -s, git tag --contains); todo items keep a
+# note pointing back at the docs/planning/todo-archive.md section heading so the design detail stays
+# findable once TODO.md is archived.
+#
+# IDs are disjoint from the 21 already in the ledger. Append these [[item]]
+# blocks; do not renumber existing items.
+
+# ─────────────────────────── newly-attested done (backfill) ───────────────────────────
+
+[[item]]
+id = "ui-chain-replace-picker-favorites"
+title = "Chain-UI replace picker opens in normal browse, not favorites-tagging mode"
+status = "done"
+stamped = "2026-07-09T20:40:20-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "on a chain unit invoke Replace (shift+M3 in the header sub-menu); confirm the unit picker opens in normal browse mode (not favorites-tagging), so a replacement can be picked without releasing shift first" }
+attested = "2026-06-08 (commit 8135fc1 'polish: BPM latch UP+onHide + Replace picker shift + TXo passthrough toggle'), first released in v0.7.0-stolmine.9.5.0 (tag 0f36ac7, 2026-06-10). Fix: added an empty shiftPressed handler to xroot/Unit/Chooser/Default.lua (line ~479) so the shift-held picker entry is consumed and no phantom shiftReleased fires toggleFavoritesEditMode on first refresh. NOTE: TODO.md tagged this 'target: .9.2.1' and the summary bullet says 'shipped 9.2.1', but no 9.2.1 tag exists — the commit actually landed in the 2026-06-08 polish round and first shipped in 9.5.0."
+note = "From docs/planning/todo-archive.md section 'Chain UI: Replace Picker Opens in Favorites-Tagging Mode'. That section also documents a second, non-shipped concern (favorites-tagging EXIT feels sluggish — synchronous file I/O + both choosers refreshed on exit); the sluggish-exit refactor was NOT part of this fix and is not separately ledgered (dense picker is now the default layout, reducing its relevance)."
+
+[[item]]
+id = "sequencer-bpm-latch-exit"
+title = "Sequencer BPM latch releases on UP and on takeover hide (no sticky encoder routing)"
+status = "done"
+stamped = "2026-07-09T20:40:20-05:00"
+area = "sequencer"
+verify = { kind = "manual", ref = "latch BPM (shift+S2) in the sequencer takeover; press UP and confirm the latch releases and the dialed BPM persists to Settings; separately, latch BPM then exit the takeover (shift+ENTER / mode toggle / home) and re-enter, confirming the encoder is no longer routed to BPM" }
+attested = "2026-06-08 (commit 8135fc1 'polish: BPM latch UP+onHide + Replace picker shift + TXo passthrough toggle'), first released in v0.7.0-stolmine.9.5.0 (tag 0f36ac7, 2026-06-10). upReleased gained a bpmLatched branch (xroot/Sequencer/GridView.lua:2103-2110) parallel to cancelReleased's, and onHide now releases the latch and persists BPM (GridView.lua:1199-1216). NOTE: TODO.md tagged this 'target: .9.2.1' and the summary bullet says '9.4.0.16'; actual commit is the 2026-06-08 polish round, first shipped in 9.5.0."
+note = "From docs/planning/todo-archive.md section 'Sequencer BPM Latch: Exit Gestures + Scope-Mode Persistence'. CANCEL release was already wired (cancelReleased bpmLatched branch); the two shipped gaps were UP and onHide."
+
+[[item]]
+id = "i2c-txo-passthrough-toggle"
+title = "TXo TR/CV units expose a top-level passthrough toggle (I2C-pure send vs audio passthrough)"
+status = "done"
+stamped = "2026-07-09T20:40:20-05:00"
+area = "i2c"
+verify = { kind = "manual", ref = "instantiate a TXo TR (or CV) unit; confirm a top-level passthrough control that, when off, mutes the chain-input-to-Out1 passthrough while the I2C send (gate detection / V-oct CV) still fires on the TXo (hardware-only, needs a TXo expander)" }
+attested = "2026-06-08 (commit 8135fc1 'polish: BPM latch UP+onHide + Replace picker shift + TXo passthrough toggle'), first released in v0.7.0-stolmine.9.5.0 (tag 0f36ac7, 2026-06-10). Implemented in mods/txo/assets/TR.lua (and CV.lua) as a toggle-mode app.Comparator named 'passthrough' gating an app.Multiply 'vca' on the Out1 path, surfaced as a Gate control (differs from the TODO's proposed Multiply+Fader-on-ParameterAdapter design, same user-facing effect). NOTE: TODO.md tagged this 'target: .9.2.1' / summary bullet '9.2.1'; actual commit landed 2026-06-08, first shipped in 9.5.0."
+links = { depends_on = ["i2c-txo-master"] }
+note = "From docs/planning/todo-archive.md section 'TXo Units: Top-Level Passthrough Toggle'."
+
+[[item]]
+id = "dsp-multi-output-framework"
+title = "Multi-output unit framework: units expose sub-outs picked from LocalChooser, vanilla-safe"
+status = "done"
+stamped = "2026-07-09T20:40:20-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "instantiate the multiout QuadLFO fixture; confirm its sub-outs (>2) are pickable as sources from the local chooser on stolmine; load the same preset on vanilla firmware and confirm graceful fallback to the primary out (no crash)" }
+attested = "2026-04-21 (commits 7d99be1 'multi-out unit framework: Unit Lua + LocalChooser picker UI' + a9cc47d 'multiout package: QuadLFO test fixture'), first released in v0.7.0-stolmine.9.2.0. Validated end-to-end on stolmine emu, stolmine hardware, and vanilla firmware (graceful fallback to primary). Author guide in er-301-habitat/docs/multi-output-units-author-guide.md."
+note = "From docs/planning/todo-archive.md section 'Multi-Output Unit Framework — Follow-Ups' (which documents the shipped framework; the 4 non-blocking follow-ups are tracked separately as dsp-multi-output-followups)."
+
+[[item]]
+id = "ui-settings-picker-scene-categories"
+title = "Settings menu splits Unit Picker + Scenes into their own categories"
+status = "done"
+stamped = "2026-07-09T20:40:20-05:00"
+area = "ui"
+verify = { kind = "screenshot", ref = "open Admin > Settings > Interface; confirm a 'Unit Picker' category (pickerStyle, showFavorites, pickerSectionDividers, pickerDefaultSort, pickerPinFavorites, pickerPinRecents) and a 'Scenes' category (sceneMode), distinct from the catch-all 'Units' and from 'Sequencer' / 'QuickSaves'" }
+attested = "2026-06-04 (commit ed95e0d 'settings: split picker + scene-mode into own categories'), first released in v0.7.0-stolmine.9.4.0 (tag 7168d39, 2026-06-04). xroot/Settings/Interface.lua now emits addCategory 'Unit Picker' (line ~76) with the six picker variables and addCategory 'Scenes' (line ~107) with sceneMode."
+links = { depends_on = ["ui-dense-unit-picker", "scenes-hold-mode"] }
+note = "From docs/planning/todo-archive.md section 'Settings Menu: Picker + Scene Mode Categorization'. Fully shipped; the only listed-but-skipped sub-task is the long-term gray-out/hide of dense-only entries under classic layout (TODO explicitly marked that 'skip for v1' and relied on description-suffix signalling instead)."
+
+# ─────────────────────────── open work: sequencer (todo) ───────────────────────────
+
+[[item]]
+id = "sequencer-shift-home-all-slots"
+title = "shift+HOME resets all 4 slot playheads (unified-transport scope)"
+status = "todo"
+stamped = "2026-07-09T20:40:20-05:00"
+area = "sequencer"
+verify = { kind = "manual", ref = "run all 4 sequencer slots; press shift+HOME (outside L1 cell-edit); confirm every slot's playhead resets to 0, matching the S1 start/stop unified-transport scope, not just the active slot" }
+note = "From docs/planning/todo-archive.md section 'Sequencer: shift+HOME Resets All Slot Playheads'. VERIFIED STILL OPEN: xroot/Sequencer/GridView.lua:2180-2185 (zeroReleased) calls seq:resetSlot(self.slot) — single slot only. Fix is a loop `for s = 0, 3 do seq:resetSlot(s) end`. The in-edit-mode branch (zeros the focused cell) at GridView.lua:2172-2179 stays untouched."
+
+[[item]]
+id = "sequencer-gate-len-zero-random"
+title = "Include 0 (no-gate / rest) in the gate-len random pool"
+status = "todo"
+stamped = "2026-07-09T20:40:20-05:00"
+area = "sequencer"
+verify = { kind = "manual", ref = "roll gate-len via a ? action and via the selection-RAND softkey enough times; confirm 0 (silent/rest step) can occur, not just firing gate lengths" }
+note = "From docs/planning/todo-archive.md section 'Sequencer: Include 0 in gate-len Random Pool'. VERIFIED STILL OPEN: the pool excludes 0 in both places — Lua xroot/Sequencer/GridView.lua:680 kRandomBeats = {0.0625,0.125,0.25,0.5,1.0,2.0}; C++ od/sequencer/ActionApply.cpp:110-113 beats[] = {0.0625f,0.125f,0.25f,0.5f,1.0f,2.0f} with b(0,5). Both must add 0 and the C++ dist bump to (0,6) to stay in sync. TODO flags an open design choice: uniform vs weight the pool toward firing."
+
+[[item]]
+id = "sequencer-enter-in-edit-toggle"
+title = "Admin toggle for ENTER-in-edit behavior (advance vs exit)"
+status = "todo"
+stamped = "2026-07-09T20:40:20-05:00"
+area = "sequencer"
+verify = { kind = "manual", ref = "set the proposed sequencerEnterInEditMode admin setting to 'exit'; in single-cell L1 edit, press ENTER and confirm it commits + exits to navigation (rather than advancing the focus head one row and staying in edit); with 'advance' (default) confirm current advance behavior" }
+note = "From docs/planning/todo-archive.md section 'Sequencer: Admin Toggle for ENTER-in-Edit Behavior'. VERIFIED STILL OPEN and NOT superseded by the terminal-edit change (sequencer-terminal-edit-leds): editingL1 became a terminal modal in the sense that OTHER modal-entry gestures commit-and-exit the edit first (GridView.lua _commitOtherModalsBefore), but ENTER inside editingL1 still advances the focus head — xroot/Sequencer/GridView.lua:2024-2028 does focusHeadRow = clamp(focusHeadRow+1, ...) and re-snapshots the cell. No sequencerEnterInEditMode setting exists (grep clean). The advance-vs-exit asymmetry the TODO describes is intact, so this remains open design work."
+
+# ─────────────────────────── open work: ui (todo) ───────────────────────────
+
+[[item]]
+id = "ui-dense-picker-residuals"
+title = "Dense picker residual sub-features: I/O-fan sort, admin hidden-units restore list, sub-display preview pane"
+status = "todo"
+stamped = "2026-07-09T20:40:20-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "in the dense picker cycle M2 to an 'I/O fan' sort mode and confirm units order by input/output count; in Admin > Settings find a hidden-units list with per-row restore; confirm the sub-display shows a live preview pane (description / I-O fan / last-used) for the focused unit" }
+links = { depends_on = ["ui-dense-unit-picker"] }
+note = "From docs/planning/todo-archive.md sections 'Unit Picker Readability + Editability' (dense view). The dense picker shipped in 9.3.0 (ui-dense-unit-picker) with type glyphs (xroot/Unit/Chooser/Glyph.lua), hide state (Hidden.lua), recency sparklines (Sparkline.lua), and 6 sort modes (Dense.lua kSortModes: recents/alpha/type/package/keyword/favorites). This item groups the designed-but-unshipped residue: (1) the 7th sort mode 'I/O fan' (absent from kSortModes), (2) the admin 'Hidden units' list with per-row restore (Hidden.lua persists hide state but no admin management list surfaces it), (3) the cheap-win sub-display preview pane. All are power-user polish, none blocking."
+
+[[item]]
+id = "ui-core-keyword-type-revamp"
+title = "Core package keyword + type revamp: sampling glyph + keyword audit"
+status = "todo"
+stamped = "2026-07-09T20:40:20-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "add a 'sampling' type (7th glyph) to xroot/Unit/Chooser/Glyph.lua and audit mods/core/assets/toc.lua keywords; confirm sampling-family core units render with the new glyph, no core unit renders as '?' unknown, and keywords use canonical forms (modulate/cv/oscillator)" }
+links = { depends_on = ["ui-dense-unit-picker"] }
+note = "From docs/planning/todo-archive.md section 'Core Package Keyword + Type Revamp'. Add sampling as a first-class type (candidate glyph '%') to Glyph.lua cycleOrder/kClassLabel/kKeywordToGlyph; audit core toc.lua so the FIRST keyword reflects the primary type; backfill '?' units; apply consistently to in-house packages (multiout, txo, teletype). Out of scope: third-party packages (mi, biome, kryos)."
+
+[[item]]
+id = "ui-screensaver-polish"
+title = "Screensaver polish: forest full-screen coverage + rain splash particles"
+status = "todo"
+stamped = "2026-07-09T20:40:20-05:00"
+area = "ui"
+verify = { kind = "screenshot", ref = "run the forest screensaver and confirm full-screen coverage; run the rain screensaver and confirm splash particles on impact" }
+links = { depends_on = ["ui-screensavers"] }
+note = "From docs/planning/todo-archive.md section 'Screensaver Polish'. Two small polish items on the shipped screensaver suite (ui-screensavers)."
+
+[[item]]
+id = "ui-audio-editor-selection-ops"
+title = "Audio editor: selection-scoped destructive operations (idea)"
+status = "todo"
+stamped = "2026-07-09T20:40:20-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "with a sample-editor selection active (shift+scroll range), invoke an M-key operation (reverse / gain / cut / copy / paste) and confirm it scopes to the range; with no selection, confirm the same operation applies to the whole sample" }
+note = "From docs/planning/todo-archive.md section 'Audio Editor: Selection-Scoped Operations (idea, 2026-06-13)'. IDEA STAGE — not yet designed. Layer Audacity/Audition-style ops on the existing shift+scroll selection convention; same button, two scopes (selection vs whole-sample). Candidate ops: copy/cut/paste (cross-sample needs a clipboard), reverse, gain, pitch/time-stretch (gate behind its own pass). Undo/redo and a non-destructive edit layer are explicitly out of scope for the idea phase; pick an undo model before building."
+
+[[item]]
+id = "ui-chain-ref-invalidation-link-unlink"
+title = "Chain-reference invalidation on stereo link/unlink (LocalChooser / Source.Chooser)"
+status = "todo"
+stamped = "2026-07-09T20:40:20-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "with a LocalChooser / Source.Chooser holding a chain reference, link then unlink the stereo channel; confirm the chooser reseeds or dismisses cleanly instead of dangling on a destroyed chain object" }
+note = "From docs/planning/todo-archive.md section 'Chain-Reference Invalidation on Stereo Link/Unlink (pre-v9.1.0)'. Known fix shape: stereo link/unlink destroys+recreates chain objects but only UserMode subscribes to channelsModified; LocalChooser and Source/Chooser hold references that dangle. Apply the stock Signal.weakRegister pattern (as in Source/Chooser.lua:41, GlobalChains/Interface.lua:315-317) with reseed-or-dismiss semantics. Full analysis: docs/planning/chain_invalidation_on_link_unlink.md."
+
+[[item]]
+id = "ui-encoder-capture-saturation"
+title = "Encoder capture under UI saturation: instrument then de-couple input from render"
+status = "todo"
+stamped = "2026-07-09T20:40:20-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "drive the UI into CPU saturation (heavy Lua views / redraw during transitions); confirm encoder movement reaches the underlying parameter value within a few hundred ms even when the display lags — sluggish-but-trackable, never captured with seconds of ghost-motion backlog" }
+note = "From docs/planning/todo-archive.md section 'Encoder Capture Under UI Saturation'. DESIGN INVESTIGATION, not a spot fix. Root cause: only the audio thread has CPU accounting; the UI thread has no budget/watchdog/degradation path, so events pile up unbounded under overload. First step (before any fix): UI-thread budget instrumentation (analogous to od::extras::Profiler) to characterize which states saturate and how badly. Candidate remedies: input aging/coalescing, render-skip circuit breaker, input fast-path bypassing render, priority-inversion event drain."
+
+# ─────────────────────────── open work: infra / docs (todo) ───────────────────────────
+
+[[item]]
+id = "infra-v0616-port"
+title = "Port the TXo I2C master mod to the v0.6.16 stable firmware base"
+status = "todo"
+stamped = "2026-07-09T20:40:20-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "build the TXo I2C master mod against a v0.6.16 firmware base; confirm it loads and drives a TXo expander on that base (which retains third-party-package compatibility that v0.7 breaks)" }
+links = { depends_on = ["i2c-txo-master"] }
+note = "From docs/planning/todo-archive.md section 'v0.6.16 Port'. v0.7 breaks compatibility with all third-party packages (lojik, strike, sloop, polygon); v0.6.16 keeps it. UNLIKELY to be revisited on the AM335x fork (feature-complete at 9.5.0) — kept on the menu only. Low priority."
+
+[[item]]
+id = "docs-intro-video"
+title = "Produce a short intro video for the stolmine firmware"
+status = "todo"
+stamped = "2026-07-09T20:40:20-05:00"
+area = "docs"
+verify = { kind = "manual", ref = "produce the video per the script outline in video.md; confirm it introduces the stolmine firmware's differentiators end-to-end" }
+note = "From docs/planning/todo-archive.md section 'Intro Video'. Script outline lives in video.md."
+
+# ─────────────────────────── open work: dsp (todo) ───────────────────────────
+
+[[item]]
+id = "dsp-multi-output-followups"
+title = "Multi-output framework follow-ups (preset rewriter, picker glyph, topology surfacing, LUT audit)"
+status = "todo"
+stamped = "2026-07-09T20:40:20-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "confirm each non-blocking follow-up: (1) a stolmine-side save-time rewriter snaps sub-out indices >2 to primary for lossless vanilla degradation; (2) the unit picker shows a fan-out count next to multi-out unit types; (3) the focused multi-out unit's view surfaces its sub-out list; (4) any multi-out unit whose audio path shows the package trig bug uses a sinf/cosf LUT" }
+links = { depends_on = ["dsp-multi-output-framework"] }
+note = "From docs/planning/todo-archive.md section 'Multi-Output Unit Framework — Follow-Ups'. Four non-blocking items grouped: stolmine->vanilla preset rewriter (only worth building if cross-firmware presets become a real workflow), discoverability glyph in the picker (pure Lua under xroot/Unit/Chooser/), sub-out topology surfacing in the focused unit view (mechanism uncommitted), and the hardware sinf/cosf LUT audit (QuadLFO ships scalar sinf; user reports it works on hardware but LUT is the documented mitigation for the package trig bug)."
+
+[[item]]
+id = "dsp-stolmine-core-package"
+title = "Stolmine Core package: multi-output core units, default install with vanilla Core bundled"
+status = "todo"
+stamped = "2026-07-09T20:40:20-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "on a fresh install confirm stolmine Core activates by default (multi-out filters/envelopes/clocks/LFOs) while vanilla Core ships in the staging area and can be opted into via the package manager; confirm the two coexist without duplicate picker entries and that inactive sub-outs short-circuit their compute" }
+links = { depends_on = ["dsp-multi-output-framework"] }
+note = "From docs/planning/todo-archive.md section 'Stolmine Core Package (Multi-Output Core Units)'. DESIGN-OPEN. Open questions to resolve before coding: namespace strategy (distinct package id like core2.* vs reuse core.* with installer mutual-exclusion), which core units earn fan-out in v1 (ladder/SVF/env/LFO/clock yes; gain/sum/mixer no), whether to fork mods/core/ in-tree or start fresh under mods/stolmine-core/ importing DSP objects by reference, and the installer UX (default-installed alongside vanilla vs package-manager toggle). No C++ ABI work expected — fan-out affordances live in Lua + LocalChooser."
+
+# ─────────────────────────── open work: scenes (todo, from hold-mode-scenes-todos.md) ───────────────────────────
+
+[[item]]
+id = "scenes-authoring-edit-guards"
+title = "Close remaining scene-authoring edit-leak guards (retroactive gain-unfocus + subchain source-picker)"
+status = "todo"
+stamped = "2026-07-09T20:40:20-05:00"
+area = "scenes"
+verify = { kind = "manual", ref = "enter scene authoring while already focused on a non-routed sub readout (e.g. GainBias gain) and confirm the encoder can no longer edit it (enterSceneMode force-unfocuses non-routed slots); dive into a subchain during authoring and confirm the source picker refuses to reassign the subchain input source" }
+links = { depends_on = ["scenes-hold-mode"] }
+note = "From docs/planning/hold-mode-scenes-todos.md 'Open' section (delegated to by docs/planning/todo-archive.md (Hold-Mode Scenes'). Two remaining edit-leak guards beyond the shipped scene feature: (1) gain readout is gated in .33/.36 but only reactively — if the user is ALREADY focused on gain when authoring starts, the gate doesn't unfocus retroactively; mitigation is force-unfocus in enterSceneMode. (2) subchain-dive source-picker: .34 gated InputControl's SourceChooser at chain head, but the doc still lists the dive-into-subchain source picker (xroot/Source/Chooser.lua, Source/Local.lua) as needing equivalent rejectSceneAuthoringEdit gating — verify whether .34 already covers this callsite before implementing."
+
+[[item]]
+id = "scenes-serialize-roundtrip-verify"
+title = "Bench-verify scene serialize/deserialize round-trip end-to-end"
+status = "todo"
+stamped = "2026-07-09T20:40:20-05:00"
+area = "scenes"
+verify = { kind = "manual", ref = "build a chain with 2+ scenes carrying deltas across 2+ units incl. a nested branch, assign to A/B, save quickset, reboot, reload; confirm scene names, A/B assignments, delta counts/values, bias-fill indicator, authoring highlights, and audio sweep all restore; repeat with 8+ scenes for scroll viewport; cross-firmware (save stolmine, load vanilla → gracefully ignored) and old-preset compat" }
+links = { depends_on = ["scenes-hold-mode"] }
+note = "From docs/planning/hold-mode-scenes-todos.md 'Open' section. Serialize/deserialize was wired in Phase 1 + 4.3 and a serialization gap was fixed in .29/.30, but the doc records it was never bench-tested end-to-end past the .10->.20 state-machine/delta-map/indicator/viewport changes. Touch points: xroot/SceneView/init.lua, xroot/SceneView/Scene.lua, xroot/Chain/Root.lua."
+
+# ─────────────────────────── open bug: blocked ───────────────────────────
+
+[[item]]
+id = "i2c-sccv-insert-crash"
+title = "Crash when inserting sc.cv at the end of a chain (habitats + TXo + Teletype)"
+status = "blocked"
+stamped = "2026-07-09T20:40:20-05:00"
+area = "i2c"
+verify = { kind = "manual", ref = "on the latest firmware, build a chain with mutable units from the habitats package and TXo + Teletype enabled; insert an sc.cv unit at the end of the chain; confirm/deny the crash and capture a crashdump" }
+note = "From docs/planning/todo-archive.md section 'Crash Report: sc.cv insert at end of chain'. BLOCKED pending a device crashdump + exact unit list/order from the reporter (same blocking shape as dsp-stereo-mix-quicksave-drop). To collect: crashdump, exact unit list + order, whether link/unlink state matters, whether removing TXo or Teletype changes reproducibility. Cannot reproduce/diagnose without the crashdump."
+
+[[item]]
+id = "docs-porting-guide-301"
+title = "301-ecosystem porting guide for the ledger + BDG regime"
+status = "done"
+stamped = "2026-07-09T20:40:20-05:00"
+area = "docs"
+verify = { kind = "manual", ref = "planning/ledger-regime-porting-301.md exists and reflects the shipped tooling" }
+attested = "2026-07-09: wrote planning/ledger-regime-porting-301.md — companion to Ligature's ledger-regime-portable.md; captures the applied stolmine delta (STOL_/[stol:]/areas/no-build commit path/develop-allowed), 301-ecosystem constraints (release-dance tagging outside dev, testing/ is build output, Lua tag scanning, hardware-vs-emu attestation, headless emu as future substrate), and per-target notes (habitat first). Stolmine copies are canonical for 301 ports."
+note = "When the stolmine tooling and this doc drift, the code wins — update the doc. First port target: er-301-habitat (tag [hab:], areas {dsp, units, ui, seq, tooling, docs, infra}, todo.md is LIVE and must be migrated, not archived blind)."
+links = { depends_on = ["infra-ledger-regime"] }
