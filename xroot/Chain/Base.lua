@@ -429,6 +429,15 @@ end
 function ChainBase:loadUnit(loadInfo, position, continuing)
   Busy.start("Loading %s", loadInfo.title or loadInfo.moduleName)
 
+  -- [stol:infra-crash-diag-flight-recorder] Record the insert BEFORE the risky
+  -- work: UnitFactory.instantiate (below) traps in mi/Ngoma-class package
+  -- constructors, and insertUnit can trap on the audio task's first process().
+  -- The ring exists to explain exactly those crashes, so the trigger must be
+  -- recorded first -- matching the Persist seams (record-before-deserialize).
+  -- record() no-ops when diagnostics are disarmed.
+  local unitLabel = loadInfo.moduleName or loadInfo.title or "?"
+  require("FlightRecorder").record("insert " .. unitLabel)
+
   local args = {
     chain = self,
     depth = self.depth,
@@ -473,10 +482,10 @@ function ChainBase:loadUnit(loadInfo, position, continuing)
     unit:leftJustify()
     self:emitSignal("contentChanged", self)
   end
-  -- [stol:infra-crash-diag-flight-recorder] Unit insert is the top historical
-  -- crash trigger. record() no-ops when diagnostics are disarmed.
-  require("FlightRecorder").record("insert " ..
-    (loadInfo.moduleName or loadInfo.title or "?"))
+  -- [stol:infra-crash-diag-flight-recorder] Completion marker recorded only after
+  -- the insert fully succeeded, so a report distinguishes "crashed during insert"
+  -- (only the "insert" event present) from "crashed later" (both present).
+  require("FlightRecorder").record("insert-ok " .. unitLabel)
   Busy.stop()
   return unit, position
 end

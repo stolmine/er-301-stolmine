@@ -141,6 +141,18 @@ SECTIONS {
     _etext  = .;
     __etext = .;
 
+    /*
+     * [stol:crashdiag-fix-kernel-fallback-bound]
+     * Kernel text extent. The panic hook copies this range into module-map
+     * entry 0 ("kernel") so an unmatched code PC resolves to "?" at flush time
+     * instead of a falsely-confident "kernel + 0x8xxxxxxx". Start = the fixed
+     * .c_int00 load address (== __program_entry__, 0x80000000); end = etext,
+     * after .text/.rodata/.ARM. Packages load high in DDR (unused_memory), well
+     * above etext, so this bounded range excludes them.
+     */
+    __kernel_text_start__ = __program_entry__;
+    __kernel_text_end__   = .;
+
     .data : {
         __data_load__ = LOADADDR (.data);
         __data_start__ = .;

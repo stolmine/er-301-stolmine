@@ -36,16 +36,30 @@ extern "C"
   extern uint8_t __panic_buffer_start__[];
   extern uint8_t __panic_buffer_end__[];
 
+  // Kernel text extent (see linkcmd_er301.xdt). Copied into module-map entry 0
+  // so panicResolve can bound the "kernel" attribution instead of swallowing any
+  // unmatched 0x8xxxxxxx address. [stol:crashdiag-fix-kernel-fallback-bound]
+  extern uint8_t __kernel_text_start__[];
+  extern uint8_t __kernel_text_end__[];
+
   // ---------------------------------------------------------------------------
   // Panic record layout (lives at __panic_buffer_start__)
   // ---------------------------------------------------------------------------
 
 #define PANIC_MAGIC 0x53544C43u // 'STLC' — stolmine crash
-#define PANIC_VERSION 2u        // matches the crash-report schema version
+  // Binary panic-record LAYOUT version. Bumped whenever the PanicRecord struct
+  // changes, so a record written by an OLD firmware that survived a warm-reboot
+  // reflash is rejected as invalid (version mismatch) rather than misread with
+  // the new layout. This is distinct from the TEXT crash-report schema (the
+  // literal "Schema: 2" line in the flushed block, the shared contract in
+  // docs/CRASH_REPORT_FORMAT.md) which is unchanged by binary-layout bumps.
+  //   v3: added char fwVersion[] (capture-time firmware) + bounded kernel entry.
+#define PANIC_VERSION 3u
 #define PANIC_MAX_MODULES 48
 #define PANIC_MAX_FR_EVENTS 32
 #define PANIC_FR_LABEL_LEN 48
 #define PANIC_THREAD_NAME_LEN 16
+#define PANIC_FW_VERSION_LEN 32
 
   typedef struct
   {
@@ -73,6 +87,12 @@ extern "C"
 
     float wallclock; // seconds since boot at fault time
 
+    // [stol:crashdiag-fix-fwversion-capture-time] Firmware version captured at
+    // FAULT time, not flush time. The record survives a warm reboot (including a
+    // reflash), so printing the flushing binary's version would mislabel an old
+    // crash with the new firmware. Filled from FIRMWARE_VERSION in the hook.
+    char fwVersion[PANIC_FW_VERSION_LEN];
+
     // Module map
     uint32_t moduleCount;
     PanicModuleEntry modules[PANIC_MAX_MODULES];
@@ -82,12 +102,25 @@ extern "C"
     PanicFrEvent fr[PANIC_MAX_FR_EVENTS];
   } PanicRecord;
 
+  // [stol:crashdiag-review-nits] The reserved .panicbuf region is 16 KiB (see
+  // arch/am335x/sysbios/platforms/linkcmd_er301.xdt). Guard so a future
+  // PANIC_MAX_MODULES bump, a wider PanicModuleEntry::path, or a new field
+  // cannot silently overflow the region.
+  static_assert(sizeof(PanicRecord) <= 0x4000,
+                "PanicRecord exceeds the 16 KiB reserved .panicbuf region");
+
   // ---------------------------------------------------------------------------
   // Arm / behavior state (plain globals — no constructors, zero-cost when off)
   // ---------------------------------------------------------------------------
 
   static bool g_autoReboot = true;
   static volatile int g_inHook = 0;
+  // [stol:crashdiag-fix-oneshot-guard] Set once a record is sealed. Capture is
+  // ONE-SHOT: after a successful seal the device is rebooting, so the hook must
+  // never run again — otherwise a nested fault in the SYS/BIOS Error_raise tail
+  // (which runs on possibly-corrupt state within the ~30ms WDT window) would
+  // re-enter and memset/overwrite the real sealed record with a boring one.
+  static volatile bool g_captured = false;
 
   void Crash_arm(bool on)
   {
@@ -122,6 +155,10 @@ extern "C"
       for (int b = 0; b < 8; b++)
       {
         uint32_t mask = -(crc & 1u);
+        // [stol:crashdiag-review-nits] NOTE: 0xEDB88720 is NON-STANDARD (the
+        // standard reversed CRC-32 polynomial is 0xEDB88320). It is harmless
+        // here because the same function both seals and verifies, but an
+        // off-device reimplementer must use THIS value, not the textbook one.
         crc = (crc >> 1) ^ (0xEDB88720u & mask);
       }
     }
@@ -157,9 +194,12 @@ extern "C"
 
   void stolCrashExcHook(Exception_ExcContext *ctx)
   {
-    if (g_inHook)
+    if (g_captured || g_inHook)
     {
-      return; // nested fault while capturing — bail, do not recurse
+      // Already sealed a record (one-shot — the device is rebooting), or a
+      // nested fault re-entered while we are mid-capture. Either way, bail and
+      // preserve whatever is already in the buffer; do not recurse or overwrite.
+      return;
     }
     g_inHook = 1;
 
@@ -218,8 +258,27 @@ extern "C"
 
     rec->wallclock = wallclock();
 
+    // [stol:crashdiag-fix-fwversion-capture-time] Stamp the RUNNING firmware
+    // version now, at fault time. memset above already NUL-filled the field, so
+    // a bounded strncpy leaves it terminated (and "?" at flush if unset).
+#ifdef FIRMWARE_VERSION
+    strncpy(rec->fwVersion, FIRMWARE_VERSION, sizeof(rec->fwVersion) - 1);
+#endif
+
     // Module map — allocation-free reader over the dlopen registry.
     rec->moduleCount = (uint32_t)panicEnumerateModules(rec->modules, PANIC_MAX_MODULES);
+
+    // [stol:crashdiag-fix-kernel-fallback-bound] Entry 0 is the kernel by
+    // convention (hal/crash.h / panicEnumerateModules), emitted with textBase 0.
+    // Give it the REAL kernel text extent so panicResolve bounds the "kernel"
+    // attribution: an unmatched PC (package missing from the map, mid-dlopen,
+    // >48 modules) then resolves to "?" instead of a false "kernel + 0x8xxxxxxx".
+    if (rec->moduleCount > 0)
+    {
+      rec->modules[0].textBase = (uintptr_t)__kernel_text_start__;
+      rec->modules[0].textSize =
+          (uint32_t)((uintptr_t)__kernel_text_end__ - (uintptr_t)__kernel_text_start__);
+    }
 
     // Flight-recorder ring (fixed struct, no heap — safe to read here).
     {
@@ -247,6 +306,14 @@ extern "C"
     rec->crc = panicCrc32((const uint8_t *)&rec->version, panicPayloadLen());
     rec->magic = PANIC_MAGIC;
 
+    // [stol:crashdiag-fix-oneshot-guard] Record is now sealed (magic written
+    // last). Latch capture OFF before we touch anything else: from here on any
+    // nested fault (in Cache_wbInv, reboot(), or the SYS/BIOS Error_raise tail)
+    // returns immediately at the hook entry and cannot overwrite this record.
+    // We deliberately do NOT reset g_inHook — the device is rebooting; there is
+    // nothing to re-enable.
+    g_captured = true;
+
     // DDR is cached: push the record out of D-cache to DRAM so it survives the
     // reset (a warm reset drops cache lines without writeback).
     Cache_wbInv((Ptr)__panic_buffer_start__, (SizeT)sizeof(PanicRecord), (Bits16)Cache_Type_ALL, (Bool)TRUE);
@@ -257,8 +324,6 @@ extern "C"
     {
       reboot(); // WDT warm reset; returns, then fires a few ticks later
     }
-
-    g_inHook = 0;
   }
 
   // ---------------------------------------------------------------------------
@@ -307,6 +372,10 @@ extern "C"
       return "prefetch-abort";
     case Exception_Type_UndefInst:
       return "undef";
+    // [stol:crashdiag-review-nits] "swi"/"unknown" are outside the documented
+    // Kind enum in docs/CRASH_REPORT_FORMAT.md (data-abort | prefetch-abort |
+    // undef | lua | hang-watchdog). Kept because parsers tolerate an unknown
+    // Kind and these only appear for exotic traps; do not treat as the enum.
     case Exception_Type_Supervisor:
       return "swi";
     default:
@@ -315,9 +384,20 @@ extern "C"
   }
 
   // Resolve a code address to "<module> + <offset>" using the captured map.
-  // Kernel is not relocated on am335x, so a DDR-code address that matches no
-  // package is reported as "kernel + <absolute addr>" (feed straight to addr2line
-  // against kernel.elf). Anything else is "?".
+  //
+  // [stol:crashdiag-fix-kernel-fallback-bound] Every entry — INCLUDING the
+  // kernel (entry 0, now carrying its real bounded text extent) — is matched by
+  // its [textBase, textBase+textSize) range. An address inside NO entry resolves
+  // to "?"; there is no whole-0x8xxxxxxx "kernel" fallback (packages also live in
+  // DDR, so that fallback mislabelled a missing-from-map package PC as kernel).
+  //
+  // Offset semantics differ by relocation, matching tools/symbolize_crash.py:
+  //   * kernel  — linked at its runtime address (0x80000000), NOT relocated, so
+  //               addr2line against app.elf wants the ABSOLUTE address; offset
+  //               is the addr itself.
+  //   * package — linked at 0 and loaded into the od heap, so offset is
+  //               addr - textBase.
+  // The kernel entry is identified by its "kernel" path (enumerator entry 0).
   static void panicResolve(PanicRecord *rec, uint32_t addr, char *out, size_t n)
   {
     for (uint32_t i = 0; i < rec->moduleCount; i++)
@@ -326,24 +406,26 @@ extern "C"
       if (m->textSize > 0 && addr >= m->textBase &&
           addr < m->textBase + m->textSize)
       {
-        snprintf(out, n, "%s + 0x%x", m->path,
-                 (unsigned)(addr - (uint32_t)m->textBase));
+        bool isKernel = (strcmp(m->path, "kernel") == 0);
+        unsigned off = isKernel ? (unsigned)addr
+                                : (unsigned)(addr - (uint32_t)m->textBase);
+        snprintf(out, n, "%s + 0x%x", m->path, off);
         return;
       }
-    }
-    if (addr >= 0x80000000u && addr < 0xA0000000u)
-    {
-      snprintf(out, n, "kernel + 0x%x", (unsigned)addr);
-      return;
     }
     snprintf(out, n, "?");
   }
 
-  // Append a NUL-terminated string to the open file.
-  static void panicPut(FIL *f, const char *s)
+  // Append a NUL-terminated string to the open file. Returns true only if the
+  // entire string was written (FRESULT ok AND all bytes accepted) so the caller
+  // can refuse to clear the panic magic on a partial/failed write.
+  // [stol:crashdiag-fix-flush-error-handling]
+  static bool panicPut(FIL *f, const char *s)
   {
+    UINT want = (UINT)strlen(s);
     UINT bw = 0;
-    f_write(f, s, (UINT)strlen(s), &bw);
+    FRESULT r = f_write(f, s, want, &bw);
+    return r == FR_OK && bw == want;
   }
 
   int PanicBuffer_flushToLog(void)
@@ -385,24 +467,36 @@ extern "C"
 
     char line[320];
 
-    panicPut(&f, "---CRASH REPORT BEGIN\n");
-    panicPut(&f, "Schema: 2\n");
+    // [stol:crashdiag-fix-flush-error-handling] Accumulate write success across
+    // the whole block. panicPut() returns false on a short/failed f_write and
+    // f_close is checked below; the panic magic is cleared ONLY if the entire
+    // block landed. On any failure the magic survives so the existing next-boot
+    // retry re-attempts (protecting the single copy on a full/failing card).
+    bool ok = true;
+
+    ok &= panicPut(&f,"---CRASH REPORT BEGIN\n");
+    ok &= panicPut(&f,"Schema: 2\n");
     snprintf(line, sizeof(line), "Kind: %s\n", panicKindString(rec->faultType));
-    panicPut(&f, line);
+    ok &= panicPut(&f,line);
     snprintf(line, sizeof(line), "Time Since Boot: %0.3fs\n", (double)rec->wallclock);
-    panicPut(&f, line);
-#ifdef FIRMWARE_VERSION
-    snprintf(line, sizeof(line), "Firmware Version: %s\n", FIRMWARE_VERSION);
-#else
-    snprintf(line, sizeof(line), "Firmware Version: ?\n");
-#endif
-    panicPut(&f, line);
+    ok &= panicPut(&f,line);
+    // [stol:crashdiag-fix-fwversion-capture-time] Print the CAPTURE-time version
+    // recorded in the panic buffer, not the flushing binary's FIRMWARE_VERSION.
+    if (rec->fwVersion[0])
+    {
+      snprintf(line, sizeof(line), "Firmware Version: %s\n", rec->fwVersion);
+    }
+    else
+    {
+      snprintf(line, sizeof(line), "Firmware Version: ?\n");
+    }
+    ok &= panicPut(&f,line);
     // TODO(crash-diag integration): boot/mount counts live in Lua Persist.meta
     // and are not reachable from this C-side capture, so they are reported as
     // unknown. Separate labels (not "Boot/Mount Count") per the canonical
     // contract docs/CRASH_REPORT_FORMAT.md so old readers still cope.
-    panicPut(&f, "Boot Count: ?\n");
-    panicPut(&f, "Mount Count: ?\n");
+    ok &= panicPut(&f,"Boot Count: ?\n");
+    ok &= panicPut(&f,"Mount Count: ?\n");
     if (rec->threadName[0])
     {
       snprintf(line, sizeof(line), "Thread: %s\n", rec->threadName);
@@ -421,32 +515,32 @@ extern "C"
       snprintf(line, sizeof(line), "Thread: %s (handle=0x%x)\n", tt,
                (unsigned)rec->threadHandle);
     }
-    panicPut(&f, line);
+    ok &= panicPut(&f,line);
 
-    panicPut(&f, "--- Registers ---\n");
+    ok &= panicPut(&f,"--- Registers ---\n");
     snprintf(line, sizeof(line), " pc=%08x lr=%08x sp=%08x psr=%08x\n",
              (unsigned)rec->pc, (unsigned)rec->lr, (unsigned)rec->sp,
              (unsigned)rec->psr);
-    panicPut(&f, line);
+    ok &= panicPut(&f,line);
     snprintf(line, sizeof(line), " dfsr=%08x ifsr=%08x dfar=%08x ifar=%08x\n",
              (unsigned)rec->dfsr, (unsigned)rec->ifsr, (unsigned)rec->dfar,
              (unsigned)rec->ifar);
-    panicPut(&f, line);
+    ok &= panicPut(&f,line);
     snprintf(line, sizeof(line),
              " r0=%08x r1=%08x r2=%08x r3=%08x r4=%08x r5=%08x r6=%08x\n",
              (unsigned)rec->r[0], (unsigned)rec->r[1], (unsigned)rec->r[2],
              (unsigned)rec->r[3], (unsigned)rec->r[4], (unsigned)rec->r[5],
              (unsigned)rec->r[6]);
-    panicPut(&f, line);
+    ok &= panicPut(&f,line);
     snprintf(line, sizeof(line),
              " r7=%08x r8=%08x r9=%08x r10=%08x r11=%08x r12=%08x\n",
              (unsigned)rec->r[7], (unsigned)rec->r[8], (unsigned)rec->r[9],
              (unsigned)rec->r[10], (unsigned)rec->r[11], (unsigned)rec->r[12]);
-    panicPut(&f, line);
+    ok &= panicPut(&f,line);
 
     // Format matches od/glue/CrashDiag.cpp l_getModuleMap so the C (hardware) and
     // Lua (emu) reports render identically for tools/symbolize_crash.py.
-    panicPut(&f, "--- Module Map ---\n");
+    ok &= panicPut(&f,"--- Module Map ---\n");
     for (uint32_t i = 0; i < rec->moduleCount; i++)
     {
       PanicModuleEntry *m = &rec->modules[i];
@@ -475,24 +569,24 @@ extern "C"
         dataPart[0] = '\0';
       }
       snprintf(line, sizeof(line), " %-24s %s%s\n", m->path, textPart, dataPart);
-      panicPut(&f, line);
+      ok &= panicPut(&f,line);
     }
 
-    panicPut(&f, "--- Fault Resolution ---\n");
+    ok &= panicPut(&f,"--- Fault Resolution ---\n");
     {
       char res[128];
       panicResolve(rec, rec->pc, res, sizeof(res));
       snprintf(line, sizeof(line), " pc in %s\n", res);
-      panicPut(&f, line);
+      ok &= panicPut(&f,line);
       panicResolve(rec, rec->lr, res, sizeof(res));
       snprintf(line, sizeof(line), " lr in %s\n", res);
-      panicPut(&f, line);
+      ok &= panicPut(&f,line);
     }
 
-    panicPut(&f, "--- Flight Recorder ---\n");
+    ok &= panicPut(&f,"--- Flight Recorder ---\n");
     if (rec->frCount == 0)
     {
-      panicPut(&f, " (empty)\n");
+      ok &= panicPut(&f," (empty)\n");
     }
     else
     {
@@ -500,24 +594,35 @@ extern "C"
       {
         snprintf(line, sizeof(line), " %8.3fs  %s\n", (double)rec->fr[i].t,
                  rec->fr[i].label);
-        panicPut(&f, line);
+        ok &= panicPut(&f,line);
       }
     }
 
     // Recent Log ring lives in the Lua LogHistory and is not reachable from this
     // C-side capture. Keep the pre-schema "Recent Log Messages:" label so old
     // readers cope (docs/CRASH_REPORT_FORMAT.md).
-    panicPut(&f, "--- Recent Log ---\n");
-    panicPut(&f, "Recent Log Messages:\n");
-    panicPut(&f, " (not captured C-side; see flight recorder above)\n");
+    ok &= panicPut(&f,"--- Recent Log ---\n");
+    ok &= panicPut(&f,"Recent Log Messages:\n");
+    ok &= panicPut(&f," (not captured C-side; see flight recorder above)\n");
 
-    panicPut(&f, "---CRASH REPORT END\n");
+    ok &= panicPut(&f,"---CRASH REPORT END\n");
 
-    f_close(&f);
-
-    // Drop the pending-crash marker (xroot/CrashReport.lua) so the sibling's
-    // on-boot notice ("A crash was captured...") fires. One summary line.
+    // f_close flushes FatFS's dirty buffers; a failure here can mean the tail of
+    // the block never reached the card, so fold it into the success flag too.
+    if (f_close(&f) != FR_OK)
     {
+      ok = false;
+    }
+
+    // [stol:crashdiag-fix-flush-error-handling] Only advertise + retire the
+    // record if the WHOLE block wrote cleanly. On a partial/failed write we
+    // leave the magic set (skip PanicBuffer_clear) so a later boot retries,
+    // and skip the pending marker so the user is not pointed at a truncated
+    // report this boot (the next successful flush drops it).
+    if (ok)
+    {
+      // Drop the pending-crash marker (xroot/CrashReport.lua) so the sibling's
+      // on-boot notice ("A crash was captured...") fires. One summary line.
       char pending[32];
       snprintf(pending, sizeof(pending), "%s/crash.pending", globalConfig.frontRoot);
       FIL pf;
@@ -536,6 +641,14 @@ extern "C"
     if (weMounted)
     {
       Card_unmount(1);
+    }
+
+    if (!ok)
+    {
+      // Record preserved for the next boot's retry. No card scrub, no clear.
+      logInfo("PanicBuffer: crash.log write failed (card full/error?); "
+              "keeping record for retry");
+      return 0;
     }
 
     PanicBuffer_clear();

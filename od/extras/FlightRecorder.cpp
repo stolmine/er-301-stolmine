@@ -62,9 +62,17 @@ namespace od
     return &mRing[idx];
   }
 
+  // [stol:infra-crash-diag-flight-recorder] File-scope global, NOT a Meyers
+  // function-local static. A function-local static would run __cxa_guard_acquire
+  // + a lazy ctor on first touch -- and the sibling ARM abort hook may be the
+  // first thing to touch it, creating a hidden abort-context dependency. As a
+  // file-scope global it is constructed during static initialization (no guard
+  // variable). Its ctor only memsets the ring and depends on no other global, so
+  // static-init order is safe; the object also lives in zero-initialized storage.
+  FlightRecorder g_flightRecorder;
+
   FlightRecorder &flightRecorder()
   {
-    static FlightRecorder instance;
-    return instance;
+    return g_flightRecorder;
   }
 }

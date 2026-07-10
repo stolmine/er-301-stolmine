@@ -12,8 +12,14 @@ lua app.flightRecorderClear()
 # Insert a builtin unit into channel 1's chain -> loadUnit -> flight recorder.
 lua require('Channels').getChain(1):loadUnit(require('Unit.Factory').getBuiltin('TestOscillator'))
 frames 20
-!assert app.flightRecorderCount() >= 1
+# H3: loadUnit records "insert <unit>" BEFORE the risky work (instantiate /
+# first process()) and "insert-ok <unit>" AFTER a successful insert, so both land.
+!assert app.flightRecorderCount() >= 2
 !assert app.flightRecorderText():find('insert TestOscillator') ~= nil
+!assert app.flightRecorderText():find('insert%-ok TestOscillator') ~= nil
+# ...and the pre-work "insert" precedes the post-work "insert-ok" in the ring,
+# proving the trigger is now recorded before the code that can trap.
+!assert app.flightRecorderText():find('insert TestOscillator') < app.flightRecorderText():find('insert%-ok TestOscillator')
 
 # And with diagnostics OFF, the same insert records nothing (zero cost when off).
 lua app.flightRecorderArm(false)

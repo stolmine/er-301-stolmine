@@ -85,7 +85,10 @@ extern "C"
   // allocation-free variant, retire panicEnumerateModules and call that.
   typedef struct
   {
-    char path[64];      // "kernel" or the package .so path (truncated to fit)
+    // [stol:crashdiag-review-nits] 128 chars so a full package install path is
+    // not truncated: the host tool (tools/symbolize_crash.py) matches artifacts
+    // by basename, and a truncated tail can drop the basename entirely.
+    char path[128];     // "kernel" or the package .so path (truncated to fit)
     uintptr_t textBase; // runtime base of the code segment (0 == not relocated)
     uint32_t textSize;  // bytes (0 == unknown)
     uintptr_t dataBase; // runtime base of the data segment (0 == unknown)

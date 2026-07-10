@@ -137,7 +137,7 @@ local defaults = {
   -- this is off.
   enableCrashDiagnostics = {
     category = "General",
-    description = "Enable crash diagnostics? (requires reboot)",
+    description = "Enable crash diagnostics? (arms immediately)",
     value = false,
     onSet = function(value)
       app.flightRecorderArm(value and true or false)

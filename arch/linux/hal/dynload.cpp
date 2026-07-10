@@ -44,6 +44,24 @@ namespace
     m.dataBase = 0;
     m.dataSize = 0;
 
+    // [stol:infra-crash-diag-module-map] The symbolication base must be the LOAD
+    // BIAS (dlpi_addr), NOT dlpi_addr+p_vaddr. The host symbolizer computes
+    //     offset = capturedAddr - textBase
+    // and feeds that to addr2line, which wants the ELF link-time vaddr, i.e.
+    //     capturedAddr - dlpi_addr  ==  p_vaddr + (offset within segment).
+    // So we report textBase = dlpi_addr. To keep the module map's [lo..hi)
+    // containment check covering the real runtime PCs (which live at
+    // dlpi_addr + p_vaddr ..), the emitted text extent runs to the END of the
+    // exec segment measured from the bias, i.e. textSize = p_vaddr + p_memsz.
+    // Previously textBase = dlpi_addr + p_vaddr dropped p_vaddr from every
+    // offset, shifting all emu file:line under separate-code linking.
+    const uintptr_t loadBias = (uintptr_t)info->dlpi_addr;
+    bool haveText = false;
+    bool haveData = false;
+    uintptr_t textEnd = 0; // max (p_vaddr + p_memsz) over exec segments
+    uintptr_t dataVaddr = 0; // lowest writable p_vaddr
+    size_t dataMemsz = 0;
+
     for (int i = 0; i < info->dlpi_phnum; i++)
     {
       const ElfW(Phdr) &ph = info->dlpi_phdr[i];
@@ -51,25 +69,40 @@ namespace
       {
         continue;
       }
-      uintptr_t base = (uintptr_t)info->dlpi_addr + (uintptr_t)ph.p_vaddr;
+      const uintptr_t vaddr = (uintptr_t)ph.p_vaddr;
+      const uintptr_t end = vaddr + (uintptr_t)ph.p_memsz;
       if (ph.p_flags & PF_X)
       {
-        // Executable segment -> text. Take the first (lowest) one.
-        if (m.textBase == 0 || base < m.textBase)
+        // Executable segment -> text. Base is the load bias (shared across all
+        // segments); the extent must reach the end of the highest exec segment.
+        if (!haveText || end > textEnd)
         {
-          m.textBase = base;
-          m.textSize = (size_t)ph.p_memsz;
+          textEnd = end;
         }
+        haveText = true;
       }
       else if (ph.p_flags & PF_W)
       {
-        // Writable segment -> data.
-        if (m.dataBase == 0 || base < m.dataBase)
+        // Writable segment -> data (display only; not symbolized). Take the
+        // first (lowest) one, reporting its real runtime start.
+        if (!haveData || vaddr < dataVaddr)
         {
-          m.dataBase = base;
-          m.dataSize = (size_t)ph.p_memsz;
+          dataVaddr = vaddr;
+          dataMemsz = (size_t)ph.p_memsz;
         }
+        haveData = true;
       }
+    }
+
+    if (haveText)
+    {
+      m.textBase = loadBias;         // == addr2line base (the load bias)
+      m.textSize = (size_t)textEnd;  // range [loadBias .. loadBias+p_vaddr+memsz)
+    }
+    if (haveData)
+    {
+      m.dataBase = loadBias + dataVaddr; // real runtime data start
+      m.dataSize = dataMemsz;
     }
 
     acc->out->push_back(m);
