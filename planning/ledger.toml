@@ -766,3 +766,83 @@ area = "infra"
 verify = { kind = "manual", ref = "on hardware with debug mode armed, induce an audio-thread hang; confirm the watchdog fires, snapshots state to the panic buffer, and the report appears after reboot" }
 note = "planning/crash-diagnostics-plan.md §3. Several habitat sagas FROZE rather than trapped, which the exception hook alone never catches. Audio-thread heartbeat + am335x WDT (arch/am335x/ti/am335x/wdt.h). Deferred follow-on: the trap path (exc-hook + panic-buffer) lands first. HARDWARE-ONLY."
 links = { depends_on = ["infra-crash-diag-exc-hook"] }
+
+[[item]]
+id = "crashdiag-fix-oneshot-guard"
+title = "Crash hook must be one-shot: a post-capture nested fault overwrites the real report (H2)"
+status = "todo"
+stamped = "2026-07-10T10:17:40-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "on hardware, a trap whose post-hook Error_raise tail itself faults within the ~30ms WDT window must NOT overwrite the sealed record; the flushed report resolves to the original trap (dfar=0xF0000000), not kernel print/error machinery" }
+note = "Fable review 2026-07-10 (HIGH). arch/am335x/hal/crash/PanicBuffer.cpp:158-262: the hook resets g_inHook=0 and returns; SYS/BIOS then runs Error_raise->onSystemError->Error_print/System_printf on possibly-corrupt state (verified in vendor Exception.c:184-232). A nested fault re-enters the hook (g_inHook cleared, still armed) and memsets/overwrites the sealed record with the boring nested fault. This is THE misleading-report failure mode, most likely on the messiest crashes. Fix: make capture one-shot — do not reset g_inHook after a successful capture, or add a static g_captured checked at entry (device is rebooting anyway). BENCH-CRITICAL: without this, tomorrow's worst crashes lie."
+links = { depends_on = [] }
+
+[[item]]
+id = "crashdiag-fix-flightrec-insert-order"
+title = "Flight recorder records unit insert AFTER the risky work, missing the #1 trigger (H3)"
+status = "todo"
+stamped = "2026-07-10T10:17:40-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "a crash during UnitFactory.instantiate or the unit's first process() produces a report whose Flight Recorder names the insert that triggered it" }
+note = "Fable review 2026-07-10 (HIGH). xroot/Chain/Base.lua:476-479 records 'insert ...' as the LAST statement of loadUnit, after UnitFactory.instantiate:437 (where mi/Ngoma-class constructors trap) and after insertUnit (audio task can trap on first process()). The crash the ring exists to explain happens BEFORE the event is recorded → silent trigger. Persist seams got it right (record before deserialize/apply). Fix: move record() to the top of loadUnit before instantiate; optionally add an 'insert-ok' event after to show completion. Cheap, emu-verifiable."
+links = { depends_on = [] }
+
+[[item]]
+id = "crashdiag-fix-package-symbolication"
+title = "Offline symbolication of package PCs is broken by design — the headline use case (H1)"
+status = "todo"
+stamped = "2026-07-10T10:17:40-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "take a real captured PC inside a loaded package, run symbolize_crash.py, and confirm it resolves to the correct file:line (cross-checked against nm/objdump of the .so)" }
+note = "Fable review 2026-07-10 (HIGH, toolchain-only — no hardware risk). am335x packages are ET_REL relocatables built -ffunction-sections; the loader (ElfFile.cpp:171-241) repacks every SHF_ALLOC non-write section sequentially with 4-byte align into mpTextSpace. So pc-textBase is an offset into a repacked blob across hundreds of .text.* sections whose sh_addr are all 0. symbolize_crash.py:115 feeds that to addr2line as a link-time vaddr → ??:0 or CONFIDENTLY WRONG file:line. On-device 'libX.so + off' attribution is still correct; only the offset->file:line step is broken — and packages are exactly the habitat NEON-saga sites the feature targets. The §7 bench test faults in KERNEL code so it never exercises this. Fix: symbolize_crash.py must replicate the loader's deterministic section packing (walk SHF_ALLOC non-write section headers in order, ELF_ALIGNUP(4), find which section the blob offset lands in, addr2line -j <section> <section_offset>, or use the section symtab). All inputs are in the .so it already reads."
+links = { depends_on = ["infra-crash-diag-format"] }
+
+[[item]]
+id = "crashdiag-fix-fwversion-capture-time"
+title = "Firmware Version stamped at flush time, not capture time (M2)"
+status = "todo"
+stamped = "2026-07-10T10:17:40-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "capture a crash, install a different firmware (warm reboot preserves the record), boot; the flushed report shows the version that was running at CRASH time, not the new one" }
+note = "Fable review 2026-07-10 (MEDIUM). PanicBuffer.cpp:394-398 prints the FLUSHING binary's FIRMWARE_VERSION. A user's natural reaction to a crash is to reinstall firmware (warm reboot, record survives) → old crash mislabeled with new version → symbolication against 'matching' artifacts is silently wrong. Fix: add char fwVersion[32] to PanicRecord, filled in the hook, print that. BENCH-relevant: keeps the report honest across a reflash."
+links = { depends_on = [] }
+
+[[item]]
+id = "crashdiag-fix-flush-error-handling"
+title = "Flush ignores FatFS write errors, then destroys the only copy (M4)"
+status = "todo"
+stamped = "2026-07-10T10:17:40-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "with a full/failing card, confirm a failed crash.log write does NOT clear the panic-buffer magic (report retries next boot) rather than being lost" }
+note = "Fable review 2026-07-10 (MEDIUM). PanicBuffer.cpp:343-347/516/541: panicPut discards f_write's FRESULT and bw, f_close unchecked, then PanicBuffer_clear() runs unconditionally → a full/failing card yields a truncated/empty block and the record is gone forever. Fix: accumulate a success flag across panicPut/f_close, clear the magic only on a fully-written block (the no-card retry-next-boot machinery already exists). Cheap, protects the one copy."
+links = { depends_on = [] }
+
+[[item]]
+id = "crashdiag-fix-kernel-fallback-bound"
+title = "'kernel + offset' fallback swallows unknown package addresses (M1)"
+status = "todo"
+stamped = "2026-07-10T10:17:40-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "a PC in a package missing from the module map (>48 loaded, path truncated, mid-dlopen) resolves to '?' not a confident 'kernel + 0x9xxxxxxx'" }
+note = "Fable review 2026-07-10 (MEDIUM). PanicBuffer.cpp:334-338 + symbolize_crash.py:78 attribute any unmatched 0x80000000..0xA0000000 addr to the kernel, but packages live in the od heap (also DDR) → a missing-from-map PC is falsely reported as kernel with confidence. Fix: bound the kernel fallback by real kernel text extent (export etext/__program_entry__ from linkcmd, or capture it into module-map entry 0), print '?' outside it. Fix both the device resolver and the host tool."
+links = { depends_on = [] }
+
+[[item]]
+id = "crashdiag-fix-emu-symbolication-base"
+title = "Emu symbolication base off by p_vaddr (M3)"
+status = "todo"
+stamped = "2026-07-10T10:17:40-05:00"
+area = "emu"
+verify = { kind = "manual", ref = "symbolize a synthetic/emu report and confirm file:line matches the true source location (base = dlpi_addr, not dlpi_addr+p_vaddr)" }
+note = "Fable review 2026-07-10 (MEDIUM, emu-only — no real traps there). arch/linux/hal/dynload.cpp:54-62 sets textBase = dlpi_addr + p_vaddr(exec seg), so addr-textBase drops p_vaddr; addr2line needs addr-dlpi_addr. With separate-code linking (p_vaddr ~0x1000+) every emu file:line is shifted — confuses anyone validating the toolchain against the emu. Fix: record dlpi_addr as the base (or store p_vaddr so the symbolizer adds it back)."
+links = { depends_on = [] }
+
+[[item]]
+id = "crashdiag-review-nits"
+title = "Crash-diag review LOW/NIT cleanup batch"
+status = "todo"
+stamped = "2026-07-10T10:17:40-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "each LOW/NIT from the 2026-07-10 Fable review is addressed or consciously waived with a reason" }
+note = "Fable review 2026-07-10 LOW/NIT. L1: hook constructs FlightRecorder Meyers singleton from abort context if never touched (benign on arm-none-eabi no-threads libstdc++; make it a plain file-scope global to remove the hidden dependency). L2: PanicModuleEntry.path=63 chars truncates long install paths, breaking basename artifact match (hal/crash.h:89). L3: torn flight-recorder entry if hook preempts record() mid-write (accept, don't chase on bench). L4: crash.pending write failure silent → no boot notice though report lands (cosmetic). L5: SysMin UART decode buffer flushes at exit but WDT fires ~30ms after hook, so no live UART dump when auto-reboot armed — the NEXT-boot flush message is the signal (document, don't treat as failure). NITs: CRC poly 0xEDB88720 vs standard 0xEDB88320 (self-consistent, cosmetic); add static_assert(sizeof(PanicRecord)<=0x4000); Settings '(requires reboot)' text wrong (onSet arms immediately, Settings/init.lua:137); panicKindString emits swi/unknown outside documented Kind enum; disarmed seams pay a require+concat per insert (negligible)."
+links = { depends_on = [] }
