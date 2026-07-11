@@ -976,9 +976,10 @@ links = { depends_on = ["ui-planner-solver"] }
 [[item]]
 id = "emu-admin-golden-fragile"
 title = "10-admin-nav pixel golden is env-fragile (font-dependent render across builds)"
-status = "todo"
-stamped = "2026-07-10T18:07:25-05:00"
+status = "done"
+stamped = "2026-07-10T21:36:38-05:00"
 area = "emu"
+attested = "2026-07-10: Dropped the !golden admin pixel assertion from tests/emu/10-admin-nav.test and removed testing-assets/emu/goldens/10-admin-nav/; the test now verifies admin nav via its two state assertions (Chain.Root -> Menu/Admin), which are build-environment-robust. Verified passing on a fresh `make emu` rebuild. Reinforces: prefer state/trace tiers over pixel goldens for navigation. Commit follows."
 verify = { kind = "manual", ref = "tests/emu/10-admin-nav passes on a FRESH clean build (make clean emu), not only on an incrementally-built binary; either the render is made deterministic (pinned font) or the pixel golden is replaced by the already-present state/trace assertions" }
 note = "Observed 2026-07-10 across three independent agent worktrees: 10-admin-nav's admin-menu PNG golden fails on a freshly-built emu (renders slightly differently, likely the FreeSans.ttf font-substitution warning) while passing on the main incrementally-built binary. Reinforces the tiering: prefer uiState (state) + trace-golden (route) over pixel goldens. Cheapest fix: drop the !golden from 10-admin-nav and keep its !assert (admin nav is already state-verified); or pin the font so pixel renders are build-stable. Low risk, unrelated to feature work."
 links = { depends_on = [] }
