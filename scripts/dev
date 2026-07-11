@@ -19,6 +19,9 @@
 #                                baseline; STOL_UPDATE_UI_MODEL=1 regenerates)
 #   scripts/dev ui-operators     UI-planner operator-library gate (lift map+manifest
 #                                -> diff baseline; STOL_UPDATE_UI_OPERATORS=1 regen)
+#   scripts/dev ui-crawl         UI-planner EMPIRICAL-crawl gate (drive emu -> observe
+#                                -> diff baseline; STOL_UPDATE_UI_CRAWL=1 regen). SLOW,
+#                                drives the emu — MANUAL/CI ONLY, never in the commit path.
 #   scripts/dev render           regenerate planning/TODO.md from the ledger
 #   scripts/dev status           short ledger summary (used by the session hook)
 #   scripts/dev now              the current date/time (ISO-8601, local + offset)
@@ -160,6 +163,40 @@ do_ui_operators() {
   fi
   rm -f "$tmp"
   log "ui-operators: no drift ($UI_OPERATORS_TOML)"
+}
+# ── UI-planner empirical-crawl gate (planning/ui-planning-domain-plan.md §4) ──
+# Re-crawl the live UI (drive the headless emu, observe via emu.uiState() -> fluents)
+# and diff the resulting map against the committed baseline
+# (testing-assets/emu/ui-crawl.map). Drift means the UI's empirical transitions or
+# a resolved dynamic operator moved; the human accepts (STOL_UPDATE_UI_CRAWL=1
+# regenerates in place) or fixes the code. Same extract-and-diff discipline as
+# ui-model / ui-operators.
+#
+# IMPORTANT: crawling DRIVES THE EMU and is SLOW (hundreds of boots). It is a
+# MANUAL / CI gate ONLY — it is deliberately NOT wired into the commit path or the
+# fast `check` gate. Run it explicitly (or in CI) after a UI change; needs a built
+# emu binary (scripts/dev build first).
+UI_CRAWL_MAP="testing-assets/emu/ui-crawl.map"
+do_ui_crawl() {
+  local emu_bin="${STOL_EMU_BIN:-$ROOT/testing/linux-x86_64/emu/emu.elf}"
+  [ -x "$emu_bin" ] || die "ui-crawl needs a built emu binary ($emu_bin) — run: scripts/dev build"
+  if [ "${STOL_UPDATE_UI_CRAWL:-}" = 1 ]; then
+    log "ui-crawl: re-crawling (slow — drives the emu)…"
+    python3 tools/ui_crawl.py -o "$UI_CRAWL_MAP"
+    log "ui-crawl: map regenerated; review + commit the diff"
+    return 0
+  fi
+  log "ui-crawl: re-crawling to diff against baseline (slow — drives the emu)…"
+  local tmp; tmp="$(mktemp)"
+  python3 tools/ui_crawl.py --stdout > "$tmp"
+  if ! diff -u "$UI_CRAWL_MAP" "$tmp" >/dev/null 2>&1; then
+    printf '\033[31m✗ ui-crawl drift (the UI transitions / resolved operators moved):\033[0m\n' >&2
+    diff -u "$UI_CRAWL_MAP" "$tmp" >&2 || true
+    rm -f "$tmp"
+    die "ui-crawl drift: accept with STOL_UPDATE_UI_CRAWL=1 scripts/dev ui-crawl, or fix the code"
+  fi
+  rm -f "$tmp"
+  log "ui-crawl: no drift ($UI_CRAWL_MAP)"
 }
 do_status() { python3 tools/ledger.py status; }
 do_now()    { python3 tools/ledger.py now; }    # the ONE way to learn the date/time
@@ -307,6 +344,7 @@ case "$cmd" in
   check)  do_check "$@";;
   ui-model) do_ui_model "$@";;
   ui-operators) do_ui_operators "$@";;
+  ui-crawl) do_ui_crawl "$@";;
   render) do_render "$@";;
   status) do_status "$@";;
   now)    do_now "$@";;
@@ -317,6 +355,6 @@ case "$cmd" in
   commit) do_commit "$@";;
   push)   do_push "$@";;
   integrate) do_integrate "$@";;
-  *) die "usage: scripts/dev {build|test|check|ui-model|ui-operators|render|status|now|ledger-append|claim|release|claims|commit|push|integrate}";;
+  *) die "usage: scripts/dev {build|test|check|ui-model|ui-operators|ui-crawl|render|status|now|ledger-append|claim|release|claims|commit|push|integrate}";;
 esac
 fi

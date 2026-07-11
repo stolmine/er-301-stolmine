@@ -1,0 +1,41 @@
+# [stol:ui-planner-crawler] FAST regression for the crawler-RESOLVED set_cell
+# gesture SKELETON (testing-assets/emu/ui-crawl.map). Drives the resolved
+# precondition + skeleton: in context(sequencer) with a column selected, ENTER
+# enters the L1-edit modal (modal(editingL1)) and an encoder nudge changes the
+# cell value (value = f(nudges) is arithmetic per-column; the tr column steps 1.0
+# per encoder threshold). Firmware sequencer only, no packages.
+
+frames 20
+!assert require('emu.UIState').topClass() == 'Chain.Root'
+
+# reach context(sequencer): nav_home_to_scope + nav_scope_to_sequencer.
+mode down
+frames 10
+down SHIFT
+press ENTER
+up SHIFT
+frames 10
+!assert require('emu.UIState').topClass() == 'Sequencer.GridView'
+# cursor starts on cv1 (column 0); editingL1 not yet active.
+!assert require('Application').getVisibleContext():top().columnCursor == 0
+!assert require('Application').getVisibleContext():top().editingL1 ~= true
+
+# select the tr column (select_column: MAIN6 -> columnCursor 5).
+press MAIN6
+frames 6
+!assert require('Application').getVisibleContext():top().columnCursor == 5
+
+# set_cell skeleton step 1: ENTER enters the L1-edit terminal modal.
+!assert string.format('%.4f', app.AudioThread.getSequencerTask():l1Value(0,5,0)) == '0.0000'
+press ENTER
+frames 6
+!assert require('Application').getVisibleContext():top().editingL1 == true
+# the modal surfaces in uiState.modals (the fluent-projection input for modal(editingL1)).
+!assert (function() for _,m in ipairs(require('emu.UIState').describe().modals) do if m == 'editingL1' then return true end end return false end)()
+
+# set_cell skeleton step 2: one encoder threshold nudges the tr cell 0 -> 1.0.
+turn 3
+frames 6
+!assert string.format('%.4f', app.AudioThread.getSequencerTask():l1Value(0,5,0)) == '1.0000'
+
+quit

@@ -1,0 +1,36 @@
+# [stol:ui-planner-crawler] FAST regression for the crawler-RESOLVED open_picker
+# operator (testing-assets/emu/ui-crawl.map). NOT a full crawl -- it drives the two
+# resolved cases and asserts the resolved rule: open the dense picker by pressing
+# the MAIN column that holds EmptySection.EmptyControl -- M3 on an empty mono chain,
+# M4 after a stereo link adds a second input spot. Hermetic, firmware builtins only
+# (no packages).
+
+frames 20
+!assert require('emu.UIState').topClass() == 'Chain.Root'
+
+# ── case mono: the empty-insert control is at M3; MAIN3 opens the picker ───────
+!assert require('emu.UIState').controlClassAt('M3') == 'EmptySection.EmptyControl'
+press MAIN3
+frames 15
+!assert require('emu.UIState').topClass() == 'Unit.Chooser.Dense'
+# close it again (CANCEL) to return to the mono chain.
+press DIAL2
+frames 10
+!assert require('emu.UIState').topClass() == 'Chain.Root'
+
+# ── case linked: stereo-link 1+2, the empty-insert control shifts to M4 ────────
+down SELECT1
+frames 6
+down SELECT2
+frames 6
+up SELECT2
+up SELECT1
+frames 10
+!assert tostring(require('Channels').serialize().links.link12) == 'true'
+# the resolved precondition: EmptySection.EmptyControl now sits at M4, not M3.
+!assert require('emu.UIState').controlClassAt('M4') == 'EmptySection.EmptyControl'
+press MAIN4
+frames 15
+!assert require('emu.UIState').topClass() == 'Unit.Chooser.Dense'
+
+quit

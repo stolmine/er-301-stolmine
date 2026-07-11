@@ -1,0 +1,44 @@
+# [stol:ui-planner-crawler] FAST regression for the crawler-RESOLVED expand /
+# collapse operators (testing-assets/emu/ui-crawl.map). Drives the resolved gesture
+# skeleton: focus a unit's header spot (its MAIN column), then ENTER toggles
+# currentViewName expanded<->collapsed (Unit.Base.Header:enterReleased). Asserts the
+# unit-specific slot_control remap in each view. Firmware builtin Test Osc, no
+# packages.
+
+frames 20
+
+# insert Test Osc (dense picker row 1, right column) onto the empty mono chain.
+press MAIN3
+frames 12
+turn 3
+frames 6
+press MAIN4
+frames 30
+!assert require('Channels').getChain(1):length() == 1
+!assert require('Channels').getChain(1):getSelection().title:find('Test Osc', 1, true) == 1
+
+# freshly inserted -> EXPANDED view: header at M1, expanded[1] (Pitch) at M2.
+!assert (select(2, require('Channels').getChain(1):getSelection())) == 'expanded'
+!assert require('emu.UIState').controlClassAt('M1') == 'Unit.Base.Header'
+!assert require('emu.UIState').controlClassAt('M2') == 'Unit.ViewControl.Pitch'
+
+# COLLAPSE: focus the header spot (press its MAIN column M1), then ENTER toggles.
+press MAIN1
+frames 8
+press ENTER
+frames 15
+!assert (select(2, require('Channels').getChain(1):getSelection())) == 'collapsed'
+# collapsed view: chain title/input reappear; the header remaps to M3, monitor M4.
+!assert require('emu.UIState').controlClassAt('M1') == 'ChainTitleControl'
+!assert require('emu.UIState').controlClassAt('M3') == 'Unit.Base.Header'
+!assert require('emu.UIState').controlClassAt('M4') == 'MonitorControl'
+
+# EXPAND: the header stays focused after the toggle, so a second ENTER re-expands
+# (re-pressing the focused header MAIN would instead open its floating menu).
+press ENTER
+frames 15
+!assert (select(2, require('Channels').getChain(1):getSelection())) == 'expanded'
+!assert require('emu.UIState').controlClassAt('M1') == 'Unit.Base.Header'
+!assert require('emu.UIState').controlClassAt('M2') == 'Unit.ViewControl.Pitch'
+
+quit
