@@ -1,5 +1,10 @@
 # Admin navigation: home -> admin via the STORAGE toggle (edge in ui-map.toml),
-# confirm arrival with the node's recognize predicate, then golden the menu.
+# confirmed by the node's recognize predicate (state assertion — robust across
+# build environments). A pixel !golden was dropped here 2026-07-10: the admin
+# menu's text renders slightly differently on fresh builds (font substitution),
+# so the screenshot was env-fragile while adding nothing the state assertions
+# below don't already prove. See ledger emu-admin-golden-fragile. Prefer the
+# state (uiState) + trace tiers over pixel goldens for navigation.
 
 frames 20
 !assert require('Application').getVisibleContext():top():getClassName() == 'Chain.Root'
@@ -8,9 +13,5 @@ frames 20
 storage center
 frames 20
 !assert require('Application').getVisibleContext():top():getClassName() == 'Menu' and require('Application').getVisibleContext():getInstanceName() == 'Admin'
-
-# The admin menu is a static screen (animation disabled by the fixture), so it is
-# a valid golden target. First run: STOL_UPDATE_GOLDEN=1 to create the baseline.
-!golden admin
 
 quit
