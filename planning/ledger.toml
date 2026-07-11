@@ -997,9 +997,10 @@ links = { depends_on = ["ui-planner-domain-facility"] }
 [[item]]
 id = "ui-planner-cov-starts"
 title = "Non-boot start states close the 5 return/indirect nav operators (cause A)"
-status = "todo"
-stamped = "2026-07-10T21:38:49-05:00"
+status = "done"
+stamped = "2026-07-11T12:58:57-05:00"
 area = "emu"
+attested = "2026-07-11: tools/ui_goals.py gained an optional `# start: context(<node>)` goal directive; --run auto-routes home->start (solver-planned, tracing off so only the goal's plan+trace count) then plans the goal FROM the start. 5 new goals (home-from-{admin,scope,quicksave,picker}, admin-via-sample-pool) cover the return/indirect nav ops nav_{admin,scope,quicksave,unit_picker_dense}_to_home + nav_sample_pool_to_admin. Backward-compatible (start-less goals byte-identical). Verified in the merged tree: --check-plans + --run all 18 goals green, coverage 12/20->17/20 (A's contribution), tests 59-cov-starts-*. Commit 8eb90a9."
 verify = { kind = "manual", ref = "goal files support a `# start: context(<node>)` directive; ui_goals.py --run auto-routes home->start (solver-planned) before planning the goal; new corpus goals home-from-{admin,scope,quicksave,picker} and admin-via-sample-pool plan+run green and cover nav_admin_to_home, nav_scope_to_home, nav_quicksave_to_home, nav_unit_picker_dense_to_home, nav_sample_pool_to_admin" }
 note = "planning/ui-planner-coverage-plan.md §1.A. Pure corpus/runner enhancement — no operator changes. Fastest, closes 5 of 8 uncovered operators. The setup route (home->start) is solver-planned + trace-golden'd but not counted in the goal's measured plan. The solver already accepts --from; extend --run to drive to the declared start first."
 links = { depends_on = ["ui-planner-cov-facility"] }
@@ -1007,9 +1008,10 @@ links = { depends_on = ["ui-planner-cov-facility"] }
 [[item]]
 id = "ui-planner-cov-views"
 title = "Concrete expand/collapse slot_control effects make them plannable (cause B)"
-status = "todo"
-stamped = "2026-07-10T21:38:49-05:00"
+status = "done"
+stamped = "2026-07-11T12:58:57-05:00"
 area = "infra"
+attested = "2026-07-11: expand/collapse effects made concrete + plannable: extract_operators.py emits an eff_from='manifest.views.{expanded,collapsed}' marker; ui_solve.py grounds the per-unit slot_control(Mi,ctrl) add/remove set at plan time. HONEST PIVOT: the manifest's per-unit views were insufficient (collapsed lists empty; slots = intrinsic catalog, not the chain-embedded on-screen layout), so the authoritative source is the crawl-map [[resolved]] live-captured view proof. Goals collapse-unit-header (insert->collapse, asserts collapsed slot map) + expand-unit-controls cover collapse+expand + the slot_control fluent type. Backward-compat proven (solver selftest + all prior plans byte-identical). Verified merged: 19/20 ops + 7/9 fluent types, ui-operators + goal-corpus gates no-drift, suite 29/29. Commit 8eb90a9."
 verify = { kind = "manual", ref = "extract_operators.py emits expand(u)/collapse(u) effects as concrete slot_control(Mi,ctrl) fluents from ui-model.manifest units[u].views.expanded/.collapsed; the solver grounds them per-unit; a goal fixing slot_control(M2,<ctrl>) for a focused core unit plans via expand and --run asserts the slot map; covers expand, collapse, and the slot_control fluent type" }
 note = "planning/ui-planner-coverage-plan.md §1.B. High agent value: makes slot_control a first-class goal target ('put control X on slot M2'). Unit-parametric effect bound from the manifest view lists at plan time; --run drives the crawler-resolved header-MAIN + ENTER toggle. Re-run the ui-operators + goal-corpus gates after."
 links = { depends_on = ["ui-planner-cov-facility"] }
