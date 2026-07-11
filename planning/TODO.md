@@ -5,7 +5,7 @@ ER-301-STOLMINE TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**88 items** — 59 done, 27 todo, 2 blocked. *Rendered 2026-07-10.*
+**88 items** — 60 done, 26 todo, 2 blocked. *Rendered 2026-07-10.*
 
 ## Sequencer
 
@@ -122,7 +122,6 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `infra-crash-diag-panic-buffer` | Warm-reboot-surviving panic buffer flushed to crash.log on next boot (hardware) | manual · 2026-07-09 |
 |   | `infra-crash-diagnostics-debug-mode` | Dev-enabled debug mode captures C-side crash diagnostics (umbrella) | manual · 2026-07-09 |
 |   | `infra-v0616-port` | Port the TXo I2C master mod to the v0.6.16 stable firmware base | manual · 2026-07-09 |
-|   | `ui-planner-solver` | Classical planner: arbitrary fluent goal -> gesture sequence, verified by driving | manual · 2026-07-10 |
 | ✓ | `crashdiag-fix-flightrec-insert-order` | Flight recorder records unit insert AFTER the risky work, missing the #1 trigger (H3) | manual *(attested)* · 2026-07-10 |
 | ✓ | `crashdiag-fix-package-symbolication` | Offline symbolication of package PCs is broken by design — the headline use case (H1) | manual *(attested)* · 2026-07-10 |
 | ✓ | `crashdiag-review-nits` | Crash-diag review LOW/NIT cleanup batch | manual *(attested)* · 2026-07-10 |
@@ -134,4 +133,5 @@ check`): a `done` item must have a real test or its named artifact.*
 | ✓ | `infra-swig-vanilla-compat` | SWIG pinned to 4.2.1 + runtime version bridge so vanilla community packages load | manual *(attested)* · 2026-07-09 |
 | ✓ | `ui-model-manifest` | Static UI behavior manifest extracted from xroot (extract-and-diff BDG) | manual *(attested)* · 2026-07-10 |
 | ✓ | `ui-planner-operators` | Typed operator library (precondition->effect + gesture template), BDG-diffed | manual *(attested)* · 2026-07-10 |
+| ✓ | `ui-planner-solver` | Classical planner: arbitrary fluent goal -> gesture sequence, verified by driving | manual *(attested)* · 2026-07-10 |
 

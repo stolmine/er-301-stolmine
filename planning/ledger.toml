@@ -953,9 +953,10 @@ links = { depends_on = ["ui-planner-operators"] }
 [[item]]
 id = "ui-planner-solver"
 title = "Classical planner: arbitrary fluent goal -> gesture sequence, verified by driving"
-status = "todo"
-stamped = "2026-07-10T17:48:52-05:00"
+status = "done"
+stamped = "2026-07-10T20:24:14-05:00"
 area = "infra"
+attested = "2026-07-10: tools/ui_solve.py: forward A* over the merged operator library (20 static from ui-operators.toml + the 6 crawler-resolved gestures from ui-crawl.map [[resolved]]). Grounds operators from goal target fluents, applicability with ~negation + adjacent-topology + domain guards (link needs empty chains; MAIN3 picker edge barred once linked), heuristic = unsatisfied-goal-fluent count, deterministic tie-breaks; live-resolves parametric gestures at --run (EmptyControl column, picker row/side, set_cell nav+nudges). set_cell uses REAL gestures: cv1 C3=3.0V = 3 coarse octave nudges (dial->coarse, turn 9), closed-loop verified by l1Value. VERIFIED INDEPENDENTLY: --selftest 24 checks; --run of the C3 goal {context(sequencer),column_cursor(cv1),cell(0,cv1,0..5,3.0)} plans from the goal alone and executes via real gestures, all 6 cells at 3.0, satisfies(goal); link+insert goal --run PASS; full suite 22/22 incl 57-ui-solve-{c3-sequencer,link-insert}. Supersedes ui_plan.py's fixed goal menu. Commit e3c9224."
 verify = { kind = "manual", ref = "tools/ui_solve.py takes a partial-fluent goal + current state and returns a gesture sequence via A* over the operator library (heuristic = unsatisfied goal-fluent count); --run drives the headless emu and confirms arrival via fluent asserts + a trace-golden; supersedes ui_plan.py's hardcoded goal-types" }
 note = "planning/ui-planning-domain-plan.md §5. Stdlib-only classical search (A*/STRIPS-style) over the operator library. Generalizes tools/ui_plan.py from a few hardcoded goal-types to ANY fluent goal. A failed operator becomes a corrected precondition (self-heals, like ui_plan's map-growth suggestions). No learned component — deterministic search only."
 links = { depends_on = ["ui-planner-crawler"] }
