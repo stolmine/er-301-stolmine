@@ -53,7 +53,7 @@ select_column
 set_cell
 
 [operators.uncovered]  (1)
-focus_unit                     # focused_unit(u) is auto-produced by insert; on a boot start no unit pre-exists to re-focus
+focus_unit                     # no operator opens the picker on a NON-empty chain (loadUnit drops the empty-insert slot), so a 2nd unit can't be inserted; needs an insert_after operator
 
 [fluent_types.covered]  (8)
 cell
@@ -66,4 +66,4 @@ slot_control
 unit_in_chain
 
 [fluent_types.uncovered]  (1)
-focused_class                  # not an effect of any modeled operator (nav ops set only context)
+focused_class                  # derived + co-present with context/focus (1:1 with the window class), not an independently-targetable end-state; also not emitted by any operator effect. Coverable by adding focused_class to nav/focus operator effects if wanted, or excluded as derived-redundant.

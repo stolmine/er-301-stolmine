@@ -63,22 +63,25 @@ FLUENT_TYPES = [
 # Why an operator can end up uncovered by ANY boot-start goal. Printed beside
 # each currently-uncovered operator so the coverage gap is self-documenting; an
 # operator that later gains a goal simply moves to the covered list.
+# Why a currently-uncovered operator is uncovered. (The nav-return ops,
+# expand/collapse, and the sample_pool->admin op are now COVERED — by cov-starts
+# and cov-views — so they are no longer listed here.)
 UNCOVERED_OP_WHY = {
-    "collapse": "prose view-map effect (slot_control map), not a concrete fluent -- unplannable as a goal",
-    "expand": "prose view-map effect (slot_control map), not a concrete fluent -- unplannable as a goal",
-    "focus_unit": "focused_unit(u) is auto-produced by insert; on a boot start no unit pre-exists to re-focus",
-    "nav_admin_to_home": "effect context(home) is the boot START; A* never routes back to it",
-    "nav_scope_to_home": "effect context(home) is the boot START; A* never routes back to it",
-    "nav_quicksave_to_home": "effect context(home) is the boot START; A* never routes back to it",
-    "nav_unit_picker_dense_to_home": "effect context(home) is the boot START; A* never routes back to it",
-    "nav_sample_pool_to_admin": "context(admin) is reached in 1 op (nav_home_to_admin), so A* never routes via sample_pool",
+    # Corrected 2026-07-11 (was "no unit pre-exists"): the real blocker, proven
+    # live, is that ChainBase:loadUnit removes the empty insert section on the
+    # first insert, and EVERY picker-open operator is keyed on
+    # slot_control(Mi, EmptySection.EmptyControl) — so no operator can open the
+    # picker on a NON-empty chain, hence a 2nd unit can never be inserted and
+    # focus_unit (which needs >=2 units to re-focus a non-last one) is
+    # unreachable. Needs a new open_picker_nonempty / insert_after operator
+    # modelling the per-unit Chain.InsertControl (xroot/Unit/Section.lua:13).
+    "focus_unit": "no operator opens the picker on a NON-empty chain (loadUnit drops the empty-insert slot), so a 2nd unit can't be inserted; needs an insert_after operator",
 }
 
-# Why a goal-fluent TYPE can end up uncovered.
+# Why a goal-fluent TYPE can end up uncovered. (slot_control + modal are now
+# COVERED — by cov-views and cov-modals.)
 UNCOVERED_TYPE_WHY = {
-    "slot_control": "only expand/collapse produce a slot map, and that effect is prose (unmodeled)",
-    "modal": "modal(editingL1) is set_cell's transient effect, stripped as non-durable -- not a stable goal",
-    "focused_class": "not an effect of any modeled operator (nav ops set only context)",
+    "focused_class": "derived + co-present with context/focus (1:1 with the window class), not an independently-targetable end-state; also not emitted by any operator effect. Coverable by adding focused_class to nav/focus operator effects if wanted, or excluded as derived-redundant.",
 }
 
 
