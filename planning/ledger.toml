@@ -910,9 +910,10 @@ links = { depends_on = ["ui-model-introspect", "ui-model-manifest"] }
 [[item]]
 id = "ui-planner-domain-facility"
 title = "UI planning domain — deterministic goal-routing over the 301 UI (umbrella)"
-status = "todo"
-stamped = "2026-07-10T17:48:52-05:00"
+status = "done"
+stamped = "2026-07-10T20:46:09-05:00"
 area = "emu"
+attested = "2026-07-10: COMPLETE 2026-07-10: agents route to arbitrary fluent goals over the 301 UI deterministically, no ML. All children done: state-schema (ui_fluents.py), operators (ui-operators.toml, 20 ops), crawler (ui_crawl.py, resolves the 6 dynamic ops, deterministic map), solver (ui_solve.py, A* over the merged library), goal-corpus (11 goal/plan/trace goldens + coverage). Proof: the sequencer C3 goal — which a human hand-derived from code earlier — is now planned AND executed via real gestures from the declarative goal alone (ui_solve --run / goals/seq-cv1-c3). Commit 81359f6."
 verify = { kind = "manual", ref = "an agent gives an arbitrary fluent goal (e.g. sequencer cv1 first-6-steps at C3, or link 1+2 + insert Network + glitch on M1) and the solver routes to it over the operator library, executes headless, and confirms arrival — no per-goal code, no looking anything up" }
 note = "planning/ui-planning-domain-plan.md. Builds on the ui-model facility (planning/ui-model-plan.md). THESIS: this is a planning problem, not a learning problem — the UI is deterministic with a fully-observable model (the code) + perfect observation (emu.uiState()), which is exactly the regime where classical planning dominates and ML underperforms AND breaks BDG (AI is never in the gate). ML/LLM only at the authoring boundary (fuzzy intent -> formal fluent goal), upstream of the gate. Umbrella over ui-planner-{state-schema, operators, crawler, solver, goal-corpus}; done when children close."
 links = { depends_on = ["ui-model-facility"] }
@@ -964,9 +965,10 @@ links = { depends_on = ["ui-planner-crawler"] }
 [[item]]
 id = "ui-planner-goal-corpus"
 title = "Worked-example goal corpus (goal/plan/trace goldens) + coverage metric"
-status = "todo"
-stamped = "2026-07-10T17:48:52-05:00"
+status = "done"
+stamped = "2026-07-10T20:46:09-05:00"
 area = "emu"
+attested = "2026-07-10: testing-assets/emu/goals/ = 11 (goal, plan, trace) triples — worked examples AND regression goldens: seq-cv1-c3 (6 cells at C3 via real gestures), seq-cv2-fifth, link-insert-core, link-pair-23, nav-{admin,scope,sequencer,hold,quicksave,sample-pool}, open-picker. tools/ui_goals.py: --check-plans (offline plan-golden diff), --run (drives emu per goal, satisfies + frame-stripped trace diff), --coverage. scripts/dev goal-corpus = fast offline gate (plans + coverage byte-diff); --run half in tests/emu 58-goals-*. COVERAGE (testing-assets/emu/goal-coverage.txt): operators 12/20, goal-fluent types 6/9; 8 uncovered operators documented (expand/collapse prose-effect unmodeled, focus_unit subsumed by insert's auto-focus, 4x nav_*_to_home never routed-to since home is the start, nav_sample_pool_to_admin dominated). Verified: --check-plans 11/11 + no-op + drift-caught; --run all 11 green (satisfies + trace); full suite 25/25. Commit 81359f6."
 verify = { kind = "manual", ref = "testing-assets/emu/goals/ holds (goal, plan, trace-golden) triples that regenerate + diff (seeded with the hand-proven ones: Network-glitch-on-M1, sequencer cv1 first-6-at-C3, admin/scope/sequencer entry, picker open/close); a coverage metric reports which fluents/operators have >=1 verified example goal" }
 note = "planning/ui-planning-domain-plan.md §6. The 'example goal coverage' as a BDG artifact: worked examples AND regression goldens in one. Each triple regenerates (plan from the current operator library, execute, diff the trace). Coverage = fraction of fluents/operators with a verified example, tracked in the ledger so 'how much of the UI agents can reach with foreknowledge' is a monotonic number."
 links = { depends_on = ["ui-planner-solver"] }

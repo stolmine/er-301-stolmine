@@ -5,7 +5,7 @@ ER-301-STOLMINE TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**88 items** — 60 done, 26 todo, 2 blocked. *Rendered 2026-07-10.*
+**88 items** — 62 done, 24 todo, 2 blocked. *Rendered 2026-07-10.*
 
 ## Sequencer
 
@@ -75,8 +75,6 @@ check`): a `done` item must have a real test or its named artifact.*
 | | id | item | verify |
 |---|---|---|---|
 |   | `emu-admin-golden-fragile` | 10-admin-nav pixel golden is env-fragile (font-dependent render across builds) | manual · 2026-07-10 |
-|   | `ui-planner-domain-facility` | UI planning domain — deterministic goal-routing over the 301 UI (umbrella) | manual · 2026-07-10 |
-|   | `ui-planner-goal-corpus` | Worked-example goal corpus (goal/plan/trace goldens) + coverage metric | manual · 2026-07-10 |
 | ✓ | `crashdiag-fix-emu-symbolication-base` | Emu symbolication base off by p_vaddr (M3) | manual *(attested)* · 2026-07-10 |
 | ✓ | `emu-capture-deterministic` | Same UI state produces a byte-identical capture | screenshot: drive the emulator to a fixed UI state, settle, and capture twice; confirm the two PNGs are byte-identical (diff clean); document the settle convention for animated elements *(attested)* · 2026-07-09 |
 | ✓ | `emu-capture-fb` | Capture command dumps the framebuffers decoded to PNG | screenshot: send 'cap testing-assets/emu/<name>.png'; confirm the PNG matches the on-screen content of a known static screen (both displays composited) *(attested)* · 2026-07-09 |
@@ -99,6 +97,8 @@ check`): a `done` item must have a real test or its named artifact.*
 | ✓ | `ui-model-introspect` | Runtime emu.uiState() — context/focus/controls/slots/affordances as structured data | manual *(attested)* · 2026-07-10 |
 | ✓ | `ui-model-planner` | Goal -> gesture-sequence path planner, verified by driving the emu | manual *(attested)* · 2026-07-10 |
 | ✓ | `ui-planner-crawler` | Empirical UI crawler resolves dynamic operators + discovers preconditions (perfect oracle) | manual *(attested)* · 2026-07-10 |
+| ✓ | `ui-planner-domain-facility` | UI planning domain — deterministic goal-routing over the 301 UI (umbrella) | manual *(attested)* · 2026-07-10 |
+| ✓ | `ui-planner-goal-corpus` | Worked-example goal corpus (goal/plan/trace goldens) + coverage metric | manual *(attested)* · 2026-07-10 |
 | ✓ | `ui-planner-state-schema` | Fluent state vocabulary + uiState->fluents projection | manual *(attested)* · 2026-07-10 |
 
 ## Documentation
