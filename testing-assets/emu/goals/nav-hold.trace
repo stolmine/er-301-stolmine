@@ -1,0 +1,6 @@
+push SceneView.Performance
+context hide OUT1 edit
+context show OUT1 scene
+push SceneView.Performance
+push SceneView.Performance
+push SceneView.Performance

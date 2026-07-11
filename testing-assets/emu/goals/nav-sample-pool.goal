@@ -1,0 +1,4 @@
+# nav-sample-pool -- a two-hop nav that routes THROUGH admin: the sample pool is
+# reachable only from the Admin menu. Plan: nav_home_to_admin, nav_admin_to_sample_pool
+# (MAIN2 in Admin). Exercises the otherwise-uncovered nav_admin_to_sample_pool.
+context(sample_pool)

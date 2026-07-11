@@ -1,0 +1,5 @@
+# ui_solve offline plan -- goal 'link-pair-23'
+# goal (1 fluent(s)):
+#   linked(2,3)
+# plan: 1 operator(s)
+link(2,3)

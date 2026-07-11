@@ -1,0 +1,3 @@
+# nav-quicksave -- pure context nav to the QuickSaver. Plan: nav_home_to_quicksave
+# (SHIFT+MAIN1).
+context(quicksave)

@@ -1,0 +1,3 @@
+# nav-admin -- pure context nav to the Admin menu. Plan: nav_home_to_admin
+# (storage center).
+context(admin)

@@ -1,0 +1,4 @@
+# link-pair-23 -- the link operator on a DIFFERENT adjacent pair (channels 2+3),
+# proving the adjacent(a,b) precondition binds beyond the 1-2 headline. Plan:
+# link(2,3) (the SELECT2+SELECT3 chord, both chains empty so no dialog).
+linked(2,3)

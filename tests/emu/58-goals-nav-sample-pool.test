@@ -1,0 +1,27 @@
+# [stol:ui-planner-goal-corpus] Corpus regression guard: the nav-sample-pool goal.
+#
+# Hermetic end-to-end realization of the corpus goal
+#   testing-assets/emu/goals/nav-sample-pool.goal  ->  {context(sample_pool)}
+# whose committed offline plan (goals/nav-sample-pool.plan) is the two-hop
+#   nav_home_to_admin, nav_admin_to_sample_pool
+# (the sample pool is reachable only THROUGH the Admin menu). This guards the
+# otherwise-single-covered nav_admin_to_sample_pool operator end-to-end and its
+# --run route (goals/nav-sample-pool.trace). No packages needed.
+
+frames 20
+!assert require('emu.UIState').topClass() == 'Chain.Root'
+
+# ── nav_home_to_admin (storage center) ───────────────────────────────────────
+storage center
+frames 10
+!assert require('Application').getVisibleContext():top():getClassName() == 'Menu' and require('Application').getVisibleContext():getInstanceName() == 'Admin'
+
+# ── nav_admin_to_sample_pool (MAIN2) ─────────────────────────────────────────
+press MAIN2
+frames 12
+
+# ── FINAL: satisfies({context(sample_pool)}) ─────────────────────────────────
+!assert require('Application').getVisibleContext():top():getClassName() == 'SamplePool.Interface'
+
+!trace-golden route
+quit

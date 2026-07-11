@@ -1,0 +1,7 @@
+# seq-cv2-fifth -- an OTHER-column set_cell: cv2 row 0 at 5.0 V. Exercises
+# select_column on a NON-boot column (the grid boots on cv1, so switching to cv2
+# is a real MAIN2 press, unlike cv1's skipped select) and the set_cell nudge
+# model on cv2, whose coarse step is 1.0 V (5 coarse nudges = `turn 15`).
+context(sequencer)
+column_cursor(cv2)
+cell(0,cv2,0,5.0)

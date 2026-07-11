@@ -1,0 +1,99 @@
+# [stol:ui-planner-goal-corpus] Corpus regression guard: the seq-cv1-c3 goal.
+#
+# Hermetic end-to-end realization of the corpus goal
+#   testing-assets/emu/goals/seq-cv1-c3.goal
+#     {context(sequencer), column_cursor(cv1), cell(0,cv1,0..5,3.0)}
+# whose committed offline plan (goals/seq-cv1-c3.plan) is
+#   nav_home_to_scope, nav_scope_to_sequencer, select_column(cv1), 6x set_cell
+# and whose --run trace (goals/seq-cv1-c3.trace) is the two nav transitions
+# below. tools/ui_goals.py --run drives + verifies this live against the emu;
+# this pins it in the standard emu suite so the corpus is guarded per-commit.
+# Each cell is set via the REAL L1-edit encoder path (ENTER -> editingL1,
+# dial->coarse, `turn 9` = 3 coarse octave nudges), NOT a seq:setL1 shortcut.
+!packages core
+
+frames 20
+!assert require('emu.UIState').topClass() == 'Chain.Root'
+
+# ── nav_home_to_scope + nav_scope_to_sequencer ───────────────────────────────
+mode down
+frames 10
+down SHIFT
+press ENTER
+up SHIFT
+frames 10
+!assert require('emu.UIState').topClass() == 'Sequencer.GridView'
+# column_cursor(cv1) already holds on entry -> select_column(cv1) is a run no-op.
+!assert require('Application').getVisibleContext():top().columnCursor == 0
+
+# ── 6x set_cell(0,cv1,row,3.0): ENTER->editingL1, dial->coarse, turn 9 ────────
+press ENTER
+frames 6
+!assert require('Application').getVisibleContext():top().editingL1 == true
+press DIAL1
+frames 6
+!assert require('Application').getVisibleContext():top().editStepMode == 'coarse'
+turn 9
+frames 6
+press UP
+frames 6
+!assert string.format('%.4f', app.AudioThread.getSequencerTask():l1Value(0,0,0)) == '3.0000'
+
+turn 3
+frames 6
+press ENTER
+frames 6
+turn 9
+frames 6
+press UP
+frames 6
+!assert string.format('%.4f', app.AudioThread.getSequencerTask():l1Value(0,0,1)) == '3.0000'
+
+turn 3
+frames 6
+press ENTER
+frames 6
+turn 9
+frames 6
+press UP
+frames 6
+!assert string.format('%.4f', app.AudioThread.getSequencerTask():l1Value(0,0,2)) == '3.0000'
+
+turn 3
+frames 6
+press ENTER
+frames 6
+turn 9
+frames 6
+press UP
+frames 6
+!assert string.format('%.4f', app.AudioThread.getSequencerTask():l1Value(0,0,3)) == '3.0000'
+
+turn 3
+frames 6
+press ENTER
+frames 6
+turn 9
+frames 6
+press UP
+frames 6
+!assert string.format('%.4f', app.AudioThread.getSequencerTask():l1Value(0,0,4)) == '3.0000'
+
+turn 3
+frames 6
+press ENTER
+frames 6
+turn 9
+frames 6
+press UP
+frames 6
+!assert string.format('%.4f', app.AudioThread.getSequencerTask():l1Value(0,0,5)) == '3.0000'
+
+# ── FINAL: satisfies({context(sequencer), column_cursor(cv1), cell 0..5 == 3.0})
+!assert require('emu.UIState').topClass() == 'Sequencer.GridView'
+!assert require('Application').getVisibleContext():top().columnCursor == 0
+!assert (function() local s=app.AudioThread.getSequencerTask(); for r=0,5 do if math.abs(s:l1Value(0,0,r)-3.0)>1e-4 then return false end end return true end)()
+
+# route signature = the two nav transitions (goals/seq-cv1-c3.trace).
+!trace-golden route
+quit

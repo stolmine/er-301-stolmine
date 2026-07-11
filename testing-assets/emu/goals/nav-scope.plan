@@ -1,0 +1,5 @@
+# ui_solve offline plan -- goal 'nav-scope'
+# goal (1 fluent(s)):
+#   context(scope)
+# plan: 1 operator(s)
+nav_home_to_scope

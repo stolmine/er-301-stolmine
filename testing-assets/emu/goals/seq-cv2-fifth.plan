@@ -1,0 +1,10 @@
+# ui_solve offline plan -- goal 'seq-cv2-fifth'
+# goal (3 fluent(s)):
+#   cell(0,cv2,0,5.0)
+#   column_cursor(cv2)
+#   context(sequencer)
+# plan: 4 operator(s)
+nav_home_to_scope
+nav_scope_to_sequencer
+select_column(cv2)
+set_cell(0,cv2,0,5.0)

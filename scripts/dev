@@ -22,6 +22,10 @@
 #   scripts/dev ui-crawl         UI-planner EMPIRICAL-crawl gate (drive emu -> observe
 #                                -> diff baseline; STOL_UPDATE_UI_CRAWL=1 regen). SLOW,
 #                                drives the emu — MANUAL/CI ONLY, never in the commit path.
+#   scripts/dev goal-corpus      UI-planner example-goal corpus gate (FAST offline half:
+#                                re-solve each goal -> diff .plan goldens + coverage file;
+#                                STOL_UPDATE_GOALS=1 regen). `goal-corpus --run` drives the
+#                                emu per goal (satisfies + trace goldens) — SLOW, CI/manual.
 #   scripts/dev render           regenerate planning/TODO.md from the ledger
 #   scripts/dev status           short ledger summary (used by the session hook)
 #   scripts/dev now              the current date/time (ISO-8601, local + offset)
@@ -198,6 +202,34 @@ do_ui_crawl() {
   rm -f "$tmp"
   log "ui-crawl: no drift ($UI_CRAWL_MAP)"
 }
+# ── UI-planner goal-corpus gate (planning/ui-planning-domain-plan.md §6) ──────
+# The FINAL ui-planner layer: an example-goal CORPUS (testing-assets/emu/goals/)
+# of (goal -> plan -> trace) triples that are both worked examples and regression
+# goldens, plus a coverage metric (testing-assets/emu/goal-coverage.txt). The FAST
+# offline half runs here: re-solve each goal + diff its committed .plan golden, and
+# regenerate + byte-diff the coverage file. STOL_UPDATE_GOALS=1 accepts drift.
+#
+# The SLOW half (`scripts/dev goal-corpus --run`) drives the headless emu once per
+# goal to assert satisfies() + diff the trace goldens; it needs a built emu binary
+# and is NOT on the commit path (the tests/emu 58-goals-*.test suite guards it in
+# CI). Same extract-and-diff discipline as ui-model / ui-operators.
+do_goal_corpus() {
+  if [ "${1:-}" = "--run" ]; then
+    local emu_bin="${STOL_EMU_BIN:-$ROOT/testing/linux-x86_64/emu/emu.elf}"
+    [ -x "$emu_bin" ] || die "goal-corpus --run needs a built emu binary ($emu_bin) — run: scripts/dev build"
+    log "goal-corpus: driving every goal live (slow — drives the emu)…"
+    python3 tools/ui_goals.py --run || die "goal-corpus --run: a goal failed satisfies/trace (STOL_UPDATE_GOALS=1 to accept a vetted trace change)"
+    log "goal-corpus --run: all goals satisfied + traces matched"
+    return 0
+  fi
+  # Fast offline half: plan goldens + coverage file.
+  python3 tools/ui_goals.py --check-plans \
+    || die "goal-corpus: plan drift (STOL_UPDATE_GOALS=1 scripts/dev goal-corpus to accept, or fix the goal/solver)"
+  python3 tools/ui_goals.py --coverage \
+    || die "goal-corpus: coverage drift (STOL_UPDATE_GOALS=1 scripts/dev goal-corpus to accept)"
+  log "goal-corpus: no drift (plans + goal-coverage.txt)"
+}
+
 do_status() { python3 tools/ledger.py status; }
 do_now()    { python3 tools/ledger.py now; }    # the ONE way to learn the date/time
 
@@ -345,6 +377,7 @@ case "$cmd" in
   ui-model) do_ui_model "$@";;
   ui-operators) do_ui_operators "$@";;
   ui-crawl) do_ui_crawl "$@";;
+  goal-corpus) do_goal_corpus "$@";;
   render) do_render "$@";;
   status) do_status "$@";;
   now)    do_now "$@";;
@@ -355,6 +388,6 @@ case "$cmd" in
   commit) do_commit "$@";;
   push)   do_push "$@";;
   integrate) do_integrate "$@";;
-  *) die "usage: scripts/dev {build|test|check|ui-model|ui-operators|ui-crawl|render|status|now|ledger-append|claim|release|claims|commit|push|integrate}";;
+  *) die "usage: scripts/dev {build|test|check|ui-model|ui-operators|ui-crawl|goal-corpus|render|status|now|ledger-append|claim|release|claims|commit|push|integrate}";;
 esac
 fi

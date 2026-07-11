@@ -1,0 +1,8 @@
+push Chain.Root
+push Chain.ScopeView
+push Sequencer.GridView
+push PinView
+context hide OUT1 edit
+context show OUT1 + OUT2 edit
+push Unit.Chooser.Dense
+pop Unit.Chooser.Dense

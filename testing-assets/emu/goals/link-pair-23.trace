@@ -1,0 +1,8 @@
+context hide OUT1 edit
+context show OUT2 edit
+push Chain.Root
+push Chain.ScopeView
+push Sequencer.GridView
+push PinView
+context hide OUT2 edit
+context show OUT2 + OUT3 edit

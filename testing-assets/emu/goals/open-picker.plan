@@ -1,0 +1,5 @@
+# ui_solve offline plan -- goal 'open-picker'
+# goal (1 fluent(s)):
+#   context(unit_picker_dense)
+# plan: 1 operator(s)
+nav_home_to_unit_picker_dense

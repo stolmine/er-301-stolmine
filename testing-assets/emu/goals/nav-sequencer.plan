@@ -1,0 +1,6 @@
+# ui_solve offline plan -- goal 'nav-sequencer'
+# goal (1 fluent(s)):
+#   context(sequencer)
+# plan: 2 operator(s)
+nav_home_to_scope
+nav_scope_to_sequencer

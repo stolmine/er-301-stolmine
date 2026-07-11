@@ -1,0 +1,3 @@
+# nav-hold -- pure context nav to the hold-mode scene performance view. Plan:
+# nav_home_to_hold (mode up).
+context(hold)

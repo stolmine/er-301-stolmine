@@ -1,0 +1,6 @@
+# ui_solve offline plan -- goal 'nav-sample-pool'
+# goal (1 fluent(s)):
+#   context(sample_pool)
+# plan: 2 operator(s)
+nav_home_to_admin
+nav_admin_to_sample_pool

@@ -1,0 +1,3 @@
+# open-picker -- open the dense unit picker from home. Plan:
+# nav_home_to_unit_picker_dense (MAIN3 = the mono-chain empty-insert column).
+context(unit_picker_dense)

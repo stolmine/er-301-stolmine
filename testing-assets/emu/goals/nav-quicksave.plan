@@ -1,0 +1,5 @@
+# ui_solve offline plan -- goal 'nav-quicksave'
+# goal (1 fluent(s)):
+#   context(quicksave)
+# plan: 1 operator(s)
+nav_home_to_quicksave

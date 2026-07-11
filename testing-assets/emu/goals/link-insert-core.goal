@@ -1,0 +1,9 @@
+# link-insert-core -- stereo-link channels 1+2, then insert + focus a CORE
+# builtin (Test Osc). Plan: link(1,2), open_picker, insert(Test Osc #1). Only
+# that order is legal: link's clean-link precondition (both chains empty) forbids
+# inserting first, and after the link the map's fixed MAIN3 picker edge is invalid
+# (the empty-insert column shifted to M4), so open_picker (live-resolved to the
+# empty slot) is used. Mirrors 57-ui-solve-link-insert.test as a fluent goal.
+linked(1,2)
+unit_in_chain(Test Osc #1)
+focused_unit(Test Osc #1)

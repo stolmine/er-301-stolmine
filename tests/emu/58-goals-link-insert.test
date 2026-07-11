@@ -1,0 +1,52 @@
+# [stol:ui-planner-goal-corpus] Corpus regression guard: the link-insert-core goal.
+#
+# Hermetic end-to-end realization of the corpus goal
+#   testing-assets/emu/goals/link-insert-core.goal
+#     {linked(1,2), unit_in_chain(Test Osc #1), focused_unit(Test Osc #1)}
+# whose committed offline plan (goals/link-insert-core.plan) is
+#   link(1,2), open_picker, insert(Test Osc #1)
+# and whose --run route is goals/link-insert-core.trace. tools/ui_goals.py --run
+# drives + verifies this live; pinned here in the standard emu suite. Test Osc is
+# a CORE builtin. Mirrors 57-ui-solve-link-insert.test but as a corpus guard.
+!packages core
+
+frames 20
+!assert require('emu.UIState').topClass() == 'Chain.Root'
+
+# ── link(1,2): SELECT1+SELECT2 chord (both chains empty -> no dialog) ─────────
+!assert tostring(require('Channels').serialize().links.link12) == 'false'
+down SELECT1
+frames 6
+down SELECT2
+frames 6
+up SELECT2
+up SELECT1
+frames 10
+# effect: linked(1,2)
+!assert tostring(require('Channels').serialize().links.link12) == 'true'
+
+# ── open_picker: after the link the empty-insert column is M4, not M3 ─────────
+!assert require('emu.UIState').controlClassAt('M4') == 'EmptySection.EmptyControl'
+press MAIN4
+frames 15
+# effect: context(unit_picker_dense)
+!assert require('emu.UIState').topClass() == 'Unit.Chooser.Dense'
+
+# ── insert(Test Osc #1): 2-channel picker, Test Osc is row 2 left cell ────────
+turn 3
+frames 6
+turn 3
+frames 6
+press MAIN1
+frames 30
+
+# ── FINAL: satisfies({linked(1,2), unit_in_chain, focused_unit}) ─────────────
+!assert require('emu.UIState').topClass() == 'Chain.Root'
+!assert tostring(require('Channels').serialize().links.link12) == 'true'
+# focused_unit(Test Osc #1)
+!assert require('Channels').getChain(1):getSelection().title == 'Test Osc #1'
+# unit_in_chain(Test Osc #1) (chain-walk)
+!assert (function() local c=require('Channels').getChain(1); for i=1,c:length() do local u=c:getUnit(i); if u and u.title=='Test Osc #1' then return true end end return false end)()
+
+!trace-golden route
+quit

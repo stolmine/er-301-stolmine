@@ -1,0 +1,5 @@
+# ui_solve offline plan -- goal 'nav-hold'
+# goal (1 fluent(s)):
+#   context(hold)
+# plan: 1 operator(s)
+nav_home_to_hold

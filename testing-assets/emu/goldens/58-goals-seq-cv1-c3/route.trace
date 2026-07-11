@@ -1,0 +1,4 @@
+context hide OUT1 edit
+context show OUT1 scope
+context hide OUT1 scope
+context show OUT1 sequencer
