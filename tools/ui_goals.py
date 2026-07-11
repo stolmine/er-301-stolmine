@@ -53,12 +53,24 @@ import ui_solve      # noqa: E402  (the solver -- imported, never modified)
 GOALS_DIR = os.path.join(REPO_ROOT, "testing-assets/emu/goals")
 COVERAGE_FILE = os.path.join(REPO_ROOT, "testing-assets/emu/goal-coverage.txt")
 
-# The 9 goal-fluent TYPES an agent may put in a goal (the ui_fluents vocabulary;
+# The goal-fluent TYPES an agent may put in a goal (the ui_fluents vocabulary;
 # `adjacent` is a precondition-only domain predicate, never a goal fluent).
 FLUENT_TYPES = [
     "cell", "column_cursor", "context", "focused_class", "focused_unit",
     "linked", "modal", "slot_control", "unit_in_chain",
 ]
+
+# Types intentionally EXCLUDED from the coverage denominator (not gaps): they are
+# not independently-targetable end-states, so requiring an example goal for them
+# would be coverage-gaming. Documented, not faked — the honest analogue of the
+# transient-modal exclusion (editingL1). The denominator is FLUENT_TYPES minus
+# these, so "N/N" means every MEANINGFUL type has a worked example.
+EXCLUDED_FLUENT_TYPES = {
+    "focused_class": "derived + co-present with context/focus (1:1 with the window "
+                     "class implied by context; only non-redundant as "
+                     "Unit.Base.Header on unit-focus) -- not an independently-"
+                     "targetable end-state; excluded as derived-redundant 2026-07-11",
+}
 
 # Why an operator can end up uncovered by ANY boot-start goal. Printed beside
 # each currently-uncovered operator so the coverage gap is self-documenting; an
@@ -273,16 +285,19 @@ def compute_coverage(names, operators):
             if p:
                 covered_types.add(p[0])
     uncovered_ops = [o for o in all_ops if o not in covered_ops]
-    covered_types_l = [t for t in FLUENT_TYPES if t in covered_types]
-    uncovered_types = [t for t in FLUENT_TYPES if t not in covered_types]
+    # Denominator = MEANINGFUL types (FLUENT_TYPES minus derived exclusions).
+    meaningful = [t for t in FLUENT_TYPES if t not in EXCLUDED_FLUENT_TYPES]
+    covered_types_l = [t for t in meaningful if t in covered_types]
+    uncovered_types = [t for t in meaningful if t not in covered_types]
     return {
         "rows": rows,
         "n_ops": len(all_ops),
         "covered_ops": sorted(covered_ops),
         "uncovered_ops": uncovered_ops,
-        "n_types": len(FLUENT_TYPES),
+        "n_types": len(meaningful),
         "covered_types": covered_types_l,
         "uncovered_types": uncovered_types,
+        "excluded_types": sorted(EXCLUDED_FLUENT_TYPES),
     }
 
 
@@ -319,6 +334,11 @@ def render_coverage(cov):
     for t in cov["uncovered_types"]:
         why = UNCOVERED_TYPE_WHY.get(t, "(no goal exercises it)")
         L.append("%-30s # %s" % (t, why))
+    L.append("")
+    L.append("[fluent_types.excluded]  (%d -- derived/transient, off the denominator by design)"
+             % len(cov.get("excluded_types", [])))
+    for t in cov.get("excluded_types", []):
+        L.append("%-30s # %s" % (t, EXCLUDED_FLUENT_TYPES[t]))
     return "\n".join(L) + "\n"
 
 

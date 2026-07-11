@@ -7,7 +7,7 @@
 # Deterministic: sorted, no timestamps/paths.
 
 operators covered: 20/21
-goal-fluent types: 8/9
+goal-fluent types: 8/8
 
 [goals]  (name -> plan length -> operators exercised)
 admin-via-sample-pool   1  nav_sample_pool_to_admin
@@ -65,5 +65,7 @@ modal
 slot_control
 unit_in_chain
 
-[fluent_types.uncovered]  (1)
-focused_class                  # derived + co-present with context/focus (1:1 with the window class), not an independently-targetable end-state; also not emitted by any operator effect. Coverable by adding focused_class to nav/focus operator effects if wanted, or excluded as derived-redundant.
+[fluent_types.uncovered]  (0)
+
+[fluent_types.excluded]  (1 -- derived/transient, off the denominator by design)
+focused_class                  # derived + co-present with context/focus (1:1 with the window class implied by context; only non-redundant as Unit.Base.Header on unit-focus) -- not an independently-targetable end-state; excluded as derived-redundant 2026-07-11
