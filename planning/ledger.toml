@@ -1029,9 +1029,10 @@ links = { depends_on = ["ui-planner-cov-facility"] }
 [[item]]
 id = "ui-planner-cov-modals"
 title = "Durable-modal operators cover the modal fluent type (cause D)"
-status = "todo"
-stamped = "2026-07-10T21:38:49-05:00"
+status = "done"
+stamped = "2026-07-11T17:11:19-05:00"
 area = "emu"
+attested = "2026-07-11: New operator build_selection (sequencer nav-mode SHIFT+encoder -> modal(selectionActive), a clean absent->present durable boundary) covers the modal fluent type: 7/9 -> 8/9. Modeled via extract_operators.py modal_operators() + ui_crawl.py shift_encoder resolver + ui_solve.py grounding; re-crawl determinism gate GATE_EXIT=0. REJECTED (documented permanent exclusions, not faked): markingMode (self.markingMode='idle' reads Lua-truthy at every sequencer state -> no fluent boundary, un-exercisable by its own goal), favoritesEditMode (no-op in the dense fixture picker; classic picker has no ui-map nav edge). editingL1 also stays excluded (transient). Verified: solver selftest byte-identical, all 19 goals --run green, suite 30/30. Commit follows."
 verify = { kind = "manual", ref = "new operators enter_favorites_edit / enter_mark_mode / build_selection (precondition->effect+gesture, crawler-resolved) each set a durable modal fluent; a corpus goal per operator plans + runs green; covers the modal fluent type for durable modals, with modal(editingL1) documented as an intentional transient exclusion (not counted in the denominator)" }
 note = "planning/ui-planner-coverage-plan.md §1.D. LARGEST (new operators + a crawl pass) — do last. Models the modals that ARE stable end-states (favoritesEditMode, markingMode, selectionActive). editingL1 and other in-edit transients stay an explicit permanent gap: you don't route TO a transient modal as an end-state; exclude from the coverage denominator rather than count as a hole."
 links = { depends_on = ["ui-planner-cov-facility"] }
