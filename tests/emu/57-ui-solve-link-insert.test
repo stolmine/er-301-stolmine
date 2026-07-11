@@ -1,0 +1,58 @@
+# [stol:ui-planner-solver] Solver acceptance: link + insert + focus, REALIZED.
+#
+# ui_solve.py plans the fluent goal
+#   {linked(1,2), unit_in_chain(Test Osc #1), focused_unit(Test Osc #1)}
+# to  link(1,2) + open_picker + insert(Test Osc #1)  -- and only that order:
+# link's clean-link precondition (both chains empty) forbids inserting first, and
+# after the link the map's fixed MAIN3 picker edge is invalid (the empty-insert
+# column shifted to M4), so open_picker (live-resolved to the empty slot) is used.
+# `tools/ui_solve.py --run` drives + verifies it live (report transcript); this
+# pins the committed REAL-gesture realization. Test Osc is a CORE builtin (the
+# Network analogue is the manual non-hermetic demo in ui_plan.py). Mirrors
+# 53-ui-plan-core-insert.test, but expressed as an arbitrary fluent goal.
+!packages core
+
+frames 20
+!assert require('emu.UIState').topClass() == 'Chain.Root'
+
+# ── link(1,2): the SELECT1+SELECT2 chord (both chains empty -> no dialog) ─────
+!assert tostring(require('Channels').serialize().links.link12) == 'false'
+down SELECT1
+frames 6
+down SELECT2
+frames 6
+up SELECT2
+up SELECT1
+frames 10
+# effect: linked(1,2)
+!assert tostring(require('Channels').serialize().links.link12) == 'true'
+
+# ── open_picker: after the link the empty-insert column is M4, not M3 ─────────
+# The solver reads the live EmptySection.EmptyControl slot; pinned here as MAIN4.
+!assert require('emu.UIState').controlClassAt('M4') == 'EmptySection.EmptyControl'
+press MAIN4
+frames 15
+# effect: context(unit_picker_dense)
+!assert require('emu.UIState').topClass() == 'Unit.Chooser.Dense'
+
+# ── insert(Test Osc #1): 2-channel picker, Test Osc is row 2 left cell ────────
+# channel-count-2 order: row0 Custom Effect|Custom Source, row1 Mono|Stereo Mix,
+# row2 Test Osc|-. Cursor starts at row 0; 2 selectable rows down (3 detents/row),
+# then pick the LEFT cell (MAIN1). Settle out the ~0.12s pick-flash timer.
+turn 3
+frames 6
+turn 3
+frames 6
+press MAIN1
+frames 30
+
+# ── effects: unit_in_chain(Test Osc #1), focused_unit(Test Osc #1), context(home)
+!assert require('emu.UIState').topClass() == 'Chain.Root'
+!assert require('Channels').getChain(1):length() == 1
+!assert require('emu.UIState').selectionSectionClass() == 'Unit'
+# focused_unit(Test Osc #1): the freshly inserted unit is focused with this title.
+!assert require('Channels').getChain(1):getSelection().title == 'Test Osc #1'
+# unit_in_chain(Test Osc #1): present in the selected chain (chain-walk).
+!assert (function() local c=require('Channels').getChain(1); for i=1,c:length() do local u=c:getUnit(i); if u and u.title=='Test Osc #1' then return true end end return false end)()
+
+quit
