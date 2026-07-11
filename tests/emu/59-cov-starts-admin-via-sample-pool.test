@@ -1,0 +1,38 @@
+# [stol:ui-planner-cov-starts] Corpus regression guard: the admin-via-sample-pool goal.
+#
+# End-to-end realization of the DECLARED-START corpus goal
+#   testing-assets/emu/goals/admin-via-sample-pool.goal  (# start: context(sample_pool))
+#   -> {context(admin)}
+# whose committed offline plan (goals/admin-via-sample-pool.plan), solved FROM the
+# declared start, is the single RETURN-edge
+#   nav_sample_pool_to_admin
+# From a boot start A* reaches admin in one op (nav_home_to_admin), so this
+# indirect return edge is only exercised by declaring the sample pool as the start.
+# This test drives the SETUP route home->admin->sample_pool (nav_home_to_admin,
+# nav_admin_to_sample_pool) first to REACH the start, then the goal op
+# (nav_sample_pool_to_admin, DIAL2), and asserts satisfies({context(admin)}).
+# Firmware nav only, no packages.
+
+frames 20
+!assert require('emu.UIState').topClass() == 'Chain.Root'
+
+# ── SETUP: nav_home_to_admin (storage center) ────────────────────────────────
+storage center
+frames 10
+!assert require('Application').getVisibleContext():top():getClassName() == 'Menu' and require('Application').getVisibleContext():getInstanceName() == 'Admin'
+
+# ── SETUP: nav_admin_to_sample_pool (MAIN2) ──────────────────────────────────
+press MAIN2
+frames 12
+!assert require('Application').getVisibleContext():top():getClassName() == 'SamplePool.Interface'
+
+# ── GOAL: nav_sample_pool_to_admin (DIAL2) ───────────────────────────────────
+press DIAL2
+frames 10
+
+# ── FINAL: satisfies({context(admin)}) ───────────────────────────────────────
+!assert require('Application').getVisibleContext():top():getClassName() == 'Menu' and require('Application').getVisibleContext():getInstanceName() == 'Admin'
+
+# route signature = setup + goal nav transitions (goldens/<test>/route.trace).
+!trace-golden route
+quit

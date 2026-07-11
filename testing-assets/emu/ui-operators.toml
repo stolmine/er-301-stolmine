@@ -59,8 +59,9 @@ verified = "needs_crawl"
 params = ["u"]
 pre = ["context(home)", "focused_unit(u)"]
 eff = []
+eff_from = "manifest.views.collapsed"
 gesture = ["press {u_header_main}", "frames 15"]
-note = "Press u's header spot (the MAIN column whose control is Unit.Base.Header) to toggle to the collapsed view. CRAWLER-REFINED: the resulting slot_control(M*, ...) map is u's per-unit `views.collapsed` list (manifest units[u]); {u_header_main} is the live header column."
+note = "Press u's header spot (the MAIN column whose control is Unit.Base.Header) then ENTER to toggle to the collapsed view. The effect is the UNIT-PARAMETRIC slot_control map named by `eff_from` (u's per-view slot list, manifest units[u].views.collapsed, made concrete by the crawl-proof exemplar); ui_solve grounds it per-unit and {u_header_main} is the live header column."
 
 [[operator]]
 id = "expand"
@@ -69,8 +70,9 @@ verified = "needs_crawl"
 params = ["u"]
 pre = ["context(home)", "focused_unit(u)"]
 eff = []
+eff_from = "manifest.views.expanded"
 gesture = ["press {u_header_main}", "frames 15"]
-note = "Press u's header spot (the MAIN column whose control is Unit.Base.Header) to toggle to the expanded view. CRAWLER-REFINED: the resulting slot_control(M*, ...) map is u's per-unit `views.expanded` list (manifest units[u]); {u_header_main} is the live header column."
+note = "Press u's header spot (the MAIN column whose control is Unit.Base.Header) then ENTER to toggle to the expanded view. The effect is the UNIT-PARAMETRIC slot_control map named by `eff_from` (u's per-view slot list, manifest units[u].views.expanded, made concrete by the crawl-proof exemplar); ui_solve grounds it per-unit and {u_header_main} is the live header column."
 
 [[operator]]
 id = "focus_unit"

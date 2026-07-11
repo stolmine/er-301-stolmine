@@ -1,0 +1,8 @@
+# ui_solve offline plan -- goal 'expand-unit-controls'
+# goal (2 fluent(s)):
+#   focused_unit(Test Osc #1)
+#   slot_control(M2,V/oct)
+# plan: 3 operator(s)
+nav_home_to_unit_picker_dense
+insert(Test Osc #1)
+expand(Test Osc #1)

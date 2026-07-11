@@ -130,9 +130,11 @@ def load_columns(path):
 # ── operator model ────────────────────────────────────────────────────────────
 
 class Op:
-    __slots__ = ("id", "source", "verified", "params", "pre", "eff", "gesture", "note")
+    __slots__ = ("id", "source", "verified", "params", "pre", "eff", "gesture",
+                 "note", "eff_from")
 
-    def __init__(self, id, source, verified, params, pre, eff, gesture, note=None):
+    def __init__(self, id, source, verified, params, pre, eff, gesture, note=None,
+                 eff_from=None):
         self.id = id
         self.source = source
         self.verified = verified
@@ -141,6 +143,12 @@ class Op:
         self.eff = eff
         self.gesture = gesture
         self.note = note
+        # [stol:ui-planner-cov-views] MANIFEST-VIEW-DERIVED effect marker. When set
+        # (expand/collapse only), the operator's concrete slot_control(Mi,ctrl)
+        # effect is NOT literal in `eff` but resolved PER-UNIT at plan time from the
+        # target view's slot list (ui_solve.py binds u -> the manifest units[u]
+        # /crawl-proof view map). `eff` stays empty; this names the target view.
+        self.eff_from = eff_from
 
 
 # ── context-nav operators (source=map) ────────────────────────────────────────
@@ -276,10 +284,16 @@ def action_operators(manifest_classes, columns):
         note=setcell_note,
     ))
 
+    # [stol:ui-planner-cov-views]
     # expand(u) / collapse(u) — toggle the focused unit's view by pressing its
     # header spot. The EFFECT is a unit-specific slot_control remap (expanded ->
-    # M1=header, M2=expanded[1], ...), which is unit-dependent, so eff is left for
-    # the crawler rather than guessed.
+    # M1=header, M2=expanded[1], ...). It is UNIT-PARAMETRIC, so it is NOT written
+    # literally in `eff`; instead we emit a machine-readable `eff_from` marker
+    # naming the TARGET VIEW ("manifest.views.expanded" / ".collapsed"). ui_solve
+    # binds u and grounds the concrete slot_control(Mi,ctrl) add/remove set from
+    # that unit's per-view slot list at plan time (added = target-view slots,
+    # removed = the other view's), then --run drives the resolved header-MAIN +
+    # ENTER toggle and asserts the resulting map.
     for opid, verb in (("expand", "expanded"), ("collapse", "collapsed")):
         ops.append(Op(
             id=opid,
@@ -288,12 +302,14 @@ def action_operators(manifest_classes, columns):
             params=["u"],
             pre=["context(home)", "focused_unit(u)"],
             eff=[],
+            eff_from="manifest.views.%s" % verb,
             gesture=["press {u_header_main}", "frames 15"],
             note="Press u's header spot (the MAIN column whose control is "
-                 "Unit.Base.Header) to toggle to the %s view. CRAWLER-REFINED: the "
-                 "resulting slot_control(M*, ...) map is u's per-unit `views.%s` list "
-                 "(manifest units[u]); {u_header_main} is the live header column."
-                 % (verb, verb),
+                 "Unit.Base.Header) then ENTER to toggle to the %s view. The effect "
+                 "is the UNIT-PARAMETRIC slot_control map named by `eff_from` "
+                 "(u's per-view slot list, manifest units[u].views.%s, made concrete "
+                 "by the crawl-proof exemplar); ui_solve grounds it per-unit and "
+                 "{u_header_main} is the live header column." % (verb, verb),
         ))
 
     return ops
@@ -379,6 +395,8 @@ def emit(ops, columns):
         lines.append("params = %s" % arr(o.params))
         lines.append("pre = %s" % arr(o.pre))
         lines.append("eff = %s" % arr(o.eff))
+        if o.eff_from:
+            lines.append("eff_from = %s" % q(o.eff_from))
         lines.append("gesture = %s" % arr(o.gesture))
         if o.note:
             lines.append("note = %s" % q(o.note))

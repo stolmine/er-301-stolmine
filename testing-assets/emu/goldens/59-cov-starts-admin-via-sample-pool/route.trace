@@ -1,0 +1,4 @@
+context hide OUT1 edit
+context show Admin
+push SamplePool.Interface
+pop SamplePool.Interface

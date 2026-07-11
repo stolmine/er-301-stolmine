@@ -23,9 +23,11 @@ MERGE.  The operator set is ui-operators.toml's 20 operators, with each of the 6
 `verified = needs_crawl` operators OVERLAID by its `[[resolved]]` block from
 ui-crawl.map: the resolved `gesture` becomes the runtime gesture SKELETON, and any
 resolved `effect` string that parses as a concrete domain fluent (e.g. set_cell's
-`modal(editingL1)`) is unioned into the operator's effect. Prose effects (e.g.
-expand/collapse's "slot_control map -> u.views.*") are left unmodeled -- see
-COVERAGE below.
+`modal(editingL1)`) is unioned into the operator's effect. Prose effects are
+dropped. expand/collapse are the exception [stol:ui-planner-cov-views]: their
+UNIT-PARAMETRIC slot_control effect is named by the toml `eff_from` marker and
+GROUNDED per-unit from the crawl-proof per-view slot map (added = target-view
+slots, removed = the other view's) -- see _parse_view_slots / GroundOp.
 
 SEARCH.  Forward A* over frozenset fluent states.
   * Operators are GROUND-instantiated from the goal's target fluents (link(a,b)
@@ -75,9 +77,10 @@ Stdlib only. Usage:
   tools/ui_solve.py --selftest                        offline planning correctness
 
 COVERAGE (goals the solver cannot plan yet -- missing operator modeling):
-  * A goal fixing a specific slot_control map that only expand/collapse can produce:
-    those operators' effect is a unit-specific view map (manifest units[u].views.*),
-    not modeled as concrete fluents, so the planner will not route through them.
+  * A goal fixing an expand/collapse slot_control map for a unit OTHER than the
+    crawled exemplar: the concrete per-view slot layout is only known live for the
+    exemplar (Test Osc), so expand/collapse ground to a concrete effect only there
+    (the exemplar covers the corpus goals). [stol:ui-planner-cov-views]
   * focus of a NON-inserted chain unit at a specific detent offset: focus_unit is
     modeled (effect focused_unit(u)) but its live detent count is only resolvable in
     --run; offline it is emitted as a [live] step.
@@ -155,7 +158,8 @@ class Operator:
     param tokens; `~` negates a precondition), the runtime gesture skeleton, and
     whether its gesture must be resolved live."""
 
-    def __init__(self, id, params, pre, eff, gesture, verified, source):
+    def __init__(self, id, params, pre, eff, gesture, verified, source,
+                 eff_from=None):
         self.id = id
         self.params = list(params)
         self.pre = list(pre)
@@ -164,9 +168,69 @@ class Operator:
         self.verified = verified
         self.source = source
         self.live = verified == "needs_crawl"
+        # [stol:ui-planner-cov-views] Manifest-view-derived effect: `eff_from` names
+        # the TARGET view ("expanded"/"collapsed"); view_map holds the concrete
+        # per-view slot_control lists and view_exemplar the unit those slots were
+        # captured for. Both stay empty for every non-view operator.
+        self.eff_from = _view_target(eff_from)
+        self.view_map = {}        # {"expanded": [...], "collapsed": [...]}
+        self.view_exemplar = None
 
     def __repr__(self):
         return "Operator(%s%s)" % (self.id, "[live]" if self.live else "")
+
+
+# [stol:ui-planner-cov-views] Grounding seam for the manifest-view-derived
+# expand/collapse effect. The toml carries only an `eff_from = "manifest.views.<v>"`
+# marker (extract_operators.py); the CONCRETE per-view slot_control map is captured
+# live in the crawl-map [[resolved]] expand/collapse proof (the manifest's own
+# units[u].views lists are the intrinsic-control catalog and do NOT match the
+# chain-embedded on-screen slot layout, so the crawl proof is the authoritative
+# view source). ui_solve grounds it per-unit for the crawled exemplar.
+_VIEW_SLOT_RE = re.compile(r"slot_control\([^)]*\)")
+_VIEW_HEADER_CLASS = "Unit.Base.Header"
+
+
+def _view_target(eff_from):
+    """'manifest.views.expanded' -> 'expanded' (the target view name), else None."""
+    if not eff_from:
+        return None
+    return str(eff_from).rsplit(".", 1)[-1]
+
+
+def _parse_view_slots(resolved):
+    """From the crawl-map [[resolved]] expand/collapse proof, lift the concrete
+    per-view slot_control lists + the exemplar unit title they were captured for.
+
+    Returns (view_map, exemplar) where view_map = {"expanded": [...],
+    "collapsed": [...]} of canonical slot_control(Mi,ctrl) strings, or ({}, None)
+    if no proof carries both view lists."""
+    for oid in ("collapse", "expand"):
+        r = resolved.get(oid)
+        if not r:
+            continue
+        proof = r.get("proof", "")
+        if isinstance(proof, list):
+            proof = " ".join(proof)
+        view_map = {}
+        for vn in ("expanded", "collapsed"):
+            m = re.search(vn + r"_slots=\[(.*?)\]", proof)
+            if m:
+                view_map[vn] = _VIEW_SLOT_RE.findall(m.group(1))
+        if "expanded" in view_map and "collapsed" in view_map:
+            # exemplar = the title paired with Unit.Base.Header in the expanded view.
+            hdr_slot = None
+            for tok in view_map["expanded"]:
+                mm = ui_fluents.parse_fluent(tok)
+                if mm and mm[1][1] == _VIEW_HEADER_CLASS:
+                    hdr_slot = mm[1][0]
+            exemplar = None
+            for tok in view_map["expanded"]:
+                mm = ui_fluents.parse_fluent(tok)
+                if mm and mm[1][0] == hdr_slot and mm[1][1] != _VIEW_HEADER_CLASS:
+                    exemplar = mm[1][1]
+            return view_map, exemplar
+    return {}, None
 
 
 def load_operators(operators_path=DEFAULT_OPERATORS, crawl_path=DEFAULT_CRAWL):
@@ -174,11 +238,16 @@ def load_operators(operators_path=DEFAULT_OPERATORS, crawl_path=DEFAULT_CRAWL):
 
     Returns (operators_by_id, column_map). Each needs_crawl operator gets its
     resolved gesture SKELETON and any resolved effect that parses as a concrete
-    domain fluent unioned into its effect. Prose effects are ignored."""
+    domain fluent unioned into its effect. Prose effects are ignored.
+
+    expand/collapse additionally carry the manifest-view-derived effect: their
+    `eff_from` marker + the crawl-proof per-view slot map (see _parse_view_slots)
+    are attached so GroundOp can bind the concrete slot_control set per-unit."""
     optoml = _load_toml(operators_path)
     column_map = optoml.get("column_map", {})
     crawl = _load_toml(crawl_path)
     resolved = {r["id"]: r for r in crawl.get("resolved", [])}
+    view_map, view_exemplar = _parse_view_slots(resolved)
 
     ops = {}
     for op in optoml.get("operator", []):
@@ -197,7 +266,12 @@ def load_operators(operators_path=DEFAULT_OPERATORS, crawl_path=DEFAULT_CRAWL):
             for e in r.get("effect", []):
                 if _is_concrete_fluent(e) and e not in eff:
                     eff.append(e)
-        ops[oid] = Operator(oid, op.get("params", []), pre, eff, gesture, verified, source)
+        operator = Operator(oid, op.get("params", []), pre, eff, gesture, verified,
+                            source, eff_from=op.get("eff_from"))
+        if operator.eff_from and operator.eff_from in view_map:
+            operator.view_map = view_map
+            operator.view_exemplar = view_exemplar
+        ops[oid] = operator
     return ops, column_map
 
 
@@ -245,6 +319,24 @@ class GroundOp:
         self.binding = dict(binding)
         self.pre = [_subst(p, binding) for p in op.pre]
         self.eff = [ui_fluents.normalize_fluent(_subst(e, binding)) for e in op.eff]
+        # [stol:ui-planner-cov-views] Fluents this op REMOVES (only expand/collapse
+        # use it: the OTHER view's slot_control map). Empty for every other op, so
+        # apply_op is byte-identical for the existing operators.
+        self.remove = []
+        # Manifest-view-derived expand/collapse effect: when u binds the crawled
+        # exemplar unit, ground the concrete slot_control set. added = target-view
+        # slots; removed = the other view's slots. (Non-exemplar units stay
+        # unmodeled -- honest: the per-unit live map is only known for the crawled
+        # exemplar, same limitation as insert's live picker rows.)
+        if op.eff_from and op.view_map:
+            u = binding.get("u")
+            if u is not None and _strip_instance(u) == op.view_exemplar:
+                target = op.eff_from
+                other = "collapsed" if target == "expanded" else "expanded"
+                self.eff = [ui_fluents.normalize_fluent(s)
+                            for s in op.view_map.get(target, [])]
+                self.remove = [ui_fluents.normalize_fluent(s)
+                               for s in op.view_map.get(other, [])]
         # Gesture-template {param} substitution (e.g. link's "down SELECT{a}").
         # {placeholder}s that are NOT operator params (e.g. set_cell's {nudges},
         # open_picker's {i}) survive and are resolved by the live drivers.
@@ -389,6 +481,10 @@ def applicable(gop, state):
 def apply_op(gop, state):
     """Return the successor state (frozenset) of applying gop to `state`."""
     new = set(state)
+    # [stol:ui-planner-cov-views] Drop the fluents this op removes first (only
+    # expand/collapse populate gop.remove: the other view's slot_control map).
+    for r in getattr(gop, "remove", ()):  # noqa: B007
+        new.discard(r)
     for e in gop.eff:
         p = ui_fluents.parse_fluent(e)
         if not p:
@@ -679,9 +775,13 @@ class Executor:
                 "if u and u.title==%s then return true end end; return false end)()"
                 % _lua_str(args[0]))
         if name == "slot_control":
+            # [stol:ui-planner-cov-views] tostring() both sides: a control's
+            # on-screen name can be a Lua NUMBER (e.g. the input index 1 in the
+            # collapsed InputControl slot), which the projection prints as "1";
+            # a bare `== '1'` would miss it (number ~= string in Lua).
             return self.truth(
-                "(require('emu.UIState').controlClassAt(%s)==%s or "
-                "require('emu.UIState').controlNameAt(%s)==%s)"
+                "(tostring(require('emu.UIState').controlClassAt(%s))==%s or "
+                "tostring(require('emu.UIState').controlNameAt(%s))==%s)"
                 % (_lua_str(args[0]), _lua_str(args[1]), _lua_str(args[0]), _lua_str(args[1])))
         if name == "modal":
             return self.truth(
@@ -901,7 +1001,9 @@ class Executor:
         self._settle(8)
         self.send("press ENTER")
         self._settle(15)
-        return True, "toggled at %s" % i
+        # [stol:ui-planner-cov-views] Assert the toggled view's slot_control map
+        # (the grounded durable effect) actually reached the screen.
+        return self._check_effects(gop)
 
     def _diagnostic(self):
         try:

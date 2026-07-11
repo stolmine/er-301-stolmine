@@ -1,0 +1,8 @@
+# ui_solve offline plan -- goal 'collapse-unit-header'
+# goal (2 fluent(s)):
+#   focused_unit(Test Osc #1)
+#   slot_control(M3,Unit.Base.Header)
+# plan: 3 operator(s)
+nav_home_to_unit_picker_dense
+insert(Test Osc #1)
+collapse(Test Osc #1)

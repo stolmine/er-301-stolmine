@@ -1,0 +1,15 @@
+# expand-unit-controls -- insert a CORE builtin (Test Osc) and require its EXPANDED
+# control map: slot_control(M2,V/oct) (the Pitch/V-oct control) holds ONLY in the
+# expanded view. From boot, plan: nav_home_to_unit_picker_dense, insert(Test Osc
+# #1), expand(Test Osc #1).
+#
+# NOTE (honest coverage of EXPAND): a fresh insert lands the unit already EXPANDED,
+# so the OFFLINE planner routes through expand to add the expanded slot_control map
+# (insert itself is modeled without a slot effect), while at --run the executor
+# sees expand's durable effects already hold and SKIPS driving the toggle -- the
+# same idempotent-skip pattern as select_column(cv1) being a run no-op in
+# seq-cv1-c3. This covers the expand operator + slot_control from a boot start
+# without forcing a broken collapse-then-expand end-state. A genuine drive of
+# expand (from a collapsed-unit start) composes with ui-planner-cov-starts.
+focused_unit(Test Osc #1)
+slot_control(M2,V/oct)

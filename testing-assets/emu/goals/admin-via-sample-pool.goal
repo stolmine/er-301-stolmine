@@ -1,0 +1,9 @@
+# admin-via-sample-pool -- reach Admin INDIRECTLY, arriving from the sample pool.
+# [stol:ui-planner-cov-starts] From a boot start A* reaches admin in ONE op
+# (nav_home_to_admin), so nav_sample_pool_to_admin is never routed; declaring the
+# start as the sample pool forces that sample_pool->admin return edge -- the only
+# way to cover it. The SETUP route home->admin->sample_pool (nav_home_to_admin,
+# nav_admin_to_sample_pool) is driven first at --run but is NOT part of this
+# measured plan.
+# start: context(sample_pool)
+context(admin)

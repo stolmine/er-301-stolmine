@@ -1,0 +1,6 @@
+# home-from-scope -- return-nav from the ScopeView BACK to home.
+# [stol:ui-planner-cov-starts] Start context(scope) (reached by nav_home_to_scope)
+# forces A* to route back via nav_scope_to_home, which no boot-start goal reaches.
+# The SETUP route home->scope is driven first at --run but is NOT measured.
+# start: context(scope)
+context(home)

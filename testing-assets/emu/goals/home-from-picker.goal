@@ -1,0 +1,7 @@
+# home-from-picker -- return-nav from the dense unit picker BACK to home.
+# [stol:ui-planner-cov-starts] Start context(unit_picker_dense) (reached by
+# nav_home_to_unit_picker_dense) forces A* to route back via
+# nav_unit_picker_dense_to_home. The SETUP route home->picker is driven first at
+# --run but is NOT measured.
+# start: context(unit_picker_dense)
+context(home)

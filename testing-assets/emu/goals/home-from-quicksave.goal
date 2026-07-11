@@ -1,0 +1,6 @@
+# home-from-quicksave -- return-nav from the QuickSaver BACK to home.
+# [stol:ui-planner-cov-starts] Start context(quicksave) (reached by
+# nav_home_to_quicksave) forces A* to route back via nav_quicksave_to_home. The
+# SETUP route home->quicksave is driven first at --run but is NOT measured.
+# start: context(quicksave)
+context(home)

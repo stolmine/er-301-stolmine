@@ -1,0 +1,10 @@
+# collapse-unit-header -- insert a CORE builtin (Test Osc), then COLLAPSE it so the
+# chain-overview reappears and the unit's header remaps to M3. From boot, plan:
+# nav_home_to_unit_picker_dense (MAIN3 = the mono-chain empty-insert column),
+# insert(Test Osc #1), collapse(Test Osc #1). The goal fixes the COLLAPSED-ONLY
+# slot map: slot_control(M3,Unit.Base.Header) holds only in the collapsed view
+# (expanded puts the header at M1), so the solver must route through collapse.
+# Exercises the collapse operator + the slot_control fluent TYPE end-to-end.
+# focused_unit persists through the header toggle.
+focused_unit(Test Osc #1)
+slot_control(M3,Unit.Base.Header)

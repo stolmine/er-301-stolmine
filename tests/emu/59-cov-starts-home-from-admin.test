@@ -1,0 +1,33 @@
+# [stol:ui-planner-cov-starts] Corpus regression guard: the home-from-admin goal.
+#
+# End-to-end realization of the DECLARED-START corpus goal
+#   testing-assets/emu/goals/home-from-admin.goal  (# start: context(admin))
+#   -> {context(home)}
+# whose committed offline plan (goals/home-from-admin.plan), solved FROM the
+# declared start, is the single RETURN-nav
+#   nav_admin_to_home
+# An all-boot-start corpus never routes back to home (context(home) IS the boot
+# start), so this declared-start goal is the only thing that exercises the
+# nav_admin_to_home operator. This test drives the SETUP route home->admin
+# (nav_home_to_admin, storage center) first to REACH the start, then the goal op
+# (nav_admin_to_home, storage up), and asserts satisfies({context(home)}).
+# Firmware nav only, no packages.
+
+frames 20
+!assert require('emu.UIState').topClass() == 'Chain.Root'
+
+# ── SETUP: nav_home_to_admin (storage center) ────────────────────────────────
+storage center
+frames 10
+!assert require('Application').getVisibleContext():top():getClassName() == 'Menu' and require('Application').getVisibleContext():getInstanceName() == 'Admin'
+
+# ── GOAL: nav_admin_to_home (storage up) ─────────────────────────────────────
+storage up
+frames 10
+
+# ── FINAL: satisfies({context(home)}) ────────────────────────────────────────
+!assert require('emu.UIState').topClass() == 'Chain.Root'
+
+# route signature = setup + goal nav transitions (goldens/<test>/route.trace).
+!trace-golden route
+quit

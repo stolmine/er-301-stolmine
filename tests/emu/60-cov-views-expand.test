@@ -1,0 +1,50 @@
+# [stol:ui-planner-cov-views] Corpus guard: the EXPANDED slot_control map (the
+# expand-unit-controls goal + the expand operator's grounded effect).
+#
+# The corpus goal
+#   testing-assets/emu/goals/expand-unit-controls.goal
+#     {focused_unit(Test Osc #1), slot_control(M2,V/oct)}
+# plans nav_home_to_unit_picker_dense, insert(Test Osc #1), expand(Test Osc #1);
+# since a fresh insert lands the unit ALREADY expanded, ui_goals.py --run reaches
+# the expanded map with expand as an idempotent no-op (guarded there). This test
+# additionally proves the expanded slot_control map is reachable via a REAL header
+# toggle: insert -> collapse -> expand (a second ENTER re-expands, since the header
+# stays focused), asserting slot_control(M2,V/oct) and the header back at M1.
+# Test Osc is a CORE builtin.
+!packages core
+
+frames 20
+!assert require('emu.UIState').topClass() == 'Chain.Root'
+
+# ── insert Test Osc onto the empty mono chain (dense picker row 1, right) ─────
+press MAIN3
+frames 12
+turn 3
+frames 6
+press MAIN4
+frames 30
+!assert require('Channels').getChain(1):getSelection().title == 'Test Osc #1'
+# freshly inserted -> EXPANDED: header at M1, slot_control(M2,V/oct) already holds.
+!assert (select(2, require('Channels').getChain(1):getSelection())) == 'expanded'
+!assert require('emu.UIState').controlClassAt('M2') == 'Unit.ViewControl.Pitch'
+!assert require('emu.UIState').controlNameAt('M2') == 'V/oct'
+
+# ── COLLAPSE (header MAIN M1 + ENTER), then EXPAND (a second ENTER re-expands) ─
+press MAIN1
+frames 8
+press ENTER
+frames 15
+!assert (select(2, require('Channels').getChain(1):getSelection())) == 'collapsed'
+press ENTER
+frames 15
+
+# ── FINAL: back to the EXPANDED slot_control map after a real toggle ──────────
+!assert (select(2, require('Channels').getChain(1):getSelection())) == 'expanded'
+!assert require('Channels').getChain(1):getSelection().title == 'Test Osc #1'
+!assert require('emu.UIState').controlClassAt('M1') == 'Unit.Base.Header'
+# slot_control(M2,V/oct) -- the expand-only goal fluent (Pitch control, V/oct name)
+!assert require('emu.UIState').controlClassAt('M2') == 'Unit.ViewControl.Pitch'
+!assert require('emu.UIState').controlNameAt('M2') == 'V/oct'
+
+!trace-golden route
+quit

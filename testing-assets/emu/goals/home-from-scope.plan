@@ -1,0 +1,6 @@
+# ui_solve offline plan -- goal 'home-from-scope'
+# start: context(scope)
+# goal (1 fluent(s)):
+#   context(home)
+# plan: 1 operator(s)
+nav_scope_to_home

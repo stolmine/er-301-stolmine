@@ -109,27 +109,95 @@ def load_goal(name):
 
     Full-line `#` comments are stripped FIRST so a description header may contain
     any punctuation -- notably `;`, which ui_fluents.parse_goal treats as a fluent
-    separator before it strips comments."""
+    separator before it strips comments. The optional `# start:` directive
+    (load_start) is a `#` comment too, so it is ignored here -- it never leaks into
+    the goal fluent set."""
     with open(goal_path(name, "goal")) as f:
         body = "\n".join(
             ln for ln in f.read().splitlines() if not ln.lstrip().startswith("#"))
     return ui_fluents.parse_goal(body)
 
 
+# [stol:ui-planner-cov-starts]  NON-BOOT START STATES.  A goal file may declare a
+# start CONTEXT other than boot(home) via a `# start: <fluent(s)>` directive, e.g.
+#
+#     # start: context(admin)
+#     context(home)
+#
+# The directive is OPTIONAL: a goal with no `# start:` behaves exactly as before
+# (start = boot(home)), so every pre-existing goal -- and any start-less goal a
+# sibling adds -- plans, runs, and covers identically under this version. A
+# declared start lets A* route the FOUR return-navs back to home
+# (nav_{admin,scope,quicksave,unit_picker_dense}_to_home) and the indirect
+# nav_sample_pool_to_admin, none of which an all-boot-start corpus ever exercises
+# (context(home)/context(admin) are already reached at/near the start).
+#
+# At --run time the runner FIRST solves + drives a SETUP route boot(home) ->
+# declared start (setup_plan_for), THEN plans + drives the goal FROM that start.
+# The setup route is NOT part of the goal's measured .plan golden nor the coverage
+# tally -- only the goal's own plan (plan_for, solved from the declared start) is.
+
+START_DIRECTIVE = "# start:"
+
+
+def load_start(name):
+    """The goal's declared `# start: <fluent(s)>` start context as a canonical
+    fluent list, or None when the goal starts at the default boot(home) state.
+
+    The value after `# start:` is parsed with ui_fluents.parse_goal (so it accepts
+    the same `;`/newline fluent syntax). Only the FIRST such directive is honored.
+    [stol:ui-planner-cov-starts]"""
+    with open(goal_path(name, "goal")) as f:
+        for ln in f.read().splitlines():
+            s = ln.strip()
+            if s.startswith(START_DIRECTIVE):
+                spec = s[len(START_DIRECTIVE):].strip()
+                if spec:
+                    return ui_fluents.parse_goal(spec)
+    return None
+
+
+def start_state(name):
+    """The concrete planning start for a goal: its declared `# start:` fluents, or
+    ui_solve.boot_start() (home) when none is declared."""
+    st = load_start(name)
+    return st if st is not None else ui_solve.boot_start()
+
+
 def plan_for(name, operators):
-    """Solve the goal from the boot(home) start. Returns a ui_solve.Plan or None."""
+    """Solve the goal FROM its start -- the declared `# start:` context, or
+    boot(home) when start-less. Returns (goal, ui_solve.Plan|None)."""
     goal = load_goal(name)
-    return goal, ui_solve.solve(operators, ui_solve.boot_start(), goal)
+    return goal, ui_solve.solve(operators, start_state(name), goal)
+
+
+def setup_plan_for(name, operators):
+    """Plan the SETUP route boot(home) -> a start-goal's declared start context.
+    Returns a ui_solve.Plan (possibly empty) or None for a boot-start goal.
+
+    This route is driven FIRST at --run to place the emu in the declared start; it
+    is deliberately SEPARATE from plan_for (the goal's measured plan), so the setup
+    never enters the .plan golden or the coverage tally. [stol:ui-planner-cov-starts]"""
+    st = load_start(name)
+    if st is None:
+        return None
+    return ui_solve.solve(operators, ui_solve.boot_start(), st)
 
 
 # ── plan golden (deterministic text) ─────────────────────────────────────────
 
-def render_plan_golden(name, goal, plan):
+def render_plan_golden(name, goal, plan, start=None):
     """The committed offline-plan golden: the goal echoed as a comment header
     plus one operator-instance LABEL per line (id(param values)). Fully
-    deterministic (ui_solve grounds + sorts stably)."""
-    out = ["# ui_solve offline plan -- goal '%s'" % name,
-           "# goal (%d fluent(s)):" % len(goal)]
+    deterministic (ui_solve grounds + sorts stably).
+
+    For a declared-start goal, a `# start:` line records the non-boot start the
+    plan was solved from; start-less goals emit no such line, so their goldens are
+    byte-identical to the pre-directive format. [stol:ui-planner-cov-starts]"""
+    out = ["# ui_solve offline plan -- goal '%s'" % name]
+    if start:
+        out.append("# start: %s" % "; ".join(start))
+    out.append("# goal (%d fluent(s)):" % len(goal))
     for g in goal:
         out.append("#   %s" % g)
     if plan is None:
@@ -160,7 +228,7 @@ def cmd_check_plans(names):
             print("  [FAIL] %s -- NO PLAN (goal unreachable)" % name)
             rc = 1
             continue
-        text = render_plan_golden(name, goal, plan)
+        text = render_plan_golden(name, goal, plan, load_start(name))
         path = goal_path(name, "plan")
         if update:
             with open(path, "w") as f:
@@ -282,22 +350,46 @@ def cmd_coverage(names):
 
 # ── live run (drive the emu; verify satisfies + trace golden) ────────────────
 
+def _first_failure(results):
+    for label, res, det in results:
+        if res is False:
+            return label, det
+    return None, None
+
+
 def _run_one(name, operators, emu_bin=None):
     """Solve + drive `<name>` against a fresh hermetic emu with UI tracing on.
     Returns (satisfies_ok, trace_lines, detail). Reuses ui_solve.Executor and
-    emu_test.normalize_trace verbatim (never re-implements the drive)."""
+    emu_test.normalize_trace verbatim (never re-implements the drive).
+
+    For a DECLARED-START goal the SETUP route (boot -> declared start) is driven
+    FIRST with tracing STILL OFF, so only the goal's own transitions land in the
+    trace golden and the setup is never measured; then tracing is enabled and the
+    goal itself is driven FROM that start. [stol:ui-planner-cov-starts]"""
     goal, plan = plan_for(name, operators)
     if plan is None:
         return False, None, "NO PLAN (goal unreachable)"
+    start = load_start(name)
+    setup = setup_plan_for(name, operators)
+    if start is not None and setup is None:
+        return False, None, "NO SETUP PLAN (declared start %s unreachable from boot)" % start
     ex = ui_solve.Executor(operators_column_map(operators), packages=["core"], emu_bin=emu_bin)
     emu_test = ex.ET
     ok = False
     trace = None
     try:
         ex.start()
-        # Enable UI tracing right after boot (before any plan gesture) so the
-        # whole route is captured; boot-settle transitions are already past.
+        # SETUP: drive boot -> declared start with tracing OFF (so no @trace lines
+        # accumulate for it). ex.run(setup, start) reuses the Executor verbatim and
+        # verifies satisfies(declared start) as its own final check.
+        if setup is not None and setup.ops:
+            if not ex.run(setup, start):
+                label, det = _first_failure(ex.results)
+                return False, None, "SETUP route failed at %s: %s" % (label, det)
+        # Enable UI tracing AFTER any setup (before the goal's first gesture) so the
+        # captured route is the goal portion ONLY; boot-settle + setup are past.
         ex.send("trace on")
+        setup_results = len(ex.results)
         ok = ex.run(plan, goal)
         trace = emu_test.normalize_trace(ex.emu.trace)
     finally:
@@ -307,11 +399,10 @@ def _run_one(name, operators, emu_bin=None):
             shutil.rmtree(ex.sandbox, ignore_errors=True)
     detail = "satisfies + %d trace line(s)" % (len(trace) if trace else 0)
     if not ok:
-        # Surface the first failing drive result for diagnostics.
-        for label, res, det in ex.results:
-            if res is False:
-                detail = "drive FAILED at %s: %s" % (label, det)
-                break
+        # Surface the first failing drive result from the GOAL portion.
+        label, det = _first_failure(ex.results[setup_results:])
+        if label is not None:
+            detail = "drive FAILED at %s: %s" % (label, det)
     return ok, trace, detail
 
 
@@ -330,6 +421,16 @@ def cmd_run(names, emu_bin=None):
     update = _updating()
     rc = 0
     for name in names:
+        # [stol:ui-planner-cov-starts] Make the setup->goal split visible in the
+        # transcript for a declared-start goal.
+        st = load_start(name)
+        if st is not None:
+            setup = setup_plan_for(name, operators)
+            _, gplan = plan_for(name, operators)
+            setup_ids = ",".join(g.op.id for g in setup.ops) if setup else "(none)"
+            goal_ids = ",".join(g.op.id for g in gplan.ops) if gplan else "NO PLAN"
+            print("  [start] %s -- setup home->{%s}: %s | goal-from-start: %s"
+                  % (name, "; ".join(st), setup_ids, goal_ids))
         ok, trace, detail = _run_one(name, operators, emu_bin=emu_bin)
         if not ok:
             print("  [FAIL] %s -- %s" % (name, detail))

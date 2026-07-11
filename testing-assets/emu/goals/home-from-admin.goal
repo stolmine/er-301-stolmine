@@ -1,0 +1,8 @@
+# home-from-admin -- return-nav from the Admin menu BACK to home.
+# [stol:ui-planner-cov-starts] Declares a non-boot start so A* routes back to home
+# via nav_admin_to_home -- the return-nav an all-boot-start corpus never exercises
+# (context(home) IS the boot start, so A* never routes to it). The SETUP route
+# home->admin (nav_home_to_admin) is driven first at --run but is NOT part of this
+# measured plan.
+# start: context(admin)
+context(home)

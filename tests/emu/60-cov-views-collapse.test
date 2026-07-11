@@ -1,0 +1,54 @@
+# [stol:ui-planner-cov-views] Corpus regression guard: the collapse-unit-header goal.
+#
+# Hermetic end-to-end realization of the corpus goal
+#   testing-assets/emu/goals/collapse-unit-header.goal
+#     {focused_unit(Test Osc #1), slot_control(M3,Unit.Base.Header)}
+# whose committed offline plan (goals/collapse-unit-header.plan) is
+#   nav_home_to_unit_picker_dense, insert(Test Osc #1), collapse(Test Osc #1)
+# and whose --run route is goals/collapse-unit-header.trace. This exercises the
+# COLLAPSE operator + the slot_control fluent TYPE now made plannable
+# (expand/collapse effects grounded from the manifest-view marker). tools/ui_goals.py
+# --run drives + verifies it live against the emu; this pins it in the standard emu
+# suite so the corpus is guarded per-commit. Test Osc is a CORE builtin.
+!packages core
+
+frames 20
+!assert require('emu.UIState').topClass() == 'Chain.Root'
+
+# ── nav_home_to_unit_picker_dense: MAIN3 = the mono-chain empty-insert column ─
+!assert require('emu.UIState').controlClassAt('M3') == 'EmptySection.EmptyControl'
+press MAIN3
+frames 12
+!assert require('emu.UIState').topClass() == 'Unit.Chooser.Dense'
+
+# ── insert(Test Osc #1): mono picker, Test Osc is row 1 right cell ───────────
+turn 3
+frames 6
+press MAIN4
+frames 30
+# effect: home, focused on the freshly inserted (EXPANDED) unit.
+!assert require('emu.UIState').topClass() == 'Chain.Root'
+!assert require('Channels').getChain(1):getSelection().title == 'Test Osc #1'
+!assert (select(2, require('Channels').getChain(1):getSelection())) == 'expanded'
+!assert require('emu.UIState').controlClassAt('M1') == 'Unit.Base.Header'
+
+# ── collapse(Test Osc #1): focus the header MAIN column (M1), ENTER toggles ───
+press MAIN1
+frames 8
+press ENTER
+frames 15
+
+# ── FINAL: the COLLAPSED slot_control map (the collapse operator's grounded
+# effect). The header remaps to M3 (collapsed-only); chain title/input/monitor
+# reappear; focused_unit persists through the toggle.
+!assert (select(2, require('Channels').getChain(1):getSelection())) == 'collapsed'
+!assert require('Channels').getChain(1):getSelection().title == 'Test Osc #1'
+!assert require('emu.UIState').controlClassAt('M1') == 'ChainTitleControl'
+!assert require('emu.UIState').controlClassAt('M2') == 'InputControl'
+# slot_control(M3,Unit.Base.Header) -- the goal fluent (class + the unit-title name)
+!assert require('emu.UIState').controlClassAt('M3') == 'Unit.Base.Header'
+!assert require('emu.UIState').controlNameAt('M3') == 'Test Osc'
+!assert require('emu.UIState').controlClassAt('M4') == 'MonitorControl'
+
+!trace-golden route
+quit
