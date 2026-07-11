@@ -6,11 +6,12 @@
 # headline numbers grow monotonically as goals/*.goal are added.
 # Deterministic: sorted, no timestamps/paths.
 
-operators covered: 19/20
-goal-fluent types: 7/9
+operators covered: 20/21
+goal-fluent types: 8/9
 
 [goals]  (name -> plan length -> operators exercised)
 admin-via-sample-pool   1  nav_sample_pool_to_admin
+build-selection         3  build_selection,nav_home_to_scope,nav_scope_to_sequencer
 collapse-unit-header    3  collapse,insert,nav_home_to_unit_picker_dense
 expand-unit-controls    3  expand,insert,nav_home_to_unit_picker_dense
 home-from-admin         1  nav_admin_to_home
@@ -29,7 +30,8 @@ open-picker             1  nav_home_to_unit_picker_dense
 seq-cv1-c3              9  nav_home_to_scope,nav_scope_to_sequencer,select_column,set_cell
 seq-cv2-fifth           4  nav_home_to_scope,nav_scope_to_sequencer,select_column,set_cell
 
-[operators.covered]  (19)
+[operators.covered]  (20)
+build_selection
 collapse
 expand
 insert
@@ -53,15 +55,15 @@ set_cell
 [operators.uncovered]  (1)
 focus_unit                     # focused_unit(u) is auto-produced by insert; on a boot start no unit pre-exists to re-focus
 
-[fluent_types.covered]  (7)
+[fluent_types.covered]  (8)
 cell
 column_cursor
 context
 focused_unit
 linked
+modal
 slot_control
 unit_in_chain
 
-[fluent_types.uncovered]  (2)
+[fluent_types.uncovered]  (1)
 focused_class                  # not an effect of any modeled operator (nav ops set only context)
-modal                          # modal(editingL1) is set_cell's transient effect, stripped as non-durable -- not a stable goal

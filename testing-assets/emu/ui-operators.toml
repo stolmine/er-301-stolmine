@@ -15,16 +15,16 @@
 [meta]
 schema = 1
 generator = "tools/extract_operators.py"
-total = 20
+total = 21
 sources = ["manifest", "map", "ui_plan"]
 
 [meta.by_source]
-manifest = 4
+manifest = 5
 map = 12
 ui_plan = 4
 
 [meta.by_verified]
-needs_crawl = 6
+needs_crawl = 7
 static = 14
 
 # Shared fluent vocabulary (name = arity). Must match the schema
@@ -51,6 +51,16 @@ g1L = "MAIN3"
 g2L = "MAIN4"
 stL = "MAIN5"
 tr = "MAIN6"
+
+[[operator]]
+id = "build_selection"
+source = "manifest"
+verified = "needs_crawl"
+params = []
+pre = ["context(sequencer)", "~modal(selectionActive)"]
+eff = ["modal(selectionActive)"]
+gesture = ["down SHIFT", "turn 3", "up SHIFT", "frames 6"]
+note = "Nav-mode shift+encoder on the grid sequencer builds a row-range selection on the focused column (GridView:encoder shifted branch: `self.selectionActive = true`). DURABLE — persists until UP/CANCEL/column-change; non-destructive (a highlighted range; the bulk-edit nudge is a later, separate gesture). ~modal(selectionActive) guards re-entry. CRAWLER-REFINED: the gesture skeleton + driven modal-boundary proof come from ui-crawl.map [[resolved]]. Justified by manifest Sequencer.GridView (grid selection modal)."
 
 [[operator]]
 id = "collapse"

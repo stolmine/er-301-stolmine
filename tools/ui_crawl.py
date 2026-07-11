@@ -111,6 +111,12 @@ def _candidates():
         ("mode_center", ["mode center"], None),
         ("mode_down", ["mode down"], None),
         ("mode_up", ["mode up"], None),
+        # [stol:ui-planner-cov-modals] Modal-entering compound gesture: nav-mode
+        # SHIFT+encoder builds the grid sequencer's DURABLE row-range selection
+        # (modal(selectionActive): false->true). Eligible wherever `encoder` is
+        # handled; in the sequencer it crosses the modal(...) fluent boundary.
+        ("shift_encoder", ["down SHIFT", "turn %d" % ENCODER_DETENTS, "up SHIFT"],
+         {"encoder"}),
         ("storage_center", ["storage center"], None),
         ("storage_down", ["storage down"], None),   # ALWAYS denied (eject/unmount)
         ("storage_up", ["storage up"], None),
@@ -449,8 +455,54 @@ class Resolver:
         out.append(self._insert())
         out.append(self._focus_unit())
         out.append(self._set_cell())
+        out.append(self._build_selection())   # [stol:ui-planner-cov-modals]
         out.extend(self._expand_collapse())
         return sorted(out, key=lambda x: x["id"])
+
+    # [stol:ui-planner-cov-modals]
+    # build_selection: nav-mode shift+encoder builds a DURABLE row-range selection
+    # on the focused column. self.selectionActive INITIALIZES false, so
+    # modal(selectionActive) is a clean ABSENT->PRESENT boundary (UNLIKE the
+    # always-truthy markingMode idle-string quirk). One compound gesture; the flag
+    # persists past `up SHIFT` (durable) until UP/CANCEL/column-change.
+    def _build_selection(self):
+        e = self._fresh()
+        try:
+            e.replay(SEEDS["sequencer"])
+            pre, _ = e.observe()
+            before = e.lua("tostring(require('Application').getVisibleContext()"
+                           ":top().selectionActive)")
+            e.replay(["down SHIFT", "turn %d" % ENCODER_DETENTS, "up SHIFT",
+                      "frames 6"])
+            mid, _ = e.observe()
+            after = e.lua("tostring(require('Application').getVisibleContext()"
+                          ":top().selectionActive)")
+            # durability: the flag survives further settle frames (no auto-exit).
+            e.replay(["frames 30"])
+            durable = e.lua("tostring(require('Application').getVisibleContext()"
+                            ":top().selectionActive)")
+            post, _ = e.observe()
+        finally:
+            e.close()
+        added, _removed = delta(pre, mid)
+        return {
+            "id": "build_selection",
+            "precondition": ["context(sequencer)", "~modal(selectionActive)"],
+            "gesture": ["down SHIFT", "turn 3", "up SHIFT", "frames 6"],
+            "effect": ["modal(selectionActive)"],
+            "rule": "Nav-mode shift+encoder (SHIFT held, encoder turned) on the grid "
+                    "sequencer builds a row-range selection on the focused column: "
+                    "GridView:encoder shifted branch sets self.selectionActive=true. "
+                    "The flag INITIALIZES false, so modal(selectionActive) is a clean "
+                    "ABSENT->PRESENT boundary (unlike the always-truthy markingMode "
+                    "idle-string quirk in UI_STATE_SCHEMA.md). DURABLE: it persists "
+                    "past `up SHIFT` until UP/CANCEL/column-change. Non-destructive "
+                    "(a highlighted range; the bulk-edit nudge is a later gesture).",
+            "proofs": [{"selection_before": before, "selection_after": after,
+                        "selection_durable": durable,
+                        "modal_added": "modal(selectionActive)" in added,
+                        "pre": fhash(pre), "post": fhash(post)}],
+        }
 
     # open_picker: press the MAIN column holding EmptySection.EmptyControl.
     def _open_picker(self):

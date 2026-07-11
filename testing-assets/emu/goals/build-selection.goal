@@ -1,0 +1,10 @@
+# build-selection -- enter the grid sequencer's DURABLE row-range selection modal
+# (modal(selectionActive)) via nav-mode shift+encoder on the focused column.
+# Plan: nav home->scope->sequencer, then build_selection (down SHIFT, turn 3,
+# up SHIFT). self.selectionActive INITIALIZES false, so modal(selectionActive) is
+# a clean ABSENT->PRESENT boundary that PERSISTS (durable) until UP/CANCEL/column-
+# change -- UNLIKE the TRANSIENT modal(editingL1) (set_cell), stripped as non-
+# durable, and UNLIKE the always-truthy markingMode idle-string quirk. This is the
+# goal that moves the `modal` fluent type into coverage. [stol:ui-planner-cov-modals]
+context(sequencer)
+modal(selectionActive)

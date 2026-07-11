@@ -1,0 +1,51 @@
+# [stol:ui-planner-cov-modals] Corpus regression guard: the build-selection goal.
+#
+# End-to-end realization of the durable-modal corpus goal
+#   testing-assets/emu/goals/build-selection.goal
+#   -> {context(sequencer), modal(selectionActive)}
+# whose committed offline plan (goals/build-selection.plan) is
+#   nav_home_to_scope, nav_scope_to_sequencer, build_selection
+# This drives the two nav ops (mode down; SHIFT+ENTER) to reach the grid
+# sequencer, then the build_selection operator (nav-mode SHIFT+encoder), and
+# proves modal(selectionActive) is entered AND DURABLE (still set after 30 idle
+# frames -- it persists until UP/CANCEL/column-change, unlike the TRANSIENT
+# modal(editingL1)). Firmware sequencer only, no packages.
+
+frames 20
+!assert require('emu.UIState').topClass() == 'Chain.Root'
+
+# ── nav_home_to_scope (mode down) ────────────────────────────────────────────
+mode down
+frames 10
+!assert require('Application').getVisibleContext():top():getClassName() == 'Chain.ScopeView'
+
+# ── nav_scope_to_sequencer (SHIFT+ENTER) ─────────────────────────────────────
+down SHIFT
+press ENTER
+up SHIFT
+frames 10
+!assert require('emu.UIState').topClass() == 'Sequencer.GridView'
+# selectionActive INITIALIZES false -> modal(selectionActive) is ABSENT idle.
+!assert require('Application').getVisibleContext():top().selectionActive == false
+!assert (function() for _,m in ipairs(require('emu.UIState').describe().modals) do if m=='selectionActive' then return false end end return true end)()
+
+# ── build_selection (nav-mode SHIFT+encoder builds the row-range selection) ───
+down SHIFT
+turn 3
+up SHIFT
+frames 6
+# The flag is now set AND the encoder is released (durable, not held).
+!assert require('Application').getVisibleContext():top().selectionActive == true
+# modal(selectionActive) is now present in the UIState projection.
+!assert (function() for _,m in ipairs(require('emu.UIState').describe().modals) do if m=='selectionActive' then return true end end return false end)()
+
+# ── DURABILITY: the modal PERSISTS across idle frames (no auto-exit) ──────────
+frames 30
+!assert require('Application').getVisibleContext():top().selectionActive == true
+!assert require('emu.UIState').topClass() == 'Sequencer.GridView'
+!assert (function() for _,m in ipairs(require('emu.UIState').describe().modals) do if m=='selectionActive' then return true end end return false end)()
+
+# route signature = the two nav transitions (SHIFT+encoder stays in-context, so
+# it adds no context show/hide line). goldens/<test>/route.trace.
+!trace-golden route
+quit

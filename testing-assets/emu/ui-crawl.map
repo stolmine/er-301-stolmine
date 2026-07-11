@@ -19,8 +19,8 @@ schema = 1
 generator = "tools/ui_crawl.py"
 seeds = ["boot", "linked12", "sequencer", "unit_inserted"]
 states = 24
-transitions = 173
-resolved = 6
+transitions = 185
+resolved = 7
 
 [bounds]
 max_depth = 3
@@ -40,13 +40,13 @@ sample_pool = ["cancel"]
 unit_picker_classic = ["cancel"]
 
 [skipped]  # honest coverage: candidates NOT probed, by reason
-deny_context = 156
-deny_destructive = 18
+deny_context = 163
+deny_destructive = 15
 deny_global = 24
 depth_cap = 0
-no_affordance = 80
-self_loop = 173
-state_cap = 35
+no_affordance = 79
+self_loop = 182
+state_cap = 44
 
 # Logical gesture -> control-protocol (docs/UI_OPERATION.md); the
 # solver renders a resolved skeleton through this table.
@@ -70,6 +70,7 @@ select1 = ["press SELECT1"]
 select2 = ["press SELECT2"]
 select3 = ["press SELECT3"]
 select4 = ["press SELECT4"]
+shift_encoder = ["down SHIFT", "turn 3", "up SHIFT"]
 storage_center = ["storage center"]
 storage_down = ["storage down"]
 storage_up = ["storage up"]
@@ -332,6 +333,13 @@ removed = ["_toggle(0110)", "column_cursor(stL)", "context(sequencer)", "focused
 
 [[transition]]
 pre = "65e7d03c3014"
+gesture = "shift_encoder"
+post = "5710a5a0c8d0"
+added = ["modal(selectionActive)"]
+removed = []
+
+[[transition]]
+pre = "65e7d03c3014"
 gesture = "storage_center"
 post = "d53f9fc9e972"
 added = ["_toggle(0100)", "context(admin)", "focused_class(Menu)"]
@@ -521,6 +529,13 @@ removed = ["_toggle(0110)", "column_cursor(g1L)", "context(sequencer)", "focused
 
 [[transition]]
 pre = "765ec57ac1e6"
+gesture = "shift_encoder"
+post = "38eedd23f72a"
+added = ["modal(selectionActive)"]
+removed = []
+
+[[transition]]
+pre = "765ec57ac1e6"
 gesture = "storage_center"
 post = "d53f9fc9e972"
 added = ["_toggle(0100)", "context(admin)", "focused_class(Menu)"]
@@ -581,6 +596,118 @@ gesture = "storage_center"
 post = "a27e78544219"
 added = ["_toggle(0000)", "context(admin)", "focused_class(Menu)"]
 removed = ["_toggle(0010)", "context(home)", "focused_class(Chain.Root)", "slot_control(M1,ChainTitleControl)", "slot_control(M2,1)", "slot_control(M2,InputControl)", "slot_control(M3,EmptySection.EmptyControl)", "slot_control(M4,EmptySection.EmptyControl)", "slot_control(M5,EmptySection.EmptyControl)", "slot_control(M6,MonitorControl)"]
+
+[[transition]]
+pre = "86863aa309f5"
+gesture = "cancel"
+post = "dbea93790541"
+added = []
+removed = ["modal(selectionActive)"]
+
+[[transition]]
+pre = "86863aa309f5"
+gesture = "commit"
+post = "f73918640e34"
+added = ["context(scope)", "focused_class(Chain.ScopeView)"]
+removed = ["column_cursor(cv1)", "context(sequencer)", "focused_class(Sequencer.GridView)", "modal(markingMode)", "modal(selectionActive)"]
+
+[[transition]]
+pre = "86863aa309f5"
+gesture = "enter"
+post = "35a79652aadf"
+added = ["modal(editingL1)"]
+removed = ["modal(selectionActive)"]
+
+[[transition]]
+pre = "86863aa309f5"
+gesture = "main1"
+post = "dbea93790541"
+added = []
+removed = ["modal(selectionActive)"]
+
+[[transition]]
+pre = "86863aa309f5"
+gesture = "main2"
+post = "9d353c48ba6f"
+added = ["column_cursor(cv2)"]
+removed = ["column_cursor(cv1)", "modal(selectionActive)"]
+
+[[transition]]
+pre = "86863aa309f5"
+gesture = "main3"
+post = "765ec57ac1e6"
+added = ["column_cursor(g1L)"]
+removed = ["column_cursor(cv1)", "modal(selectionActive)"]
+
+[[transition]]
+pre = "86863aa309f5"
+gesture = "main4"
+post = "8bfdb55af1d9"
+added = ["column_cursor(g2L)"]
+removed = ["column_cursor(cv1)", "modal(selectionActive)"]
+
+[[transition]]
+pre = "86863aa309f5"
+gesture = "main5"
+post = "65e7d03c3014"
+added = ["column_cursor(stL)"]
+removed = ["column_cursor(cv1)", "modal(selectionActive)"]
+
+[[transition]]
+pre = "86863aa309f5"
+gesture = "main6"
+post = "d640e21ae43f"
+added = ["column_cursor(tr)"]
+removed = ["column_cursor(cv1)", "modal(selectionActive)"]
+
+[[transition]]
+pre = "86863aa309f5"
+gesture = "mode_center"
+post = "8576c81eefe8"
+added = ["_toggle(0010)", "context(home)", "focused_class(Chain.Root)", "slot_control(M1,ChainTitleControl)", "slot_control(M2,1)", "slot_control(M2,InputControl)", "slot_control(M3,EmptySection.EmptyControl)", "slot_control(M4,EmptySection.EmptyControl)", "slot_control(M5,EmptySection.EmptyControl)", "slot_control(M6,MonitorControl)"]
+removed = ["_toggle(0110)", "column_cursor(cv1)", "context(sequencer)", "focused_class(Sequencer.GridView)", "modal(markingMode)", "modal(selectionActive)"]
+
+[[transition]]
+pre = "86863aa309f5"
+gesture = "mode_up"
+post = "776b22b8a3e2"
+added = ["_toggle(1010)", "context(hold)", "focused_class(SceneView.Performance)", "slot_control(M1,SceneView.M1Control)", "slot_control(M2,SceneView.SceneSelectorControl)", "slot_control(M3,SceneView.SceneSelectorControl)", "slot_control(M4,SceneView.PlusControl)"]
+removed = ["_toggle(0110)", "column_cursor(cv1)", "context(sequencer)", "focused_class(Sequencer.GridView)", "modal(markingMode)", "modal(selectionActive)"]
+
+[[transition]]
+pre = "86863aa309f5"
+gesture = "storage_center"
+post = "d53f9fc9e972"
+added = ["_toggle(0100)", "context(admin)", "focused_class(Menu)"]
+removed = ["_toggle(0110)", "column_cursor(cv1)", "context(sequencer)", "focused_class(Sequencer.GridView)", "modal(markingMode)", "modal(selectionActive)"]
+
+[[transition]]
+pre = "86863aa309f5"
+gesture = "sub1"
+post = "dbea93790541"
+added = []
+removed = ["modal(selectionActive)"]
+
+[[transition]]
+pre = "86863aa309f5"
+gesture = "sub2"
+post = "dbea93790541"
+added = []
+removed = ["modal(selectionActive)"]
+
+[[transition]]
+pre = "86863aa309f5"
+gesture = "sub3"
+post = "dbea93790541"
+added = []
+removed = ["modal(selectionActive)"]
+
+[[transition]]
+pre = "86863aa309f5"
+gesture = "up_btn"
+post = "dbea93790541"
+added = []
+removed = ["modal(selectionActive)"]
 
 [[transition]]
 pre = "888c7cae6bc7"
@@ -721,6 +848,13 @@ gesture = "mode_up"
 post = "776b22b8a3e2"
 added = ["_toggle(1010)", "context(hold)", "focused_class(SceneView.Performance)", "slot_control(M1,SceneView.M1Control)", "slot_control(M2,SceneView.SceneSelectorControl)", "slot_control(M3,SceneView.SceneSelectorControl)", "slot_control(M4,SceneView.PlusControl)"]
 removed = ["_toggle(0110)", "column_cursor(g2L)", "context(sequencer)", "focused_class(Sequencer.GridView)", "modal(markingMode)"]
+
+[[transition]]
+pre = "8bfdb55af1d9"
+gesture = "shift_encoder"
+post = "b4f5429e8066"
+added = ["modal(selectionActive)"]
+removed = []
 
 [[transition]]
 pre = "8bfdb55af1d9"
@@ -892,6 +1026,13 @@ removed = ["_toggle(0110)", "column_cursor(cv2)", "context(sequencer)", "focused
 
 [[transition]]
 pre = "9d353c48ba6f"
+gesture = "shift_encoder"
+post = "a00f64c51fd8"
+added = ["modal(selectionActive)"]
+removed = []
+
+[[transition]]
+pre = "9d353c48ba6f"
 gesture = "storage_center"
 post = "d53f9fc9e972"
 added = ["_toggle(0100)", "context(admin)", "focused_class(Menu)"]
@@ -917,76 +1058,6 @@ gesture = "cancel"
 post = "8576c81eefe8"
 added = ["context(home)", "focused_class(Chain.Root)", "slot_control(M1,ChainTitleControl)", "slot_control(M2,1)", "slot_control(M2,InputControl)", "slot_control(M3,EmptySection.EmptyControl)", "slot_control(M4,EmptySection.EmptyControl)", "slot_control(M5,EmptySection.EmptyControl)", "slot_control(M6,MonitorControl)"]
 removed = ["context(Source.ExternalChooser)", "focused_class(Source.ExternalChooser)", "slot_control(M1,Source.ExternalChooser.CollapsedHeader)", "slot_control(M2,Source.ExternalChooser.CollapsedHeader)", "slot_control(M3,Source.ExternalChooser.CollapsedHeader)", "slot_control(M4,Source.ExternalChooser.CollapsedHeader)", "slot_control(M5,Source.ExternalChooser.CollapsedHeader)", "slot_control(M6,Source.ExternalChooser.CollapsedHeader)"]
-
-[[transition]]
-pre = "cceb79508bbf"
-gesture = "enter"
-post = "2bf4427b50f8"
-added = ["slot_control(M2,Unit.ViewControl.OutputScope)", "slot_control(M3,Unit.ViewControl.OutputScope)", "slot_control(M4,Unit.ViewControl.OutputScope)", "slot_control(M5,Unit.ViewControl.OutputScope)", "slot_control(M6,Unit.ViewControl.GainBias)", "slot_control(M6,f0)"]
-removed = ["slot_control(M2,Unit.ViewControl.Pitch)", "slot_control(M2,V/oct)", "slot_control(M3,Unit.ViewControl.GainBias)", "slot_control(M3,f0)", "slot_control(M4,Unit.ViewControl.GainBias)", "slot_control(M4,phase)", "slot_control(M5,Unit.ViewControl.GainBias)", "slot_control(M5,fdbk)", "slot_control(M6,Unit.ViewControl.Gate)", "slot_control(M6,sync)"]
-
-[[transition]]
-pre = "cceb79508bbf"
-gesture = "home_btn"
-post = "91f87da673d6"
-added = ["focused_class(Chain.Root)"]
-removed = ["focused_class(Unit.ViewControl.GainBias)"]
-
-[[transition]]
-pre = "cceb79508bbf"
-gesture = "main1"
-post = "91f87da673d6"
-added = ["focused_class(Chain.Root)"]
-removed = ["focused_class(Unit.ViewControl.GainBias)"]
-
-[[transition]]
-pre = "cceb79508bbf"
-gesture = "main2"
-post = "f4ef45a51927"
-added = ["focused_class(Unit.ViewControl.Pitch)"]
-removed = ["focused_class(Unit.ViewControl.GainBias)"]
-
-[[transition]]
-pre = "cceb79508bbf"
-gesture = "main3"
-post = "91f87da673d6"
-added = ["focused_class(Chain.Root)"]
-removed = ["focused_class(Unit.ViewControl.GainBias)"]
-
-[[transition]]
-pre = "cceb79508bbf"
-gesture = "main6"
-post = "2a8a1e539185"
-added = ["focused_class(Unit.ViewControl.Gate)"]
-removed = ["focused_class(Unit.ViewControl.GainBias)"]
-
-[[transition]]
-pre = "cceb79508bbf"
-gesture = "mode_down"
-post = "f73918640e34"
-added = ["_toggle(0110)", "context(scope)", "focused_class(Chain.ScopeView)"]
-removed = ["_toggle(0010)", "context(home)", "focused_class(Unit.ViewControl.GainBias)", "focused_unit(Test Osc #1)", "slot_control(M1,Test Osc)", "slot_control(M1,Unit.Base.Header)", "slot_control(M2,Unit.ViewControl.Pitch)", "slot_control(M2,V/oct)", "slot_control(M3,Unit.ViewControl.GainBias)", "slot_control(M3,f0)", "slot_control(M4,Unit.ViewControl.GainBias)", "slot_control(M4,phase)", "slot_control(M5,Unit.ViewControl.GainBias)", "slot_control(M5,fdbk)", "slot_control(M6,Unit.ViewControl.Gate)", "slot_control(M6,sync)"]
-
-[[transition]]
-pre = "cceb79508bbf"
-gesture = "mode_up"
-post = "776b22b8a3e2"
-added = ["_toggle(1010)", "context(hold)", "focused_class(SceneView.Performance)", "slot_control(M1,SceneView.M1Control)", "slot_control(M2,SceneView.SceneSelectorControl)", "slot_control(M3,SceneView.SceneSelectorControl)", "slot_control(M4,SceneView.PlusControl)"]
-removed = ["_toggle(0010)", "context(home)", "focused_class(Unit.ViewControl.GainBias)", "focused_unit(Test Osc #1)", "slot_control(M1,Test Osc)", "slot_control(M1,Unit.Base.Header)", "slot_control(M2,Unit.ViewControl.Pitch)", "slot_control(M2,V/oct)", "slot_control(M3,Unit.ViewControl.GainBias)", "slot_control(M3,f0)", "slot_control(M4,Unit.ViewControl.GainBias)", "slot_control(M4,phase)", "slot_control(M5,Unit.ViewControl.GainBias)", "slot_control(M5,fdbk)", "slot_control(M6,Unit.ViewControl.Gate)", "slot_control(M6,sync)"]
-
-[[transition]]
-pre = "cceb79508bbf"
-gesture = "storage_center"
-post = "a27e78544219"
-added = ["_toggle(0000)", "context(admin)", "focused_class(Menu)"]
-removed = ["_toggle(0010)", "context(home)", "focused_class(Unit.ViewControl.GainBias)", "focused_unit(Test Osc #1)", "slot_control(M1,Test Osc)", "slot_control(M1,Unit.Base.Header)", "slot_control(M2,Unit.ViewControl.Pitch)", "slot_control(M2,V/oct)", "slot_control(M3,Unit.ViewControl.GainBias)", "slot_control(M3,f0)", "slot_control(M4,Unit.ViewControl.GainBias)", "slot_control(M4,phase)", "slot_control(M5,Unit.ViewControl.GainBias)", "slot_control(M5,fdbk)", "slot_control(M6,Unit.ViewControl.Gate)", "slot_control(M6,sync)"]
-
-[[transition]]
-pre = "cceb79508bbf"
-gesture = "up_btn"
-post = "91f87da673d6"
-added = ["focused_class(Chain.Root)"]
-removed = ["focused_class(Unit.ViewControl.GainBias)"]
 
 [[transition]]
 pre = "d53f9fc9e972"
@@ -1071,6 +1142,13 @@ gesture = "mode_up"
 post = "776b22b8a3e2"
 added = ["_toggle(1010)", "context(hold)", "focused_class(SceneView.Performance)", "slot_control(M1,SceneView.M1Control)", "slot_control(M2,SceneView.SceneSelectorControl)", "slot_control(M3,SceneView.SceneSelectorControl)", "slot_control(M4,SceneView.PlusControl)"]
 removed = ["_toggle(0110)", "column_cursor(tr)", "context(sequencer)", "focused_class(Sequencer.GridView)", "modal(markingMode)"]
+
+[[transition]]
+pre = "d640e21ae43f"
+gesture = "shift_encoder"
+post = "4a1ceae45fe7"
+added = ["modal(selectionActive)"]
+removed = []
 
 [[transition]]
 pre = "d640e21ae43f"
@@ -1162,6 +1240,13 @@ gesture = "mode_up"
 post = "776b22b8a3e2"
 added = ["_toggle(1010)", "context(hold)", "focused_class(SceneView.Performance)", "slot_control(M1,SceneView.M1Control)", "slot_control(M2,SceneView.SceneSelectorControl)", "slot_control(M3,SceneView.SceneSelectorControl)", "slot_control(M4,SceneView.PlusControl)"]
 removed = ["_toggle(0110)", "column_cursor(cv1)", "context(sequencer)", "focused_class(Sequencer.GridView)", "modal(markingMode)"]
+
+[[transition]]
+pre = "dbea93790541"
+gesture = "shift_encoder"
+post = "86863aa309f5"
+added = ["modal(selectionActive)"]
+removed = []
 
 [[transition]]
 pre = "dbea93790541"
@@ -1340,6 +1425,11 @@ node = "home"
 fluents = ["_toggle(0010)", "context(home)", "focused_class(Chain.Root)", "slot_control(M1,ChainTitleControl)", "slot_control(M2,1)", "slot_control(M2,InputControl)", "slot_control(M3,EmptySection.EmptyControl)", "slot_control(M4,EmptySection.EmptyControl)", "slot_control(M5,EmptySection.EmptyControl)", "slot_control(M6,MonitorControl)"]
 
 [[state]]
+hash = "86863aa309f5"
+node = "sequencer"
+fluents = ["_toggle(0110)", "column_cursor(cv1)", "context(sequencer)", "focused_class(Sequencer.GridView)", "modal(markingMode)", "modal(selectionActive)"]
+
+[[state]]
 hash = "888c7cae6bc7"
 node = "unit_picker_dense"
 fluents = ["_toggle(0010)", "context(unit_picker_dense)", "focused_class(Unit.Chooser.Dense)", "linked(1,2)"]
@@ -1368,11 +1458,6 @@ fluents = ["_toggle(0000)", "context(admin)", "focused_class(Menu)"]
 hash = "c86b34f75d1c"
 node = "Source.ExternalChooser"
 fluents = ["_toggle(0010)", "context(Source.ExternalChooser)", "focused_class(Source.ExternalChooser)", "slot_control(M1,Source.ExternalChooser.CollapsedHeader)", "slot_control(M2,Source.ExternalChooser.CollapsedHeader)", "slot_control(M3,Source.ExternalChooser.CollapsedHeader)", "slot_control(M4,Source.ExternalChooser.CollapsedHeader)", "slot_control(M5,Source.ExternalChooser.CollapsedHeader)", "slot_control(M6,Source.ExternalChooser.CollapsedHeader)"]
-
-[[state]]
-hash = "cceb79508bbf"
-node = "home"
-fluents = ["_toggle(0010)", "context(home)", "focused_class(Unit.ViewControl.GainBias)", "focused_unit(Test Osc #1)", "slot_control(M1,Test Osc)", "slot_control(M1,Unit.Base.Header)", "slot_control(M2,Unit.ViewControl.Pitch)", "slot_control(M2,V/oct)", "slot_control(M3,Unit.ViewControl.GainBias)", "slot_control(M3,f0)", "slot_control(M4,Unit.ViewControl.GainBias)", "slot_control(M4,phase)", "slot_control(M5,Unit.ViewControl.GainBias)", "slot_control(M5,fdbk)", "slot_control(M6,Unit.ViewControl.Gate)", "slot_control(M6,sync)"]
 
 [[state]]
 hash = "d53f9fc9e972"
@@ -1408,6 +1493,14 @@ fluents = ["_toggle(0110)", "context(scope)", "focused_class(Chain.ScopeView)"]
 hash = "fe86df43d4de"
 node = "hold"
 fluents = ["_toggle(1010)", "context(hold)", "focused_class(SceneView.Performance)", "linked(1,2)", "slot_control(M1,SceneView.M1Control)", "slot_control(M2,SceneView.SceneSelectorControl)", "slot_control(M3,SceneView.SceneSelectorControl)", "slot_control(M4,SceneView.PlusControl)"]
+
+[[resolved]]
+id = "build_selection"
+precondition = ["context(sequencer)", "~modal(selectionActive)"]
+gesture = ["down SHIFT", "turn 3", "up SHIFT", "frames 6"]
+effect = ["modal(selectionActive)"]
+rule = "Nav-mode shift+encoder (SHIFT held, encoder turned) on the grid sequencer builds a row-range selection on the focused column: GridView:encoder shifted branch sets self.selectionActive=true. The flag INITIALIZES false, so modal(selectionActive) is a clean ABSENT->PRESENT boundary (unlike the always-truthy markingMode idle-string quirk in UI_STATE_SCHEMA.md). DURABLE: it persists past `up SHIFT` until UP/CANCEL/column-change. Non-destructive (a highlighted range; the bulk-edit nudge is a later gesture)."
+proof = "{modal_added=true; post=86863aa309f5; pre=dbea93790541; selection_after=true; selection_before=false; selection_durable=true}"
 
 [[resolved]]
 id = "collapse"

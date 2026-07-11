@@ -1,0 +1,8 @@
+# ui_solve offline plan -- goal 'build-selection'
+# goal (2 fluent(s)):
+#   context(sequencer)
+#   modal(selectionActive)
+# plan: 3 operator(s)
+nav_home_to_scope
+nav_scope_to_sequencer
+build_selection

@@ -850,6 +850,8 @@ class Executor:
             return self._set_cell(gop)
         if oid in ("expand", "collapse"):
             return self._toggle_view(gop)
+        if oid == "build_selection":
+            return self._build_selection(gop)
         return False, "no driver for operator %s" % oid
 
     def _check_effects(self, gop):
@@ -991,6 +993,21 @@ class Executor:
             self._settle(4)
         return abs(self._cell_value(slot, idx, row) - target) <= tol
 
+    def _build_selection(self, gop):
+        # [stol:ui-planner-cov-modals] Drive nav-mode shift+encoder to enter the
+        # DURABLE selection modal. durable_effects() strips ALL modal(*) (it was
+        # written for set_cell's TRANSIENT modal(editingL1)), so this operator's
+        # effect is NOT auto-verified by _check_effects -- verify modal(selectionActive)
+        # explicitly here (and again, durably, in the corpus goal + 62-*.test).
+        if self.verify_fluent("modal(selectionActive)"):
+            return True, "already satisfied (skipped)"
+        for gline in gop.gesture:
+            self.send(gline)
+        self._settle(6)
+        if not self.verify_fluent("modal(selectionActive)"):
+            return False, "shift+encoder did not enter modal(selectionActive)"
+        return True, "ok"
+
     def _toggle_view(self, gop):
         i = self.lua(
             "(function() for _,c in ipairs(require('emu.UIState').describe().controls) do "
@@ -1059,7 +1076,7 @@ def selftest():
     print("ui_solve.py --selftest (classical planning vs merged operator library)")
 
     # -- merge sanity ------------------------------------------------------------
-    check(len(operators) == 20, "merged library has 20 operators")
+    check(len(operators) == 21, "merged library has 21 operators")
     check("modal(editingL1)" in operators["set_cell"].eff,
           "set_cell effect merged modal(editingL1) from ui-crawl.map [[resolved]]")
     check(operators["set_cell"].gesture[:1] == ["press ENTER"],
@@ -1134,6 +1151,22 @@ def selftest():
     # -- 8. already-satisfied goal -> empty plan ---------------------------------
     plan = solve(operators, boot_start(), ui_fluents.parse_goal("context(home)"))
     check(ids(plan) == [], "context(home) already holds at boot -> empty plan")
+
+    # -- 9. durable-modal build_selection [stol:ui-planner-cov-modals] -----------
+    check("modal(selectionActive)" in operators["build_selection"].eff,
+          "build_selection effect carries the durable modal(selectionActive)")
+    check("~modal(selectionActive)" in operators["build_selection"].pre,
+          "build_selection guards re-entry with ~modal(selectionActive)")
+    sel_goal = ui_fluents.parse_goal("context(sequencer)\nmodal(selectionActive)")
+    plan = solve(operators, boot_start(), sel_goal)
+    check(plan is not None, "build_selection goal is solvable")
+    check(ids(plan) == ["nav_home_to_scope", "nav_scope_to_sequencer", "build_selection"],
+          "build_selection plan = nav,nav,build_selection: %s" % ids(plan))
+    # already-in-selection -> empty plan (the ~modal(selectionActive) guard).
+    sel_state = frozenset(ui_fluents.parse_goal(
+        "context(sequencer)\nmodal(selectionActive)"))
+    plan = solve(operators, sel_state, sel_goal)
+    check(ids(plan) == [], "selection already active -> empty plan (guard)")
 
     print()
     if failures:

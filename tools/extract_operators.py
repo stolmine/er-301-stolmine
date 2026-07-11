@@ -315,6 +315,71 @@ def action_operators(manifest_classes, columns):
     return ops
 
 
+# ── durable-modal operators (source=manifest) ─────────────────────────────────
+# [stol:ui-planner-cov-modals]
+# The `modal` fluent type is otherwise uncovered: the only modeled modal is
+# set_cell's TRANSIENT modal(editingL1) (stripped as non-durable — you never route
+# TO an in-edit transient). But some modals ARE durable end-states an agent would
+# target. This function emits those as first-class operators (pre = the context the
+# modal lives in; eff = the durable modal fluent; gesture = crawler-refined).
+#
+# DURABLE + DISTINGUISHABLE + REACHABLE, so modeled here:
+#   * build_selection -> modal(selectionActive). Nav-mode shift+encoder on the grid
+#     sequencer builds a row-range selection on the focused column
+#     (xroot/Sequencer/GridView.lua GridView:encoder, `self.selectionActive = true`).
+#     self.selectionActive INITIALIZES false, so modal(selectionActive) is ABSENT
+#     idle and present only after the gesture — a clean, distinguishable fluent
+#     boundary. It persists (durable) until UP/CANCEL/column-change; non-destructive
+#     (just a highlighted row-range; the bulk edit is a later, separate gesture).
+#
+# REJECTED durable modals (documented, NOT faked — they stay out of the coverage
+# denominator alongside the transient modal(editingL1)):
+#   * modal(markingMode) — Sequencer.GridView S2 (subReleased 2) enters mark mode
+#     (`self.markingMode = "marking_end"`), a durable modal. But its idle value is
+#     the STRING "idle" (Lua truthy) and UIState scans obj[flag] for PRESENCE, so
+#     modal(markingMode) reads truthy at EVERY Sequencer.GridView state (the quirk
+#     documented in docs/UI_STATE_SCHEMA.md). A goal {context(sequencer),
+#     modal(markingMode)} is therefore satisfied by nav ALONE and pressing S2
+#     crosses no fluent boundary — the operator could never be exercised by its own
+#     goal and the crawl would see no modal delta. Non-distinguishable → excluded.
+#   * modal(favoritesEditMode) — Unit.Chooser SHIFT (Chooser:shiftReleased ->
+#     toggleFavoritesEditMode) enters favorites-tagging mode, durable. But
+#     toggleFavoritesEditMode is a NO-OP in the dense picker (`if self.style ==
+#     "dense" then return end`), and the hermetic sandbox forces pickerStyle=dense
+#     (testing-assets/emu/fixtures/rear/settings.lua). The classic chooser that owns
+#     the gesture is context(unit_picker_classic), which the ui-map has NO nav edge
+#     to (it is a SAFE_RESTRICTED crawl screen). Unreachable in the modeled domain →
+#     excluded.
+def modal_operators(manifest_classes):
+    ops = []
+
+    def has(cls):
+        return cls in manifest_classes
+
+    # build_selection — nav-mode shift+encoder builds a durable row-range selection.
+    sel_note = ("Nav-mode shift+encoder on the grid sequencer builds a row-range "
+                "selection on the focused column (GridView:encoder shifted branch: "
+                "`self.selectionActive = true`). DURABLE — persists until "
+                "UP/CANCEL/column-change; non-destructive (a highlighted range; the "
+                "bulk-edit nudge is a later, separate gesture). ~modal(selectionActive) "
+                "guards re-entry. CRAWLER-REFINED: the gesture skeleton + driven "
+                "modal-boundary proof come from ui-crawl.map [[resolved]].")
+    if has("Sequencer.GridView"):
+        sel_note += " Justified by manifest Sequencer.GridView (grid selection modal)."
+    ops.append(Op(
+        id="build_selection",
+        source="manifest",
+        verified="needs_crawl",
+        params=[],
+        pre=["context(sequencer)", "~modal(selectionActive)"],
+        eff=["modal(selectionActive)"],
+        gesture=["down SHIFT", "turn 3", "up SHIFT", "frames 6"],
+        note=sel_note,
+    ))
+
+    return ops
+
+
 # ── deterministic TOML emission ───────────────────────────────────────────────
 
 def q(s):
@@ -412,7 +477,8 @@ def build(map_path=DEFAULT_MAP, manifest_path=DEFAULT_MANIFEST,
     uimap = load_map(map_path)
     manifest_classes = load_manifest_classes(manifest_path)
     columns = load_columns(gridview_path)
-    ops = nav_operators(uimap) + action_operators(manifest_classes, columns)
+    ops = (nav_operators(uimap) + action_operators(manifest_classes, columns)
+           + modal_operators(manifest_classes))  # [stol:ui-planner-cov-modals]
     return emit(ops, columns)
 
 
