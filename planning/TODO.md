@@ -5,7 +5,7 @@ ER-301-STOLMINE TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**88 items** — 63 done, 23 todo, 2 blocked. *Rendered 2026-07-10.*
+**93 items** — 63 done, 28 todo, 2 blocked. *Rendered 2026-07-10.*
 
 ## Sequencer
 
@@ -74,6 +74,10 @@ check`): a `done` item must have a real test or its named artifact.*
 
 | | id | item | verify |
 |---|---|---|---|
+|   | `ui-planner-cov-facility` | UI planning-domain coverage expansion — close the 8 uncovered operators + 3 fluent types (umbrella) | manual · 2026-07-10 |
+|   | `ui-planner-cov-focus` | Multi-unit focus goal + focused_class derived effect (cause C) | manual · 2026-07-10 |
+|   | `ui-planner-cov-modals` | Durable-modal operators cover the modal fluent type (cause D) | manual · 2026-07-10 |
+|   | `ui-planner-cov-starts` | Non-boot start states close the 5 return/indirect nav operators (cause A) | manual · 2026-07-10 |
 | ✓ | `crashdiag-fix-emu-symbolication-base` | Emu symbolication base off by p_vaddr (M3) | manual *(attested)* · 2026-07-10 |
 | ✓ | `emu-admin-golden-fragile` | 10-admin-nav pixel golden is env-fragile (font-dependent render across builds) | manual *(attested)* · 2026-07-10 |
 | ✓ | `emu-capture-deterministic` | Same UI state produces a byte-identical capture | screenshot: drive the emulator to a fixed UI state, settle, and capture twice; confirm the two PNGs are byte-identical (diff clean); document the settle convention for animated elements *(attested)* · 2026-07-09 |
@@ -122,6 +126,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `infra-crash-diag-panic-buffer` | Warm-reboot-surviving panic buffer flushed to crash.log on next boot (hardware) | manual · 2026-07-09 |
 |   | `infra-crash-diagnostics-debug-mode` | Dev-enabled debug mode captures C-side crash diagnostics (umbrella) | manual · 2026-07-09 |
 |   | `infra-v0616-port` | Port the TXo I2C master mod to the v0.6.16 stable firmware base | manual · 2026-07-09 |
+|   | `ui-planner-cov-views` | Concrete expand/collapse slot_control effects make them plannable (cause B) | manual · 2026-07-10 |
 | ✓ | `crashdiag-fix-flightrec-insert-order` | Flight recorder records unit insert AFTER the risky work, missing the #1 trigger (H3) | manual *(attested)* · 2026-07-10 |
 | ✓ | `crashdiag-fix-package-symbolication` | Offline symbolication of package PCs is broken by design — the headline use case (H1) | manual *(attested)* · 2026-07-10 |
 | ✓ | `crashdiag-review-nits` | Crash-diag review LOW/NIT cleanup batch | manual *(attested)* · 2026-07-10 |
