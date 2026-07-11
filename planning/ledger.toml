@@ -942,9 +942,10 @@ links = { depends_on = ["ui-planner-state-schema"] }
 [[item]]
 id = "ui-planner-crawler"
 title = "Empirical UI crawler resolves dynamic operators + discovers preconditions (perfect oracle)"
-status = "todo"
-stamped = "2026-07-10T17:48:52-05:00"
+status = "done"
+stamped = "2026-07-10T19:52:16-05:00"
 area = "emu"
+attested = "2026-07-10: tools/ui_crawl.py: bounded BFS with replay-from-boot, uiState/ui_fluents as the perfect oracle, affordance-pruning + a destructive-gesture denylist. Resolves all 6 needs_crawl operators (open_picker M3-mono/M4-linked, insert row-nav, focus_unit, set_cell L1-edit skeleton, expand/collapse unit-specific remap) with driven proofs; testing-assets/emu/ui-crawl.map = 24 states / 173 transitions, honest [skipped] coverage (denylist 18, no-affordance 80, state_cap 35). scripts/dev ui-crawl is a SLOW manual/CI gate (out of the commit path). DETERMINISM: initial map failed the re-crawl no-op gate (state aliasing — the goal-fluent key omitted physical STORAGE/MODE toggle positions, making mode/storage gestures nondeterministic at a shared hash); fixed by folding a synthetic _toggle(bits) key-fluent into the crawl state (solver ignores it); re-crawl now byte-identical (GATE_EXIT=0). tests 56-crawl-{open-picker,set-cell,expand-collapse} green. Commit 4245143."
 verify = { kind = "manual", ref = "the crawler drives candidate gestures from reachable states, observes actual transitions via uiState()/trace, and records empirical operators (pre-fluents -> gesture -> post-fluents); re-crawling an unchanged build is a no-op diff; it converts >=1 previously-'dynamic' manifest target into a verified operator and discovers a precondition (e.g. open-picker column M3 mono vs M4 after stereo link)" }
 note = "planning/ui-planning-domain-plan.md §4. THE highest-value new build: graph exploration with a PERFECT ORACLE (uiState) — no learning, no generalization, just search+observation. Resolves the ~93% of manifest handler targets currently marked 'dynamic'. Must bound the crawl (depth, fluent-hash visited set), avoid destructive/irreversible gestures via a denylist, and log skips. Output is a diffable BDG artifact."
 links = { depends_on = ["ui-planner-operators"] }
