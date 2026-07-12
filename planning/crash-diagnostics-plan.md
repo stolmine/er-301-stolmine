@@ -351,3 +351,151 @@ never observed. Flag these while testing:
 6. **`f_open`/`Card_mount(1)` at the flush point.** Confirm the report reaches the
    card. If `1:` is absent at boot, the flush leaves the magic set and retries on a
    later boot with a card in — verify by booting once cardless, then with a card.
+
+### 6.7 RESULT — trap path bench-VALIDATED 2026-07-11 (fw 9.5.2.46)
+
+All six assumptions above CONFIRMED on hardware. Injected data-abort → panic
+buffer survived the WDT warm reset (assumption 1 HELD) → flushed schema-2 block to
+`front/crash.log` on next boot with exact fault state (`dfar=0xf0000000`,
+`r2=0xf0000000`, `r3=0xdeadbeef`); `pc=0x801fe2b8` symbolized to
+`Crash_testTrap` (PanicBuffer.cpp:683) via `arm-none-eabi-addr2line` against the
+`.46` `app.elf`; module map bounded (`kernel 80000000..804f191c`), `lr` above text
+end resolved to `?`; version stamped `.46` from the record's capture-time field.
+Reproduced across two runs. Ledger: exc-hook, panic-buffer, oneshot-guard,
+fwversion-capture-time, kernel-fallback-bound all flipped done (commit 1d37d77).
+
+ONE residual defect: partial register capture (`sp==pc`, `psr/r1/r8-r11=0xffffffff`)
+— localized UPSTREAM of our hook (SYS/BIOS bios 6.46 A8 abort frame; `excDumpContext`
+reads the identical `ExcContext` fields), tracked in
+`crashdiag-fix-partial-register-capture`. Diagnostic-essential set intact.
+
+--------------------------------------------------------------------------------
+
+## 8. Hang watchdog — design pass (2026-07-11)
+
+The trap path catches faults. It does NOT catch **hangs** — the habitat freezes
+(mi AAPCS livelocks, differential-switch stalls, NaN storms) where the audio code
+loops or blocks forever instead of trapping, leaving zero evidence. This is the
+last open capability of the debug-mode umbrella and the hardest, because a hang
+hands us no `ExcContext`: by definition the stuck code will not run our capture.
+
+### 8.1 Resolved architecture (the facts that make this tractable)
+
+Investigated 2026-07-11:
+
+- **Audio DSP runs in a Task, not a HWI.** `arch/am335x/hal/audio.c`: `taskAudio`
+  is a `Task_create` at `TASK_PRIORITY_AUDIO = 11` (hal/priorities.h), driven by
+  EDMA ping-pong completion **Events** (`Event_pend` on `pingDone`/`pongDone`).
+  `Audio_callback()` — which runs every package unit's `process()`, i.e. the exact
+  habitat trap/hang sites — executes **in that task context**. This is the single
+  most important fact: the hang we care about is a **Task-context** hang with
+  interrupts still enabled.
+- **Scheduler order is HWI > Swi > Task.** So a monitor running in **Swi context**
+  (a SYS/BIOS `Clock` function) preempts a spinning audio Task (pri 11) with no raw
+  timer/HWI programming. The default SYS/BIOS Clock tick already exists; no free
+  DMTIMER is needed.
+- **`reboot()` is a bare WDT1 register poke** (`startWatchDogTimer(1000)`,
+  arch/am335x/hal/reboot.c), already proven callable from the abort context, so the
+  monitor may call it too.
+- **The persistence spine is done and bench-proven:** panic buffer + next-boot
+  flush + flight recorder + the reserved `Kind: hang-watchdog` schema slot. The hang
+  path REUSES all of it; only capture *acquisition* is new.
+
+### 8.2 Mechanism
+
+1. **Heartbeat.** A monotonic counter `g_audioFrames` bumped once per
+   `Audio_callback` in `taskAudio`. Plus an `g_audioRunning` flag set when the
+   McASP/EDMA stream is started and cleared when it is stopped (audio.c start/stop
+   seams). The flag is ESSENTIAL: a legitimately-stopped stream also freezes the
+   counter (`Event_pend` blocks forever), and without the gate that reads as a
+   false hang.
+2. **Monitor.** A periodic SYS/BIOS `Clock` function (≈100 ms), created + started
+   ONLY when hang diagnostics are armed. Each tick it samples `(g_audioFrames,
+   g_audioRunning)`. If `g_audioRunning` and the frame counter has not advanced for
+   K consecutive ticks (≈250 ms — dozens of frames' worth at 48 kHz), declare a
+   hang. Runs in Swi context, so it preempts the stuck audio Task.
+3. **Snapshot.** Build a `PanicRecord` with `faultType = HANG` from the audio Task:
+   best-effort `pc`, `sp`, and a **raw stack window** (new fixed-size field, see
+   8.4) copied from the task's saved stack, plus the existing module map + flight
+   recorder + capture-time `fwVersion`. Set the one-shot `g_captured` latch,
+   `Cache_wbInv` the buffer, then `reboot()`. Identical persistence to the trap path.
+4. **Flush + view.** The existing next-boot flush prints the block (`Kind:
+   hang-watchdog` is already in the format contract), the on-boot notice fires, and
+   the admin viewer renders it. Offline: `symbolize_crash.py` scans the stack window
+   for in-`.text` return addresses against the module map to reconstruct a backtrace
+   (see 8.4), so we get a call chain, not just one PC.
+
+### 8.3 Coverage — be explicit about what a hang monitor can and cannot catch
+
+| Hang class | Caught? | How / why |
+|---|---|---|
+| Livelock / infinite loop / NaN storm in `Audio_callback` (Task ctx, IRQs on) | **Yes, full** | Clock Swi preempts; the preempting HWI already saved the task's FULL register frame on its stack → complete capture. THE common habitat case. |
+| Deadlock / blocked-forever (mutex, `Event_pend` never satisfied) | **Yes, partial** | Heartbeat goes stale; snapshot the task's saved switch-frame → shows the block site (callee-saved regs + return PC into `Event_pend`/`Semaphore_pend`), enough to say "deadlocked here". |
+| Spin inside a driver **HWI** (EDMA/McASP/SD ISR) | **No (MVP)** | A Swi cannot preempt a HWI. Rare for habitat (their hangs are in DSP task code). A phase-2 high-INTC-priority HWI monitor could, but out of MVP scope. |
+| Hard spin with **interrupts disabled** | **No capture** | The Clock tick can't fire. Only the hardware WDT backstop (8.5, phase 2) recovers the device — a reset with no snapshot. Documented gap. |
+
+The MVP catches the two classes that actually cost the multi-day habitat bisects.
+
+### 8.4 The one genuinely new/tricky piece: acquiring a hung Task's state
+
+A hung task's context differs by sub-case, and reconstructing exact register frames
+from SYS/BIOS TCB internals is fragile:
+
+- A **preempted (spinning)** task has a FULL exception frame (r0-r12/pc/psr) on its
+  own stack, left by the HWI that preempted it.
+- A **blocked** task has only the callee-saved switch frame (r4-r11/sp/lr) saved by
+  `Task_switch`.
+
+Rather than branch on bios-internal frame layouts, the MVP captures a **raw stack
+window** (proposal: 256 bytes from the task's saved SP) plus the saved SP itself,
+and defers interpretation to the offline symbolizer, which **scans the window for
+words that land in any module's `.text` range** (it already has the module map) and
+prints them as a candidate backtrace, innermost first. This is robust to both
+sub-cases, needs no bios-version-specific struct reads, and yields a call chain
+instead of a single frame. The device-side `pc` is best-effort (from the saved
+frame when we can identify it, else left 0 and the stack scan carries the load).
+
+`PanicRecord` grows by one fixed `uint8_t stackWindow[256]` + `uint32_t
+stackWindowSp` (the trap path can populate it too, for free backtraces there).
+Budget is fine: current record ≈ 0x2228 of the 0x4000 `.panicbuf` reservation, so
++0x104 is comfortably within the `static_assert`.
+
+### 8.5 Zero-cost-when-off + the IRQ-off backstop (phasing)
+
+- **Off cost:** the heartbeat is a single store per audio frame (optionally gated
+  behind `g_hangArmed` for byte-exact parity when off). The Clock monitor instance
+  only exists while armed. A release build with diagnostics off is unaffected at
+  steady state — same guarantee as the trap path.
+- **Phase 2 (follow-on, recovery-only):** arm hardware **WDT1** at a long timeout
+  (≈2 s) when hang diagnostics are on, petted by the monitor Clock function. If
+  interrupts are disabled (the monitor itself can't run), WDT1 hardware-resets the
+  device — recovery WITHOUT capture, closing the "device is just frozen forever"
+  UX at least. Needs care: `reboot()` already reprograms WDT1, so the live-watchdog
+  and reset-trigger uses must be reconciled. Kept OUT of MVP (it captures nothing;
+  the value is capture).
+
+### 8.6 Bench trigger + verification
+
+Mirror the trap path's one-file-drop ergonomics: extend `BUILDOPT_CRASH_TEST` so a
+`CRASH_TEST` whose first byte is `'h'` makes `Audio_callback` enter an infinite
+loop on the next frame (a deliberate livelock). Verify: drop the file, boot the
+test firmware, confirm the device auto-reboots within the monitor window and the
+next boot shows a `Kind: hang-watchdog` report whose stack-window scan resolves to
+the injected loop in the audio path. HARDWARE-ONLY (hangs, like traps, don't
+reproduce in the emu — but the report FORMAT + viewer + symbolizer stack-scan are
+emu-testable via a synthetic hang record through the existing injector).
+
+### 8.7 Build order
+
+1. **Heartbeat + `g_audioRunning` gate** (audio.c) — trivial, isolated.
+2. **Clock monitor + hang snapshot** (new `hal/crash` code reusing PanicRecord) +
+   the `stackWindow` field + `Kind: hang` populated by the existing flush.
+3. **Symbolizer stack-scan** (`tools/symbolize_crash.py`) + synthetic hang record
+   in the emu injector for format/viewer testing.
+4. **`BUILDOPT_CRASH_TEST` `'h'` trigger** + bench verify.
+5. **(Phase 2, later)** WDT1 IRQ-off backstop.
+
+Open decisions to confirm during implementation: the exact audio.c start/stop seams
+for the `g_audioRunning` flag; the K-tick threshold vs the real frame period; and
+whether to gate the heartbeat store when off (recommended: yes, for byte-exact
+off-parity).
