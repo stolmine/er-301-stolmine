@@ -5,7 +5,7 @@ ER-301-STOLMINE TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**103 items** — 76 done, 25 todo, 2 blocked. *Rendered 2026-07-12.*
+**103 items** — 77 done, 24 todo, 2 blocked. *Rendered 2026-07-12.*
 
 ## Sequencer
 
@@ -125,7 +125,6 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `crashdiag-insert-lifecycle-markers` | Flight recorder marks unit construct-complete / first-process (P1c) | manual · 2026-07-12 |
 |   | `crashdiag-object-guard-event` | Guard/canary the audio Event object to catch heap corruption near the write (P2) | manual · 2026-07-12 |
 |   | `crashdiag-resolve-lr` | Crash report resolves or explicitly flags lr against the module map (C1) | manual · 2026-07-12 |
-|   | `crashdiag-stack-highwater` | Crash report carries per-task + ISR stack high-water and canary (P0) | manual · 2026-07-12 |
 |   | `crashdiag-ui-heartbeat` | Hang monitor covers the UI/main thread, not just audio (P1a) | manual · 2026-07-12 |
 |   | `infra-crash-diagnostics-debug-mode` | Dev-enabled debug mode captures C-side crash diagnostics (umbrella) | manual · 2026-07-09 |
 |   | `infra-v0616-port` | Port the TXo I2C master mod to the v0.6.16 stable firmware base | manual · 2026-07-09 |
@@ -136,6 +135,7 @@ check`): a `done` item must have a real test or its named artifact.*
 | ✓ | `crashdiag-fix-package-symbolication` | Offline symbolication of package PCs is broken by design — the headline use case (H1) | manual *(attested)* · 2026-07-10 |
 | ✓ | `crashdiag-hang-spin-pc` | Hang stack window catches scheduler/stale frames, not the spin PC, for a leaf livelock | manual *(attested)* · 2026-07-12 |
 | ✓ | `crashdiag-review-nits` | Crash-diag review LOW/NIT cleanup batch | manual *(attested)* · 2026-07-10 |
+| ✓ | `crashdiag-stack-highwater` | Crash report carries per-task + ISR stack high-water and canary (P0) | manual *(attested)* · 2026-07-12 |
 | ✓ | `infra-crash-diag-exc-hook` | SYS/BIOS exception hook captures ExcContext + module map (hardware) | manual *(attested)* · 2026-07-11 |
 | ✓ | `infra-crash-diag-flight-recorder` | Flight recorder: ring of recent crash-trigger events | manual *(attested)* · 2026-07-10 |
 | ✓ | `infra-crash-diag-format` | Crash report schema v2 + offline symbolication tool | manual *(attested)* · 2026-07-10 |
