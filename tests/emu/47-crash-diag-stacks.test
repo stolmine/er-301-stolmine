@@ -1,0 +1,49 @@
+# [stol:crashdiag-stack-highwater] Inject a synthetic report carrying a
+# --- Stacks --- section (one task overflowed: MAIN canary BLOWN, 100%) and
+# confirm the format + viewer render it end-to-end without hardware: the Stacks
+# section, the top-of-report BLOWN banner, the on-boot notice, and the admin
+# viewer detail scroll. The real per-task high-water CAPTURE is am335x-hardware-
+# only (the numbers only exist on the target); this exercises everything
+# downstream of the panic buffer, so C flush / Lua injector / symbolizer agree.
+
+frames 20
+!assert app.EMULATION == true
+
+# Inject drops a schema-v2 data-abort report WITH a Stacks section + a pending marker.
+lua require('CrashReport').injectSynthetic('stacks')
+!assert require('CrashReport').hasPending() == true
+
+# The parser recovers exactly one report; it is a data-abort (a blown stack traps).
+!assert #require('CrashReport').parseReports() == 1
+!assert require('CrashReport').parseReports()[1].kind == 'data-abort'
+
+# The block carries a --- Stacks --- section header.
+!assert (function() for _,l in ipairs(require('CrashReport').parseReports()[1].lines) do if l:find('%-%-%- Stacks %-%-%-') then return true end end return false end)()
+
+# ...a per-task line showing the blown canary.
+!assert (function() for _,l in ipairs(require('CrashReport').parseReports()[1].lines) do if l:find('MAIN') and l:find('canary=BLOWN') then return true end end return false end)()
+
+# ...and the prominent top-of-report BLOWN banner (unmissable prime suspect).
+!assert (function() for _,l in ipairs(require('CrashReport').parseReports()[1].lines) do if l:find('%*%*%* STACK MAIN BLOWN %*%*%*') then return true end end return false end)()
+
+# On-boot notice fires off the pending marker.
+lua require('CrashReport').checkPendingOnBoot()
+frames 20
+!assert require('Application').getVisibleContext():top():getClassName() == 'MainMessage'
+press ENTER
+frames 20
+!assert require('CrashReport').hasPending() == false
+
+# The admin viewer lists it and renders the detail scroll (incl. the Stacks section).
+lua require('CrashReportViewer'):show()
+frames 20
+!assert require('Application').getVisibleContext():top():getClassName() == 'CrashReportViewer'
+!assert require('CrashReportViewer'):size() == 1
+!assert require('CrashReportViewer').reportColumn:get(0):find('data%-abort') ~= nil
+
+press SUB1
+frames 20
+!assert require('Application').getVisibleContext():top():getClassName() == 'CrashReportDetail'
+!assert require('Application').getVisibleContext():top():size() > 5
+
+quit

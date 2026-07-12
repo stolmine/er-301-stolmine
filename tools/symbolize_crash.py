@@ -108,18 +108,28 @@ class Module:
 STACK_SP_RE = re.compile(r"\bsp=([0-9a-fA-F]+)")
 STACK_WORD_RE = re.compile(r"[0-9a-fA-F]{8}")
 
+# [stol:crashdiag-stack-highwater] A line in the --- Stacks --- section, e.g.
+#   " MAIN            base=4fff0000 size=8192 used=8192 (100%) canary=BLOWN"
+# The ISR entry is named "isr" and shares this shape.
+STACK_ENTRY_RE = re.compile(
+    r"^\s*(\S+)\s+base=([0-9a-fA-F]+)\s+size=(\d+)\s+used=(\d+)\s+"
+    r"\((\d+)%\)\s+canary=(ok|BLOWN)")
+
 
 def parse_report(text):
-    """Return (modules, addresses, stack).
+    """Return (modules, addresses, stack, stacks).
 
     modules   -- list[Module] from the Module Map.
     addresses -- {name: int} from Registers (pc/lr/sp).
     stack     -- {"sp": int|None, "words": [int]} from the Stack Window section
                  (hang-watchdog captures; empty for trap reports).
+    stacks    -- list of per-task/ISR stack dicts from the --- Stacks --- section
+                 {name, base, size, used, pct, canary_ok, blown}; [] if absent.
     """
     modules = []
     addresses = {}
     stack = {"sp": None, "words": []}
+    stacks = []
     section = None
     for raw in text.splitlines():
         line = raw.rstrip("\n")
@@ -150,7 +160,23 @@ def parse_report(text):
             body = line[line.find(":") + 1:]
             for tok in STACK_WORD_RE.findall(body):
                 stack["words"].append(int(tok, 16))
-    return modules, addresses, stack
+        if section == "Stacks":
+            m = STACK_ENTRY_RE.match(line)
+            if m:
+                pct = int(m.group(5))
+                canary_ok = m.group(6) == "ok"
+                stacks.append({
+                    "name": m.group(1),
+                    "base": int(m.group(2), 16),
+                    "size": int(m.group(3)),
+                    "used": int(m.group(4)),
+                    "pct": pct,
+                    "canary_ok": canary_ok,
+                    # Prime-suspect gate: an overflow (broken canary) or a
+                    # near-full (>=90%) stack. Mirrors the C anyStackBlown rule.
+                    "blown": (not canary_ok) or pct >= 90,
+                })
+    return modules, addresses, stack, stacks
 
 
 class Resolution:
@@ -548,8 +574,25 @@ def _enrich(res, build_dir, addr2line):
 
 
 def symbolize(report_text, build_dir, addr2line):
-    modules, addresses, stack = parse_report(report_text)
+    modules, addresses, stack, stacks = parse_report(report_text)
     out_lines = []
+
+    # [stol:crashdiag-stack-highwater] Lead with any blown / near-full stack: a
+    # stack overflow is the corruption ROOT, so it must precede the register and
+    # backtrace dump (which only show the downstream DETECTION site). A broken
+    # canary is an outright overflow; >=90% used is a near-miss worth flagging.
+    prime = [s for s in stacks if s["blown"]]
+    if prime:
+        out_lines.append("*** STACK PRIME SUSPECT (overflow is the likely root "
+                         "cause; see below for the fault site) ***")
+        for s in prime:
+            reason = "canary BLOWN" if not s["canary_ok"] else "near-full"
+            out_lines.append(
+                "  %-15s used=%d/%d (%d%%) canary=%s  [%s]" % (
+                    s["name"], s["used"], s["size"], s["pct"],
+                    "ok" if s["canary_ok"] else "BLOWN", reason))
+        out_lines.append("")
+
     out_lines.append("Modules: %d (%d relocatable)" % (
         len(modules), sum(1 for m in modules if m.relocatable)))
     have_a2l = _resolve_exe(addr2line) is not None
@@ -650,6 +693,31 @@ Thread: audio
  9ffe0110: 00000000 00001500 9ffe0180 80014400
  9ffe0120: deadbeef 00000000 9ffe01c0 00000000
  9ffe0130: 00000000 00000000 9ffe0200 800aabbc
+--- Recent Log ---
+---CRASH REPORT END
+"""
+
+# [stol:crashdiag-stack-highwater] Trap report carrying a --- Stacks --- section
+# with one task (MAIN) overflowed (canary BLOWN, 100% used), one near-full task
+# (DISPLAY at 96%), a healthy task (audio), and a healthy ISR stack. The tool
+# must lead its output with MAIN and DISPLAY as the prime suspects.
+SELFTEST_STACKS_REPORT = """\
+---CRASH REPORT BEGIN
+Schema: 2
+Kind: data-abort
+ *** STACK MAIN BLOWN ***
+ *** STACK DISPLAY NEAR-FULL (96%) ***
+Thread: MAIN
+--- Registers ---
+ pc=800014d0 lr=00001200 sp=4fff0100 psr=60000013
+--- Module Map ---
+ kernel                   text=80000000..80100000
+ core.so                  text=00001000..00002000  data=00002000..00003000
+--- Stacks ---
+ MAIN            base=4fff0000 size=8192 used=8192 (100%) canary=BLOWN
+ DISPLAY         base=4ffee000 size=8192 used=7900 (96%) canary=ok
+ audio           base=4ffd0000 size=16384 used=6000 (36%) canary=ok
+ isr             base=4001f000 size=4096 used=800 (19%) canary=ok
 --- Recent Log ---
 ---CRASH REPORT END
 """
@@ -946,7 +1014,7 @@ def selftest():
     ok = True
 
     print("== M1 resolver (bounded kernel, '?' outside all ranges) ==")
-    modules, addresses, _stack = parse_report(SELFTEST_REPORT)
+    modules, addresses, _stack, _stacks = parse_report(SELFTEST_REPORT)
     assert addresses.get("pc") == 0x800014d0, addresses
 
     # pc in the bounded kernel range -> kernel, RAW addr (non-relocated).
@@ -979,7 +1047,7 @@ def selftest():
     # Old-format report (unbounded kernel) -> labelled best-effort, not '?'.
     old = SELFTEST_REPORT.replace(
         "text=80000000..80100000", "text=0")
-    om, _, _ = parse_report(old)
+    om, _, _, _ = parse_report(old)
     res = resolve(0xdeadbeef, om)
     if res.path and os.path.basename(res.path) == "kernel" and res.note:
         print("PASS: old-format unbounded kernel -> labelled best-effort")
@@ -988,7 +1056,7 @@ def selftest():
         ok = False
 
     print("\n== hang-watchdog stack-window scan ==")
-    hmods, haddrs, hstack = parse_report(SELFTEST_HANG_REPORT)
+    hmods, haddrs, hstack, _hstacks = parse_report(SELFTEST_HANG_REPORT)
     if hstack["sp"] == 0x9ffe0100 and len(hstack["words"]) == 16:
         print("PASS: parsed Stack Window sp=9ffe0100, 16 words")
     else:
@@ -1015,6 +1083,38 @@ def selftest():
         print("PASS: symbolize() renders the candidate backtrace")
     else:
         print("FAIL: hang symbolize output:\n%s" % hout)
+        ok = False
+
+    print("\n== stack high-water (--- Stacks --- prime suspect) ==")
+    smods, saddrs, sstack, sstacks = parse_report(SELFTEST_STACKS_REPORT)
+    if len(sstacks) == 4 and [s["name"] for s in sstacks] == \
+            ["MAIN", "DISPLAY", "audio", "isr"]:
+        print("PASS: parsed 4 stack entries (MAIN, DISPLAY, audio, isr)")
+    else:
+        print("FAIL: stacks parse -> %r" % [s["name"] for s in sstacks])
+        ok = False
+
+    main = next(s for s in sstacks if s["name"] == "MAIN")
+    disp = next(s for s in sstacks if s["name"] == "DISPLAY")
+    audio = next(s for s in sstacks if s["name"] == "audio")
+    if (main["blown"] and not main["canary_ok"] and main["pct"] == 100 and
+            disp["blown"] and disp["canary_ok"] and disp["pct"] == 96 and
+            not audio["blown"]):
+        print("PASS: MAIN=overflow, DISPLAY=near-full, audio=healthy")
+    else:
+        print("FAIL: blown flags MAIN=%r DISPLAY=%r audio=%r" % (
+            main["blown"], disp["blown"], audio["blown"]))
+        ok = False
+
+    sout, _, _ = symbolize(SELFTEST_STACKS_REPORT, None, DEFAULT_ADDR2LINE)
+    # The prime-suspect block must lead (appear before the pc= resolution line).
+    if ("STACK PRIME SUSPECT" in sout and
+            "MAIN" in sout.split("pc=")[0] and
+            "DISPLAY" in sout.split("pc=")[0] and
+            "canary BLOWN" in sout):
+        print("PASS: symbolize() leads with the blown-stack prime suspect")
+    else:
+        print("FAIL: stacks symbolize output:\n%s" % sout)
         ok = False
 
     print("\n== ET_REL section-walk (pure-Python, synthetic ELF) ==")

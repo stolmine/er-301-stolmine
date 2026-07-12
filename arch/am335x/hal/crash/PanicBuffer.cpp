@@ -6,6 +6,14 @@
 // so it is written to a static-analysis + on-hardware-test discipline; the
 // hardware test procedure is planning/crash-diagnostics-plan.md section 6.
 
+// [stol:crashdiag-stack-highwater] Opt into the SYS/BIOS Task_Object internal
+// layout so the fault-safe stack scan can read stack base + stackSize directly
+// off a Task_Handle, without Task_stat's internal Task_disable/restore (which
+// may be unsafe from an abort context). This is the standard xdc internal-access
+// opt-in and only reveals the state structs; it MUST precede any (even
+// transitive) include of ti/sysbios/knl/Task.h, so it sits above every #include.
+#define ti_sysbios_knl_Task__internalaccess
+
 #include <hal/crash.h>
 #include <hal/log.h>
 #include <hal/timing.h>
@@ -57,12 +65,27 @@ extern "C"
   //   v3: added char fwVersion[] (capture-time firmware) + bounded kernel entry.
   //   v4: added stackWindow[]/stackWindowSp for the hang watchdog (section 8).
   //   v5: added hangRunning (spin vs blocked) for the live-SP hang capture.
-#define PANIC_VERSION 5u
+  //   v6: added per-task + ISR stack high-water/canary (stacks[]/isrStack/
+  //       stackCount/anyStackBlown). [stol:crashdiag-stack-highwater]
+#define PANIC_VERSION 6u
 #define PANIC_MAX_MODULES 48
 #define PANIC_MAX_FR_EVENTS 32
 #define PANIC_FR_LABEL_LEN 48
 #define PANIC_THREAD_NAME_LEN 16
 #define PANIC_FW_VERSION_LEN 32
+
+  // [stol:crashdiag-stack-highwater] Max task stacks reported per capture. Bounds
+  // the Task_Object_first/next walk (fault-safe: a fixed iteration cap even if the
+  // object list is mid-mutation) and the PanicRecord footprint.
+#define PANIC_MAX_TASKS 16
+#define PANIC_STACK_NAME_LEN 16
+
+  // [stol:crashdiag-stack-highwater] SYS/BIOS pre-fills task/ISR stacks with the
+  // BYTE 0xbe (ti/sysbios/family/arm/TaskSupport.c:106-111, gated by
+  // Task.initStackFlag), so an untouched 32-bit stack word reads 0xBEBEBEBE. The
+  // canary is the word at the stack BASE (the deepest a full-descending stack can
+  // reach); high-water is the first non-fill word scanning UP from base.
+#define PANIC_STACK_FILL 0xBEBEBEBEu
 
   // [stol:infra-crash-diag-hang-watchdog] Sentinel faultType for a hang capture.
   // The trap path stores an Exception_Type (small values: 0x11 supervisor, 0x17
@@ -81,6 +104,19 @@ extern "C"
     float t;
     char label[PANIC_FR_LABEL_LEN];
   } PanicFrEvent;
+
+  // [stol:crashdiag-stack-highwater] One task's (or the ISR's) stack accounting.
+  // base = lowest address (full-descending stacks grow DOWN toward it); size in
+  // bytes; used = high-water bytes = (base+size) - deepest-non-fill-word; canaryOk
+  // = the word at base is still the 0xbe fill (nothing overflowed to/past base).
+  typedef struct
+  {
+    char name[PANIC_STACK_NAME_LEN];
+    uint32_t base;
+    uint32_t size;
+    uint32_t used;
+    uint8_t canaryOk;
+  } PanicStackEntry;
 
   typedef struct
   {
@@ -131,6 +167,17 @@ extern "C"
     // Task_stat saved block site). Lets the reader interpret the backtrace.
     // Zero for the trap path.
     uint32_t hangRunning;
+
+    // [stol:crashdiag-stack-highwater] Per-task + ISR stack high-water / canary.
+    // Filled by panicEnumerateStacks() from BOTH the trap hook and the hang
+    // capture. stackCount is how many task entries in stacks[] are valid;
+    // isrStack is the Hwi/system stack; anyStackBlown is a 1-if-any summary (a
+    // broken canary OR used >= 90% of size on any stack), which drives the
+    // top-of-report BLOWN/NEAR-FULL banner.
+    uint32_t stackCount;
+    PanicStackEntry stacks[PANIC_MAX_TASKS];
+    PanicStackEntry isrStack;
+    uint8_t anyStackBlown;
   } PanicRecord;
 
   // [stol:crashdiag-review-nits] The reserved .panicbuf region is 16 KiB (see
@@ -216,6 +263,130 @@ extern "C"
   static PanicRecord *panicRecord(void)
   {
     return (PanicRecord *)__panic_buffer_start__;
+  }
+
+  // ---------------------------------------------------------------------------
+  // [stol:crashdiag-stack-highwater] Per-task + ISR stack high-water / canary.
+  //
+  // Shared by BOTH the trap hook (abort context) and the hang capture (Swi
+  // context). Discipline: allocation-free, no scheduler lock, no Task_stat (its
+  // internal Task_disable/restore may be unsafe from an abort context), every
+  // read bounded by the stack's own size. All work is pure memory reads of the
+  // stacks plus a fixed-cap walk of the task object list.
+  // ---------------------------------------------------------------------------
+
+  // A stack is "blown" (drives the banner + anyStackBlown) if its base canary is
+  // broken OR it is at/over this percent of its size.
+#define PANIC_STACK_NEARFULL_PCT 90u
+
+  static bool panicStackIsBlown(const PanicStackEntry *e)
+  {
+    if (e->size == 0)
+    {
+      return false;
+    }
+    if (!e->canaryOk)
+    {
+      return true;
+    }
+    // used*100 stays well within uint32 for KB-sized stacks.
+    return (e->used * 100u) >= (PANIC_STACK_NEARFULL_PCT * e->size);
+  }
+
+  // Fill one entry from a full-descending stack pre-filled with 0xbe. base is the
+  // lowest address (the descending target), size the byte length. Scans word by
+  // word UP from base for the first non-fill word: that address is the deepest
+  // the stack ever reached, so used = (base+size) - it. canaryOk = the base word
+  // is still the fill (an overflow writes down THROUGH base first). Bounded by
+  // size/4 iterations; volatile reads so the scan is never optimized away.
+  static void panicFillStackEntry(PanicStackEntry *e, const char *name,
+                                  uint32_t base, uint32_t size)
+  {
+    memset(e, 0, sizeof(*e));
+    if (name)
+    {
+      strncpy(e->name, name, PANIC_STACK_NAME_LEN - 1);
+    }
+    e->base = base;
+    e->size = size;
+    if (base == 0 || size < 4)
+    {
+      // Unknown / unusable bounds: report fully-used, canary broken, so the
+      // reader is not falsely reassured (and it will not trip the banner unless
+      // size>0, which it is not here).
+      e->used = size;
+      e->canaryOk = 0;
+      return;
+    }
+    const volatile uint32_t *p = (const volatile uint32_t *)(uintptr_t)base;
+    uint32_t words = size / 4u;
+    e->canaryOk = (p[0] == PANIC_STACK_FILL) ? 1u : 0u;
+    uint32_t i = 0;
+    while (i < words && p[i] == PANIC_STACK_FILL)
+    {
+      i++;
+    }
+    // i == words => never touched (used 0). i == 0 => wrote down to base (blown).
+    uint32_t highwater = base + i * 4u;
+    e->used = (base + size) - highwater;
+  }
+
+  static void panicEnumerateStacks(PanicRecord *rec)
+  {
+    bool blown = false;
+    uint32_t n = 0;
+
+    // Read-only walk of the task object list. Task_Object_first/next traverse the
+    // static + dynamic instance list without locking; the fixed PANIC_MAX_TASKS
+    // cap keeps it bounded even if the list is mid-mutation in a fault context.
+    for (Task_Handle t = Task_Object_first();
+         t != (Task_Handle)0 && n < PANIC_MAX_TASKS;
+         t = Task_Object_next(t))
+    {
+      const char *name = (const char *)Task_getEnv(t);
+      // stack/stackSize are plain fields of the (fully-defined) Task_Object; this
+      // is the same pair Task_stat copies, read here without the disable/restore.
+      uint32_t base = (uint32_t)(uintptr_t)t->stack;
+      uint32_t size = (uint32_t)t->stackSize;
+      panicFillStackEntry(&rec->stacks[n], name, base, size);
+      if (panicStackIsBlown(&rec->stacks[n]))
+      {
+        blown = true;
+      }
+      n++;
+    }
+    rec->stackCount = n;
+
+    // ISR / system stack via the a8 Hwi. getStackInfo returns TRUE on overflow
+    // (base byte != 0xbe) and fills peak/size/base; peak is 0 on overflow or if
+    // the ISR stack was not pre-filled (hal.Hwi.initStackFlag). Map that onto the
+    // same entry shape so the reader treats it uniformly.
+    {
+      Hwi_StackInfo info;
+      memset(&info, 0, sizeof(info));
+      Bool overflow = Hwi_getStackInfo(&info, (Bool)TRUE);
+      PanicStackEntry *e = &rec->isrStack;
+      memset(e, 0, sizeof(*e));
+      strncpy(e->name, "isr", PANIC_STACK_NAME_LEN - 1);
+      e->base = (uint32_t)(uintptr_t)info.hwiStackBase;
+      e->size = (uint32_t)info.hwiStackSize;
+      if (overflow)
+      {
+        e->used = (uint32_t)info.hwiStackSize;
+        e->canaryOk = 0;
+      }
+      else
+      {
+        e->used = (uint32_t)info.hwiStackPeak;
+        e->canaryOk = 1;
+      }
+      if (panicStackIsBlown(e))
+      {
+        blown = true;
+      }
+    }
+
+    rec->anyStackBlown = blown ? 1u : 0u;
   }
 
   // ---------------------------------------------------------------------------
@@ -321,6 +492,11 @@ extern "C"
       rec->modules[0].textSize =
           (uint32_t)((uintptr_t)__kernel_text_end__ - (uintptr_t)__kernel_text_start__);
     }
+
+    // [stol:crashdiag-stack-highwater] Per-task + ISR stack high-water / canary.
+    // Same self-contained scan for both paths (see the routine's header); sets
+    // rec->anyStackBlown for the flush banner.
+    panicEnumerateStacks(rec);
 
     // Flight-recorder ring (fixed struct, no heap — safe to read here).
     {
@@ -485,6 +661,11 @@ extern "C"
           (uint32_t)((uintptr_t)__kernel_text_end__ - (uintptr_t)__kernel_text_start__);
     }
 
+    // [stol:crashdiag-stack-highwater] Per-task + ISR stack high-water / canary.
+    // Same self-contained scan for both paths (see the routine's header); sets
+    // rec->anyStackBlown for the flush banner.
+    panicEnumerateStacks(rec);
+
     // Flight-recorder ring (fixed struct, no heap — safe to read here).
     {
       od::FlightRecorder &fr = od::flightRecorder();
@@ -626,6 +807,44 @@ extern "C"
     return r == FR_OK && bw == want;
   }
 
+  // [stol:crashdiag-stack-highwater] Percent of a stack consumed at high-water.
+  static unsigned panicStackPct(const PanicStackEntry *e)
+  {
+    return e->size ? (unsigned)((e->used * 100u) / e->size) : 0u;
+  }
+
+  // [stol:crashdiag-stack-highwater] Top-of-report banner(s): a broken canary is
+  // an outright overflow (BLOWN), an intact-but->=90%-used stack is NEAR-FULL.
+  // BLOWN entries lead so the prime suspect is unmissable. Iterates the task
+  // stacks then the ISR entry (index == stackCount). Returns the accumulated
+  // write success so the caller folds it into the flush's all-or-nothing flag.
+  static bool panicEmitStackBanners(FIL *f, PanicRecord *rec)
+  {
+    bool ok = true;
+    char line[96];
+    for (uint32_t i = 0; i <= rec->stackCount; i++)
+    {
+      PanicStackEntry *e = (i < rec->stackCount) ? &rec->stacks[i] : &rec->isrStack;
+      if (e->size && !e->canaryOk)
+      {
+        snprintf(line, sizeof(line), " *** STACK %s BLOWN ***\n", e->name);
+        ok &= panicPut(f, line);
+      }
+    }
+    for (uint32_t i = 0; i <= rec->stackCount; i++)
+    {
+      PanicStackEntry *e = (i < rec->stackCount) ? &rec->stacks[i] : &rec->isrStack;
+      if (e->size && e->canaryOk &&
+          (e->used * 100u) >= (PANIC_STACK_NEARFULL_PCT * e->size))
+      {
+        snprintf(line, sizeof(line), " *** STACK %s NEAR-FULL (%u%%) ***\n",
+                 e->name, panicStackPct(e));
+        ok &= panicPut(f, line);
+      }
+    }
+    return ok;
+  }
+
   int PanicBuffer_flushToLog(void)
   {
     if (!PanicBuffer_valid())
@@ -676,6 +895,13 @@ extern "C"
     ok &= panicPut(&f,"Schema: 2\n");
     snprintf(line, sizeof(line), "Kind: %s\n", panicKindString(rec->faultType));
     ok &= panicPut(&f,line);
+    // [stol:crashdiag-stack-highwater] Prime-suspect banner near the TOP of the
+    // block (right after Kind) so a blown / near-full stack is unmissable. The
+    // full per-stack numbers follow in the --- Stacks --- section below.
+    if (rec->anyStackBlown)
+    {
+      ok &= panicEmitStackBanners(&f, rec);
+    }
     snprintf(line, sizeof(line), "Time Since Boot: %0.3fs\n", (double)rec->wallclock);
     ok &= panicPut(&f,line);
     // [stol:crashdiag-fix-fwversion-capture-time] Print the CAPTURE-time version
@@ -779,6 +1005,22 @@ extern "C"
       panicResolve(rec, rec->lr, res, sizeof(res));
       snprintf(line, sizeof(line), " lr in %s\n", res);
       ok &= panicPut(&f,line);
+    }
+
+    // [stol:crashdiag-stack-highwater] Per-task + ISR stack high-water / canary.
+    // One line per task then the ISR/system stack. canary=BLOWN means the base
+    // guard word was overwritten (an overflow wrote down through the stack base);
+    // a high pct with canary=ok is a near-miss. Present for BOTH trap and hang
+    // captures. Format contract: docs/CRASH_REPORT_FORMAT.md.
+    ok &= panicPut(&f, "--- Stacks ---\n");
+    for (uint32_t i = 0; i <= rec->stackCount; i++)
+    {
+      PanicStackEntry *e = (i < rec->stackCount) ? &rec->stacks[i] : &rec->isrStack;
+      snprintf(line, sizeof(line),
+               " %-15s base=%08x size=%u used=%u (%u%%) canary=%s\n",
+               e->name, (unsigned)e->base, (unsigned)e->size, (unsigned)e->used,
+               panicStackPct(e), e->canaryOk ? "ok" : "BLOWN");
+      ok &= panicPut(&f, line);
     }
 
     // [stol:crashdiag-hang-spin-pc] Hang sub-case, so the reader knows how to

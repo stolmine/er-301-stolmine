@@ -27,6 +27,8 @@ Each report is delimited by `---CRASH REPORT BEGIN` / `---CRASH REPORT END`
 ---CRASH REPORT BEGIN
 Schema: 2
 Kind: data-abort | prefetch-abort | undef | lua | hang-watchdog
+ *** STACK <name> BLOWN ***          (0+ banner lines, only if a stack is blown/near-full)
+ *** STACK <name> NEAR-FULL (<pct>%) ***
 Time Since Boot: <s>s
 Firmware Version: <v>
 Boot Count: <n>
@@ -42,6 +44,9 @@ Thread: audio | ui | <name>          (from ExcContext threadType/Handle on hw)
 --- Fault Resolution ---             (best-effort, on-device, symbol-free)
  pc in <pkg>.so + 0x<off>            (or 'kernel + 0x<off>' or '?')
  lr in <pkg>.so + 0x<off>
+--- Stacks ---                       (per-task + ISR stack high-water; trap AND hang)
+ <name>          base=<hex> size=<n> used=<n> (<pct>%) canary=<ok|BLOWN>
+ isr             base=<hex> size=<n> used=<n> (<pct>%) canary=<ok|BLOWN>
 Hang State: running (spin) | blocked (kind=hang-watchdog only; how to read sp)
 --- Stack Window ---                 (kind=hang-watchdog only; raw hung-task stack)
  sp=<hex> bytes=<n>
@@ -79,6 +84,24 @@ Recent Log Messages:
   symbolication (offset → `file:line`) is offline (below); the device never runs
   `addr2line`.
 
+- **Stacks.** Per-task and ISR/system-stack high-water + canary, present for
+  **both** trap and hang captures (`crashdiag-stack-highwater`). One line per task
+  (up to 16), then the `isr` line. `base` is the stack's lowest address (ARM
+  stacks are full-descending, growing DOWN toward it), `size`/`used` are bytes,
+  `(<pct>%)` is `used/size`, and `canary=BLOWN` means the guard word at `base` was
+  overwritten (an overflow wrote down through the stack base) versus `ok`. The
+  high-water is computed at capture time by scanning the SYS/BIOS `0xbe`
+  stack-fill (`Task.initStackFlag`, required) from `base` upward for the first
+  non-fill word; the ISR line comes from `Hwi_getStackInfo`. When any stack is
+  blown (broken canary) or near-full (`used >= 90%`), a prominent
+  ` *** STACK <name> BLOWN ***` / ` *** STACK <name> NEAR-FULL (<pct>%) ***`
+  banner is emitted near the **top** of the block (right after `Kind:`) so the
+  prime suspect is unmissable, and `tools/symbolize_crash.py` leads its output
+  with that stack **before** the register/backtrace dump (the overflow is the
+  corruption ROOT; the fault site is only the downstream detection). The per-task
+  numbers exist only on am335x hardware; the emu injector
+  (`injectSynthetic("stacks")`) emits a canned blown-MAIN block so the
+  format/viewer/symbolizer are testable without a trap.
 - **Hang State.** `kind=hang-watchdog` only. `running (spin)` means the audio task
   was executing when the monitor fired, so `sp` and the Stack Window are the LIVE
   interrupted context (from `Hwi_getTaskSP()`) and the window is the real spin call
@@ -137,6 +160,7 @@ report:
 ```lua
 require("CrashReport").injectSynthetic("data-abort")     -- app.EMULATION only
 require("CrashReport").injectSynthetic("hang-watchdog")  -- adds a Stack Window
+require("CrashReport").injectSynthetic("stacks")         -- adds a --- Stacks --- section + BLOWN banner
 ```
 
 This writes a canned schema-v2 report (canned registers + the **real** emu module

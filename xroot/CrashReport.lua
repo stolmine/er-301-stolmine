@@ -80,6 +80,8 @@ end
 --   registerLines array of preformatted register lines (C-side kinds), or nil
 --   pc, lr        hex strings for Fault Resolution, or nil
 --   stackWindowLines array of preformatted Stack Window lines (hang kind), or nil
+--   stackBannerLines array of top-of-report banner lines (blown/near-full), or nil
+--   stackLines    array of preformatted "--- Stacks ---" section lines, or nil
 --   luaMessage    Lua error message, or nil
 --   luaTrace      Lua traceback, or nil
 function M.write(fields)
@@ -97,6 +99,13 @@ function M.write(fields)
   f:write(BEGIN, "\n")
   f:write("Schema: 2\n")
   f:write(string.format("Kind: %s\n", fields.kind or "unknown"))
+  -- [stol:crashdiag-stack-highwater] Prime-suspect banner near the TOP (right
+  -- after Kind), matching the C flush, so a blown / near-full stack is unmissable.
+  if fields.stackBannerLines and #fields.stackBannerLines > 0 then
+    for _, line in ipairs(fields.stackBannerLines) do
+      f:write(line, "\n")
+    end
+  end
   f:write(string.format("Time Since Boot: %0.3fs\n", app.wallclock()))
 
   local meta = persistMeta()
@@ -134,6 +143,16 @@ function M.write(fields)
     end
     if fields.lr then
       f:write(string.format(" lr in %s\n", M.resolveAddress(fields.lr, mods)))
+    end
+  end
+
+  -- [stol:crashdiag-stack-highwater] Stacks section (per-task + ISR high-water /
+  -- canary). Present for both trap and hang captures on hardware. The C flush
+  -- emits this after Fault Resolution; mirror that order here.
+  if fields.stackLines and #fields.stackLines > 0 then
+    f:write("--- Stacks ---\n")
+    for _, line in ipairs(fields.stackLines) do
+      f:write(line, "\n")
     end
   end
 
@@ -315,6 +334,44 @@ local function injectSyntheticHang()
   return ok
 end
 
+-- [stol:crashdiag-stack-highwater] Synthetic report carrying a --- Stacks ---
+-- section with one task (MAIN) overflowed (canary BLOWN, 100%) plus a near-full
+-- DISPLAY task, a healthy audio task, and a healthy ISR stack. Exercises the
+-- banner + Stacks format + viewer without hardware (the real per-task numbers
+-- only exist on am335x). The Kind stays data-abort: on the frozen Anamnesis case
+-- the stack blows and THEN traps, so a blown-stack report is a data-abort with a
+-- Stacks section, which is exactly what this canned block models.
+local function injectSyntheticStacks()
+  local registerLines = {
+    " pc=800014d0 lr=00001200 sp=4fff0100 psr=60000013",
+    " dfsr=00000805 ifsr=00000000 dfar=4fff0000 ifar=00000000",
+    " r0=00000001 r1=00000002 r2=00000003 r3=00000004",
+    " r4=00000005 r5=00000006 r6=00000007 r7=00000008",
+    " r8=00000009 r9=0000000a r10=0000000b r11=0000000c r12=0000000d"
+  }
+  local stackBannerLines = {
+    " *** STACK MAIN BLOWN ***",
+    " *** STACK DISPLAY NEAR-FULL (96%) ***"
+  }
+  local stackLines = {
+    " MAIN            base=4fff0000 size=8192 used=8192 (100%) canary=BLOWN",
+    " DISPLAY         base=4ffee000 size=8192 used=7900 (96%) canary=ok",
+    " audio           base=4ffd0000 size=16384 used=6000 (36%) canary=ok",
+    " isr             base=4001f000 size=4096 used=800 (19%) canary=ok"
+  }
+  local ok = M.write {
+    kind = "data-abort",
+    thread = "MAIN",
+    registerLines = registerLines,
+    pc = "800014d0",
+    lr = "00001200",
+    stackBannerLines = stackBannerLines,
+    stackLines = stackLines
+  }
+  M.setPending("data-abort in MAIN (stack MAIN BLOWN)")
+  return ok
+end
+
 -- [stol:infra-crash-diag-emu-inject]
 function M.injectSynthetic(kind)
   if not app.EMULATION then
@@ -324,6 +381,9 @@ function M.injectSynthetic(kind)
   kind = kind or "data-abort"
   if kind == "hang-watchdog" then
     return injectSyntheticHang()
+  end
+  if kind == "stacks" then
+    return injectSyntheticStacks()
   end
   local registerLines = {
     " pc=40012abc lr=40012a00 sp=4fff0100 psr=60000013",
