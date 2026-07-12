@@ -116,6 +116,38 @@ STACK_ENTRY_RE = re.compile(
     r"\((\d+)%\)\s+canary=(ok|BLOWN)")
 
 
+# [stol:crashdiag-object-guard-event] The " pendQ=<hex> next=<hex> prev=<hex>
+# reason=<hex>" data line of the --- Event Guard --- section.
+EVENT_GUARD_RE = re.compile(
+    r"pendQ=([0-9a-fA-F]+)\s+next=([0-9a-fA-F]+)\s+prev=([0-9a-fA-F]+)\s+"
+    r"reason=([0-9a-fA-F]+)")
+
+
+def parse_event_guard(text):
+    """Return the audio-Event guard-breach detail dict, or None if absent.
+
+    {pendQ, next, prev, reason} — the watched pendQ header address and the
+    corrupted next/prev links caught before Event_post would walk them. Present
+    only for kind=event-guard-breach (crashdiag-object-guard-event).
+    """
+    section = None
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if stripped.startswith("--- ") and stripped.endswith(" ---"):
+            section = stripped.strip("- ").strip()
+            continue
+        if section == "Event Guard":
+            m = EVENT_GUARD_RE.search(raw)
+            if m:
+                return {
+                    "pendQ": int(m.group(1), 16),
+                    "next": int(m.group(2), 16),
+                    "prev": int(m.group(3), 16),
+                    "reason": int(m.group(4), 16),
+                }
+    return None
+
+
 def parse_report(text):
     """Return (modules, addresses, stack, stacks).
 
@@ -575,7 +607,30 @@ def _enrich(res, build_dir, addr2line):
 
 def symbolize(report_text, build_dir, addr2line):
     modules, addresses, stack, stacks = parse_report(report_text)
+    guard = parse_event_guard(report_text)
     out_lines = []
+
+    # [stol:crashdiag-object-guard-event] Lead with an audio-Event guard breach:
+    # it is a DIRECT report of the corruption (the pendQ clobbered) caught before
+    # the downstream Event_post trap, so it is the prime signal. Decode the reason
+    # and flag which corrupted link is a valid code/heap address vs near-null.
+    if guard is not None:
+        out_lines.append("*** EVENT GUARD BREACH: audio Event pendQ corrupted "
+                         "(caught before Event_post trap) ***")
+        out_lines.append("  pendQ header %08x" % guard["pendQ"])
+        bits = []
+        if guard["reason"] & 0x1:
+            bits.append("next-badptr")
+        if guard["reason"] & 0x2:
+            bits.append("prev-badptr")
+        if guard["reason"] & 0x4:
+            bits.append("next-link")
+        if guard["reason"] & 0x8:
+            bits.append("prev-link")
+        out_lines.append("  reason=0x%x (%s)" % (
+            guard["reason"], " ".join(bits) if bits else "?"))
+        out_lines.append("  next=%08x  prev=%08x" % (guard["next"], guard["prev"]))
+        out_lines.append("")
 
     # [stol:crashdiag-stack-highwater] Lead with any blown / near-full stack: a
     # stack overflow is the corruption ROOT, so it must precede the register and
@@ -718,6 +773,29 @@ Thread: MAIN
  DISPLAY         base=4ffee000 size=8192 used=7900 (96%) canary=ok
  audio           base=4ffd0000 size=16384 used=6000 (36%) canary=ok
  isr             base=4001f000 size=4096 used=800 (19%) canary=ok
+--- Recent Log ---
+---CRASH REPORT END
+"""
+
+
+# [stol:crashdiag-object-guard-event] Guard-breach report: the audio ISR caught
+# the pendQ sentinel clobbered (next near-null 0x62, the Anamnesis fingerprint)
+# before Event_post would trap. The tool must lead with the EVENT GUARD BREACH
+# summary and decode the reason bitmask.
+SELFTEST_GUARD_REPORT = """\
+---CRASH REPORT BEGIN
+Schema: 2
+Kind: event-guard-breach
+ *** EVENT GUARD BREACH (audio pendQ corrupted) ***
+Thread: audio
+--- Registers ---
+ pc=00000000 lr=803a1000 sp=00000000 psr=00000000
+--- Module Map ---
+ kernel                   text=80000000..80100000
+ core.so                  text=00001000..00002000  data=00002000..00003000
+--- Event Guard ---
+ pendQ=80538380 next=00000062 prev=80538380 reason=05
+ reason: next-badptr next-link
 --- Recent Log ---
 ---CRASH REPORT END
 """
@@ -1115,6 +1193,27 @@ def selftest():
         print("PASS: symbolize() leads with the blown-stack prime suspect")
     else:
         print("FAIL: stacks symbolize output:\n%s" % sout)
+        ok = False
+
+    print("\n== event-guard-breach (--- Event Guard --- prime signal) ==")
+    guard = parse_event_guard(SELFTEST_GUARD_REPORT)
+    if (guard and guard["pendQ"] == 0x80538380 and guard["next"] == 0x62 and
+            guard["prev"] == 0x80538380 and guard["reason"] == 0x5):
+        print("PASS: parsed Event Guard pendQ/next/prev/reason")
+    else:
+        print("FAIL: event guard parse -> %r" % guard)
+        ok = False
+
+    gout, _, _ = symbolize(SELFTEST_GUARD_REPORT, None, DEFAULT_ADDR2LINE)
+    # The guard-breach block must lead (before the pc= resolution line) and decode
+    # the reason bits.
+    if ("EVENT GUARD BREACH" in gout and
+            "EVENT GUARD BREACH" in gout.split("pc=")[0] and
+            "next-badptr" in gout and "next-link" in gout and
+            "next=00000062" in gout):
+        print("PASS: symbolize() leads with the guard breach + decoded reason")
+    else:
+        print("FAIL: guard symbolize output:\n%s" % gout)
         ok = False
 
     print("\n== ET_REL section-walk (pure-Python, synthetic ELF) ==")

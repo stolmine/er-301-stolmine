@@ -236,3 +236,130 @@ NAMES the corruptor — "task <X> blew its stack (used > size, canary BLOWN)" (P
 "EVENT guard breached" (P2) — instead of "corruption detected in Event_post 0.2s
 after insert." That is the difference between a hypothesis and a fix, and every
 mechanism here is reusable for the next corruption, not specific to Anamnesis.
+
+---
+
+## P2 IMPLEMENTED 2026-07-12 (`crashdiag-object-guard-event`) — Tier 1 shipped
+
+P0's `--- Stacks ---` section DISPROVED the stack-overflow hypothesis on hardware
+(every task stack healthy, canary=ok) and surfaced the real cause: a **wild WRITE**
+into the runtime task-object/heap region near `~0x80538xxx` that clobbers BOTH a
+Task_Object AND the audio `Event`'s pend queue; the next audio EDMA interrupt walks
+the wrecked pendQ and traps in `Event_post`. So P2 (object guard) is the path, and
+it is now built.
+
+### Tier 1 (shipped): audio-Event pend-queue integrity guard
+
+Not a literal "guard word bracketing the heap-allocated Event" — that is
+**counterproductive here**: the wild write targets a fixed-ish absolute address
+(uninitialized/dangling/derived pointer, per the habitat analysis), so relocating
+the Event into a guarded static struct would move the victim OUT of the write's
+path and suppress the very signal we want (and change the frozen repro's layout).
+Instead we keep the Event exactly where `Event_create` puts it and check the
+**pend-queue words that get clobbered** (the deliverable's explicit "and/or the
+specific pend-queue words" option), which is layout-preserving and directly
+targets the corruption.
+
+- The pendQ is a SYS/BIOS `Queue_Object` == a doubly-linked-list sentinel
+  `Queue_Elem { next, prev }`. In every legitimate state the invariant holds:
+  `next`/`prev` mapped + 4-aligned, and `next->prev == header && prev->next ==
+  header`. The Anamnesis clobber (near-null `next`) breaks it.
+- `Audio_init` publishes the Event via `PanicBuffer_setAudioEvent()`; the audio
+  EDMA/error ISRs call `PanicBuffer_checkAudioEventGuard()` (gated on `g_hangArmed`
+  = one predicted branch when off) BEFORE `Event_post`; the Swi hang tick calls it
+  too as a low-rate backstop. On breach it seals a `PANIC_FAULT_GUARD` record
+  (kind `event-guard-breach`) with FIRST-SEEN wallclock + the corrupted next/prev
+  + reason bitmask + the per-task stacks (which also carry the clobbered
+  Task_Object), then warm-reboots + flushes exactly like the trap path. Every
+  dereference is DDR-range-checked (reuses P0's `panicAddrInDdr`), so a corrupted
+  link never nested-faults the capture.
+- The check runs in the EDMA Hwi, and the audio task only mutates pendQ under
+  `Hwi_disable`, so the check always observes a settled queue: no false positives.
+
+This shrinks the corruption window from ~0.2s (the downstream `Event_post` trap) to
+one audio frame and CONFIRMS the pendQ as the victim, without needing the exact
+corruptor pc.
+
+New report contract (C flush / Lua injector / `symbolize_crash.py` all agree):
+```
+Kind: event-guard-breach
+ *** EVENT GUARD BREACH (audio pendQ corrupted) ***
+--- Event Guard ---
+ pendQ=<hex> next=<hex> prev=<hex> reason=<hex>
+ reason: next-badptr prev-badptr next-link prev-link   (only the failed rules)
+```
+`reason` bits: `0x1` next-badptr, `0x2` prev-badptr, `0x4` next-link, `0x8`
+prev-link. `PANIC_VERSION` 6 -> 7; `static_assert(sizeof(PanicRecord) <= 0x4000)`
+still holds (record ~0x256c). Emu-tested via
+`injectSynthetic("event-guard-breach")` + `tests/emu/48-crash-diag-event-guard`
+and the symbolizer selftest.
+
+### Tier 2 (NOT shipped) — A8 self-hosted data watchpoint: feasibility VERDICT
+
+Goal: trap AT the store and record the corruptor pc. Evaluated the Cortex-A8
+self-hosted (monitor-mode) data watchpoint and the MMU guard page.
+
+**A8 monitor-mode watchpoint — PLAUSIBLE IN PRINCIPLE, but NOT shippable blind, so
+NOT shipped.** The mechanism would be: clear the OS lock (`DBGOSLAR`), enable
+monitor debug mode (`DBGDSCR.MDBGen`, CP14 c0,c1,c0,2), program `DBGWVR0`/`DBGWCR0`
+(CP14 c0,c0/c1,c7) to watch a word on WRITE with privileged+user access. A
+watchpoint debug event in monitor mode is taken as a **Data Abort** (`DFSR.FS =
+0b00010`, debug event; `DBGDSCR.MOE = 0b0010`, watchpoint), which routes to the
+SAME SYS/BIOS Data Abort vector that already calls `stolCrashExcHook` — so the
+capture path is reused and `LR_abt` gives the corruptor pc (imprecise by a few
+instructions on A8, but enough to name the function via `symbolize_crash.py`).
+
+Why it is not shipped:
+1. **DBGEN is the hard gate and is NOT firmware-verifiable in the emu or from
+   source.** `MDBGen` is RAZ/WI unless the external `DBGEN` signal is asserted. On
+   a GP AM3358 (JTAG works out of the box) `DBGEN` is very likely high, but "very
+   likely" is not "verified," and if it is low the watchpoint is a SILENT no-op.
+   Per "do not ship a half-working watchpoint," this must be proven on the bench
+   first (probe below), not assumed.
+2. **No clean watch target without a bench repro.** The word the wild write hits
+   (the pendQ `next`, or a Task_Object `stack`/`stackSize`) is at a
+   **runtime-determined** address. The pendQ has heavy legit `Event_post`/`pend`
+   traffic, so a watchpoint there fires every audio frame and needs per-frame
+   disable/step-over/re-enable filtering by writing pc (kernel vs package) — fragile
+   and hot. The clean no-legit-traffic target (a Task_Object `stack`/`stackSize`,
+   written only at task-create) needs the specific clobbered object's address,
+   which only a bench repro pins down. So even with DBGEN confirmed, the watch
+   address must be sourced from a bench capture first.
+
+**MMU guard page — NOT VIABLE HERE.** The current MMU config maps DDR in 1 MB
+SECTIONs, and `~0x80538xxx` is dense live memory (task objects + stacks + the
+Event). A read-only guard SECTION (or even a 4 KB page) covers many legitimately
+written objects and would trap constantly. Isolating the Event onto its own guard
+page requires relocating it, which (as in Tier 1) moves it out of the write's path
+and defeats the purpose. Documented as not-viable in favor of the watchpoint.
+
+**Bench probe to unblock Tier 2 (run before ever enabling a watchpoint):** in a
+`BUILDOPT_CRASH_TEST`-style build, from a privileged context: clear `DBGOSLAR`,
+set `DBGDSCR.MDBGen`, **read `DBGDSCR` back** and confirm `MDBGen` stuck (if not ->
+DBGEN is low -> Tier 2 is dead on this board, stop). Then set `DBGWVR0` to the
+address of a local `volatile uint32_t`, `DBGWCR0` to watch-on-write+enabled, store
+to that local, and confirm control lands in `stolCrashExcHook` with `DFSR.FS ==
+0b00010`. If it fires, Tier 2 is feasible: pin the clobbered Task_Object address
+from a Tier-1 `event-guard-breach` / trap capture, watch its `stackSize` field, and
+the corruptor pc appears in `libanamnesis.so`. This probe is documented, not
+compiled into any normal build.
+
+### On-hardware BENCH procedure for the frozen Anamnesis insert (Tier 1)
+
+1. Flash `0.7.0-stolmine.9.5.2.60` (this build); confirm single version via
+   `strings app.elf`.
+2. Admin > System Settings > "Enable crash diagnostics?" = on (arms the flight
+   recorder + hang monitor + the audio-Event guard on the shared choke point).
+3. Insert the frozen Anamnesis (`er-301-habitat` pkg 0.2.0.83), UNCHANGED.
+4. The device should warm-reboot and, on next boot, show "A crash was captured."
+5. Admin > Crash Reports (or `front/crash.log`): SUCCESS =
+   `Kind: event-guard-breach` with the `*** EVENT GUARD BREACH ***` banner, an
+   `--- Event Guard ---` section whose `next=` is the near-null clobbered value
+   (e.g. `00000062`) with `reason` including `next-badptr`, a FIRST-SEEN `Time
+   Since Boot` EARLIER than the old ~15.16s `Event_post` trap, and a `--- Stacks
+   ---` section that still shows the clobbered blank-name Task_Object. This proves
+   detection moved from the downstream `Event_post` trap to the pendQ write's first
+   post. (If instead the old `data-abort in Event_post` still appears, the guard
+   check did not run before the corrupting post reached `Event_post` — investigate
+   ISR ordering; the guard is called at the top of every EDMA/error ISR so this
+   should not happen.)

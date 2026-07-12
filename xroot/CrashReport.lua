@@ -156,6 +156,16 @@ function M.write(fields)
     end
   end
 
+  -- [stol:crashdiag-object-guard-event] Event Guard section (event-guard-breach
+  -- kind only): the corrupted audio pendQ header + links + reason. The C flush
+  -- emits this after the Stacks section; mirror that order here.
+  if fields.eventGuardLines and #fields.eventGuardLines > 0 then
+    f:write("--- Event Guard ---\n")
+    for _, line in ipairs(fields.eventGuardLines) do
+      f:write(line, "\n")
+    end
+  end
+
   -- [stol:crashdiag-hang-spin-pc] Hang State (hang kind only): running (spin) =>
   -- sp is the live interrupted SP; blocked => sp is the saved block site.
   if fields.hangState then
@@ -372,6 +382,42 @@ local function injectSyntheticStacks()
   return ok
 end
 
+-- [stol:crashdiag-object-guard-event] Synthetic audio-Event pend-queue guard
+-- breach: the audio ISR caught the pendQ sentinel clobbered (next near-null)
+-- BEFORE Event_post would trap, so this is a deferred-corruption capture. The
+-- registers are best-effort (pc=0, lr=the ISR detection site); the load-bearing
+-- signal is the --- Event Guard --- section (+ the top-of-report banner). The
+-- per-breach CAPTURE only exists on am335x; this exercises the format + viewer +
+-- symbolizer downstream of the panic buffer.
+local function injectSyntheticGuard()
+  local registerLines = {
+    " pc=00000000 lr=803a1000 sp=00000000 psr=00000000",
+    " dfsr=00000000 ifsr=00000000 dfar=00000000 ifar=00000000",
+    " r0=00000000 r1=00000000 r2=00000000 r3=00000000",
+    " r4=80538150 r5=80538154 r6=00000000 r7=00000000",
+    " r8=49002070 r9=00000000 r10=00000000 r11=00000000 r12=00000000"
+  }
+  local stackBannerLines = {
+    " *** EVENT GUARD BREACH (audio pendQ corrupted) ***"
+  }
+  -- next clobbered to a near-null value (the Anamnesis fingerprint); prev intact.
+  local eventGuardLines = {
+    " pendQ=80538380 next=00000062 prev=80538380 reason=05",
+    " reason: next-badptr next-link"
+  }
+  local ok = M.write {
+    kind = "event-guard-breach",
+    thread = "audio",
+    registerLines = registerLines,
+    pc = "00000000",
+    lr = "803a1000",
+    stackBannerLines = stackBannerLines,
+    eventGuardLines = eventGuardLines
+  }
+  M.setPending("event-guard-breach in audio (pendQ corrupted)")
+  return ok
+end
+
 -- [stol:infra-crash-diag-emu-inject]
 function M.injectSynthetic(kind)
   if not app.EMULATION then
@@ -384,6 +430,9 @@ function M.injectSynthetic(kind)
   end
   if kind == "stacks" then
     return injectSyntheticStacks()
+  end
+  if kind == "event-guard-breach" then
+    return injectSyntheticGuard()
   end
   local registerLines = {
     " pc=40012abc lr=40012a00 sp=4fff0100 psr=60000013",

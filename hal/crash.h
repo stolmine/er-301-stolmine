@@ -151,6 +151,30 @@ extern "C"
   // free, bounded, snapshots the audio task's own stack only.
   void PanicBuffer_captureHang(void);
 
+  // ---- Audio-Event pend-queue guard [stol:crashdiag-object-guard-event] ------
+  //
+  // Closes the attribution gap of the Anamnesis insert data-abort: the corruption
+  // clobbers the audio Event's pend queue, but the fault only surfaces ~0.2s
+  // later when the next Event_post walks the wrecked queue and traps. This guard
+  // validates the pendQ doubly-linked sentinel invariant in the audio ISR BEFORE
+  // Event_post runs; on a breach it seals a PANIC_FAULT_GUARD record (kind
+  // "event-guard-breach": first-seen wallclock + the corrupted next/prev links +
+  // the per-task stacks) and warm-reboots, exactly like the trap path. am335x
+  // capture only; the emu presentation half is exercised via the synthetic
+  // injector (xroot/CrashReport.lua) + tools/symbolize_crash.py.
+
+  // Publish the audio Event handle so the guard can locate its pendQ header.
+  // Called once from Audio_init (arch/am335x/hal/audio.c) after Event_create.
+  // A null / out-of-DDR handle simply leaves the guard disabled (no-op check).
+  void PanicBuffer_setAudioEvent(void *eventHandle);
+
+  // Validate the audio Event's pendQ sentinel; on a breach, seal a
+  // PANIC_FAULT_GUARD record + warm-reboot. Bounded, allocation-free, one-shot,
+  // callable from the EDMA Hwi or the Swi hang tick. The CALLER gates on
+  // g_hangArmed (one predicted branch when disarmed) so it is zero cost when off;
+  // the function also re-checks armed()/captured() defensively.
+  void PanicBuffer_checkAudioEventGuard(void);
+
   // Livelock flag for the BUILDOPT_CRASH_TEST 'h' trigger: set by
   // PanicBuffer_checkTestTrigger, read by the audio task, which spins forever on
   // its next frame so the monitor can catch a deliberate hang. Defined only in

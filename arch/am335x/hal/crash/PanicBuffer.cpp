@@ -14,6 +14,14 @@
 // transitive) include of ti/sysbios/knl/Task.h, so it sits above every #include.
 #define ti_sysbios_knl_Task__internalaccess
 
+// [stol:crashdiag-object-guard-event] Same internal-access opt-in for the Event
+// module, so the audio-Event pend-queue guard can locate the Event's pendQ
+// (Queue_Object) header directly off an Event_Handle and validate its
+// doubly-linked-sentinel invariant. Reveals only the state struct; must precede
+// any (even transitive) include of ti/sysbios/knl/Event.h, so it sits with the
+// Task opt-in above every #include.
+#define ti_sysbios_knl_Event__internalaccess
+
 #include <hal/crash.h>
 #include <hal/log.h>
 #include <hal/timing.h>
@@ -29,6 +37,10 @@
 
 #include <ti/sysbios/BIOS.h>
 #include <ti/sysbios/knl/Task.h>
+// [stol:crashdiag-object-guard-event] Event + Queue internals for the audio-Event
+// pend-queue guard (pendQ header lookup + Queue_Elem next/prev fields).
+#include <ti/sysbios/knl/Event.h>
+#include <ti/sysbios/knl/Queue.h>
 #include <ti/sysbios/family/arm/exc/Exception.h>
 #include <ti/sysbios/family/arm/a8/intcps/Hwi.h> // [stol:crashdiag-hang-spin-pc] Hwi_getTaskSP
 #include <ti/sysbios/hal/Cache.h>
@@ -67,7 +79,9 @@ extern "C"
   //   v5: added hangRunning (spin vs blocked) for the live-SP hang capture.
   //   v6: added per-task + ISR stack high-water/canary (stacks[]/isrStack/
   //       stackCount/anyStackBlown). [stol:crashdiag-stack-highwater]
-#define PANIC_VERSION 6u
+  //   v7: added audio-Event pend-queue guard breach detail (guardAddr/guardNext/
+  //       guardPrev/guardReason). [stol:crashdiag-object-guard-event]
+#define PANIC_VERSION 7u
 #define PANIC_MAX_MODULES 48
 #define PANIC_MAX_FR_EVENTS 32
 #define PANIC_FR_LABEL_LEN 48
@@ -92,6 +106,23 @@ extern "C"
   // prefetch, 0x18 data, 0x1b undef); this ASCII 'HANG' sentinel cannot collide,
   // so panicKindString maps it to "hang-watchdog" without disturbing the enum.
 #define PANIC_FAULT_HANG 0x484E4721u // 'HNG!'
+
+  // [stol:crashdiag-object-guard-event] Sentinel faultType for an audio-Event
+  // pend-queue guard breach (not an Exception_Type; same non-colliding ASCII
+  // trick as PANIC_FAULT_HANG). panicKindString maps it to "event-guard-breach".
+  // Detected when the audio ISR (or the hang tick) finds the Event's pendQ
+  // doubly-linked sentinel broken BEFORE Event_post would walk it and trap.
+#define PANIC_FAULT_GUARD 0x47524421u // 'GRD!'
+
+  // [stol:crashdiag-object-guard-event] Which pendQ invariant failed (bitmask,
+  // reported in the --- Event Guard --- section). NEXT/PREV_BADPTR = the header
+  // link is not a mapped, 4-aligned DDR address (the Anamnesis signature: a
+  // near-null clobbered next); NEXT/PREV_LINK = the link is mapped but the
+  // doubly-linked back-pointer no longer points at the header (a torn chain).
+#define PANIC_GUARD_REASON_NEXT_BADPTR 0x1u
+#define PANIC_GUARD_REASON_PREV_BADPTR 0x2u
+#define PANIC_GUARD_REASON_NEXT_LINK 0x4u
+#define PANIC_GUARD_REASON_PREV_LINK 0x8u
 
   // Raw stack window copied from a hung task (section 8.4). The offline
   // symbolizer scans it for in-.text return addresses to reconstruct a candidate
@@ -178,6 +209,17 @@ extern "C"
     PanicStackEntry stacks[PANIC_MAX_TASKS];
     PanicStackEntry isrStack;
     uint8_t anyStackBlown;
+
+    // [stol:crashdiag-object-guard-event] Audio-Event pend-queue guard breach
+    // detail. Non-zero guardAddr => this record is a PANIC_FAULT_GUARD capture:
+    // guardAddr is the watched pendQ header (Queue_Elem) address; guardNext /
+    // guardPrev are the CORRUPTED next/prev links observed at the breach;
+    // guardReason is the PANIC_GUARD_REASON_* bitmask. Zero for every other kind
+    // (memset leaves them clear on the trap / hang paths).
+    uint32_t guardAddr;
+    uint32_t guardNext;
+    uint32_t guardPrev;
+    uint32_t guardReason;
   } PanicRecord;
 
   // [stol:crashdiag-review-nits] The reserved .panicbuf region is 16 KiB (see
@@ -199,6 +241,12 @@ extern "C"
   // (which runs on possibly-corrupt state within the ~30ms WDT window) would
   // re-enter and memset/overwrite the real sealed record with a boring one.
   static volatile bool g_captured = false;
+
+  // [stol:crashdiag-object-guard-event] Address of the audio Event's pendQ
+  // (Queue_Elem) header, published once at Audio_init via PanicBuffer_setAudioEvent.
+  // Zero => not registered yet (the guard check is then a no-op). Read on the
+  // audio ISR hot path, so a plain word: written once, before any breach.
+  static uint32_t g_audioEventPendQ = 0;
 
   void Crash_arm(bool on)
   {
@@ -740,6 +788,213 @@ extern "C"
   }
 
   // ---------------------------------------------------------------------------
+  // [stol:crashdiag-object-guard-event] Audio-Event pend-queue guard.
+  //
+  // The Anamnesis insert corrupts the audio Event's pend queue (a stray write
+  // near 0x80538xxx clobbers pendQ->next to a near-null value); the NEXT audio
+  // EDMA interrupt calls Event_post, walks the wrecked queue, dereferences the
+  // near-null head, and traps in ti_sysbios_knl_Event_post (Event.c:285). That is
+  // the DETECTION site, ~0.2s after the write. This guard moves detection to the
+  // FIRST Event_post after the write: the audio ISR validates the pendQ sentinel
+  // BEFORE posting; on a breach it seals a PANIC_FAULT_GUARD record (first-seen
+  // wallclock + the corrupted links) and warm-reboots, shrinking the window to a
+  // single audio frame and CONFIRMING the pendQ as the victim region.
+  //
+  // The pendQ is a SYS/BIOS Queue_Object == a doubly-linked-list sentinel
+  // Queue_Elem { next, prev }. In every legitimate state (empty: next==prev==q;
+  // one pended elem E: next==prev==E, E->prev==E->next==q) the invariant
+  // "next and prev are mapped+aligned AND next->prev==q AND prev->next==q" holds.
+  // The audio task manipulates pendQ only under Hwi_disable, and this check runs
+  // in the EDMA Hwi BEFORE Event_post, so it always observes a settled queue --
+  // no false positives from an in-flight post/pend.
+  //
+  // Zero cost when off: the caller (arch/am335x/hal/audio.c) gates the call on
+  // g_hangArmed (one predicted branch when disarmed, same seam as the heartbeat).
+  // ---------------------------------------------------------------------------
+
+  void PanicBuffer_setAudioEvent(void *eventHandle)
+  {
+    g_audioEventPendQ = 0;
+    if (!eventHandle || !panicAddrInDdr((uint32_t)(uintptr_t)eventHandle))
+    {
+      return;
+    }
+    // pendQ header = (Queue_Object*) at Event_Instance_State_pendQ__O into the
+    // Event_Object; its first word is the sentinel Queue_Elem's `next`.
+    Queue_Handle q = Event_Instance_State_pendQ((Event_Object *)eventHandle);
+    uint32_t qa = (uint32_t)(uintptr_t)q;
+    if (panicAddrInDdr(qa))
+    {
+      g_audioEventPendQ = qa;
+    }
+  }
+
+  // Pure, allocation-free invariant test. Every dereference is guarded by a prior
+  // DDR+aligned proof of the pointer, so a corrupted link can never fault us
+  // (P0's rule: never read a clobbered pointer unchecked). Returns true on breach
+  // and fills the observed links + the reason bitmask.
+  static bool audioEventGuardBreached(uint32_t q, uint32_t *outNext,
+                                      uint32_t *outPrev, uint32_t *outReason)
+  {
+    const volatile uint32_t *hdr = (const volatile uint32_t *)(uintptr_t)q;
+    uint32_t next = hdr[0];
+    uint32_t prev = hdr[1];
+    *outNext = next;
+    *outPrev = prev;
+
+    uint32_t reason = 0;
+    bool nextOk = panicAddrInDdr(next) && (next & 3u) == 0u;
+    bool prevOk = panicAddrInDdr(prev) && (prev & 3u) == 0u;
+    if (!nextOk)
+    {
+      reason |= PANIC_GUARD_REASON_NEXT_BADPTR;
+    }
+    if (!prevOk)
+    {
+      reason |= PANIC_GUARD_REASON_PREV_BADPTR;
+    }
+    // Sentinel back-pointer consistency, but ONLY through links we just proved
+    // mapped + aligned. next->prev is word[1] of next; prev->next is word[0] of
+    // prev; both must equal the header address q.
+    if (nextOk)
+    {
+      uint32_t nextPrev = ((const volatile uint32_t *)(uintptr_t)next)[1];
+      if (nextPrev != q)
+      {
+        reason |= PANIC_GUARD_REASON_NEXT_LINK;
+      }
+    }
+    if (prevOk)
+    {
+      uint32_t prevNext = ((const volatile uint32_t *)(uintptr_t)prev)[0];
+      if (prevNext != q)
+      {
+        reason |= PANIC_GUARD_REASON_PREV_LINK;
+      }
+    }
+    *outReason = reason;
+    return reason != 0;
+  }
+
+  // Seal a PANIC_FAULT_GUARD record. Reuses the trap/hang path's record / CRC /
+  // module-map / stacks / flight-recorder / one-shot-latch / cache-clean /
+  // warm-reboot machinery verbatim; only the fault identity + the Event-Guard
+  // detail differ. Callable from the EDMA Hwi (audio ISR) or the Swi hang tick --
+  // both strictly more permissive than the abort context the trap path already
+  // survives. Bounded, allocation-free, one-shot.
+  static void captureGuardBreach(uint32_t q, uint32_t next, uint32_t prev,
+                                 uint32_t reason)
+  {
+    if (g_captured || g_inHook)
+    {
+      return; // one-shot: a record is already sealed / being sealed.
+    }
+    g_inHook = 1;
+
+    if (!od::flightRecorder().armed())
+    {
+      g_inHook = 0;
+      return;
+    }
+
+    PanicRecord *rec = panicRecord();
+    memset(rec, 0, sizeof(PanicRecord));
+    rec->version = PANIC_VERSION;
+    rec->faultType = PANIC_FAULT_GUARD;
+
+    // The corruptor is long gone (deferred detection), so pc stays 0; lr is the
+    // detection site (the audio ISR that ran the check) as best-effort context.
+    // The load-bearing signal is the Event-Guard detail below, not the registers.
+    rec->lr = (uint32_t)(uintptr_t)__builtin_return_address(0);
+
+    // Attribute to the audio task (the Event's owner) so Thread: reads "audio".
+    Task_Handle t = (Task_Handle)g_audioTask;
+    if (t && panicAddrInDdr((uint32_t)(uintptr_t)t))
+    {
+      rec->threadType = (uint32_t)BIOS_ThreadType_Task;
+      rec->threadHandle = (uint32_t)(uintptr_t)t;
+      const char *name = (const char *)Task_getEnv(t);
+      if (name && panicAddrInDdr((uint32_t)(uintptr_t)name))
+      {
+        strncpy(rec->threadName, name, PANIC_THREAD_NAME_LEN - 1);
+      }
+    }
+
+    rec->guardAddr = q;
+    rec->guardNext = next;
+    rec->guardPrev = prev;
+    rec->guardReason = reason;
+
+    rec->wallclock = wallclock(); // FIRST-SEEN time of the corruption.
+
+#ifdef FIRMWARE_VERSION
+    strncpy(rec->fwVersion, FIRMWARE_VERSION, sizeof(rec->fwVersion) - 1);
+#endif
+
+    rec->moduleCount = (uint32_t)panicEnumerateModules(rec->modules, PANIC_MAX_MODULES);
+    if (rec->moduleCount > 0)
+    {
+      rec->modules[0].textBase = (uintptr_t)__kernel_text_start__;
+      rec->modules[0].textSize =
+          (uint32_t)((uintptr_t)__kernel_text_end__ - (uintptr_t)__kernel_text_start__);
+    }
+
+    // Per-task + ISR stacks: on the Anamnesis case one Task_Object is ALSO
+    // clobbered, and panicEnumerateStacks surfaces it (fault-safe walk, P0), so
+    // the guard report carries the same corruption fingerprint the trap did.
+    panicEnumerateStacks(rec);
+
+    {
+      od::FlightRecorder &fr = od::flightRecorder();
+      int n = fr.count();
+      if (n > PANIC_MAX_FR_EVENTS)
+      {
+        n = PANIC_MAX_FR_EVENTS;
+      }
+      for (int i = 0; i < n; i++)
+      {
+        const od::FlightRecorder::Event *e = fr.at(i);
+        if (!e)
+        {
+          continue;
+        }
+        rec->fr[rec->frCount].t = e->timestamp;
+        strncpy(rec->fr[rec->frCount].label, e->label, PANIC_FR_LABEL_LEN - 1);
+        rec->frCount++;
+      }
+    }
+
+    rec->crc = panicCrc32((const uint8_t *)&rec->version, panicPayloadLen());
+    rec->magic = PANIC_MAGIC;
+    g_captured = true;
+
+    Cache_wbInv((Ptr)__panic_buffer_start__, (SizeT)sizeof(PanicRecord), (Bits16)Cache_Type_ALL, (Bool)TRUE);
+
+    if (g_autoReboot)
+    {
+      reboot(); // WDT warm reset; DDR keeps its charge so the buffer survives.
+    }
+  }
+
+  void PanicBuffer_checkAudioEventGuard(void)
+  {
+    // Fast rejects (hot path): unregistered, disarmed, or already sealed.
+    if (g_audioEventPendQ == 0 || g_captured)
+    {
+      return;
+    }
+    if (!od::flightRecorder().armed())
+    {
+      return;
+    }
+    uint32_t next = 0, prev = 0, reason = 0;
+    if (audioEventGuardBreached(g_audioEventPendQ, &next, &prev, &reason))
+    {
+      captureGuardBreach(g_audioEventPendQ, next, prev, reason);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Validity / clear
   // ---------------------------------------------------------------------------
 
@@ -789,6 +1044,9 @@ extern "C"
     // the hang monitor stores in faultType. Maps to the reserved schema Kind.
     case PANIC_FAULT_HANG:
       return "hang-watchdog";
+    // [stol:crashdiag-object-guard-event] Audio-Event pend-queue guard breach.
+    case PANIC_FAULT_GUARD:
+      return "event-guard-breach";
     // [stol:crashdiag-review-nits] "swi"/"unknown" are outside the documented
     // Kind enum in docs/CRASH_REPORT_FORMAT.md (data-abort | prefetch-abort |
     // undef | lua | hang-watchdog). Kept because parsers tolerate an unknown
@@ -940,6 +1198,13 @@ extern "C"
     {
       ok &= panicEmitStackBanners(&f, rec);
     }
+    // [stol:crashdiag-object-guard-event] Prime-suspect banner for a guard breach
+    // near the TOP (right after Kind), matching the blown-stack banner discipline
+    // so the confirmed victim region is unmissable.
+    if (rec->faultType == PANIC_FAULT_GUARD)
+    {
+      ok &= panicPut(&f, " *** EVENT GUARD BREACH (audio pendQ corrupted) ***\n");
+    }
     snprintf(line, sizeof(line), "Time Since Boot: %0.3fs\n", (double)rec->wallclock);
     ok &= panicPut(&f,line);
     // [stol:crashdiag-fix-fwversion-capture-time] Print the CAPTURE-time version
@@ -1059,6 +1324,36 @@ extern "C"
                e->name, (unsigned)e->base, (unsigned)e->size, (unsigned)e->used,
                panicStackPct(e), e->canaryOk ? "ok" : "BLOWN");
       ok &= panicPut(&f, line);
+    }
+
+    // [stol:crashdiag-object-guard-event] Event Guard detail (guard breach only).
+    // pendQ is the watched Queue_Elem header; next/prev are the CORRUPTED links
+    // caught before Event_post would walk them; reason decodes which invariant
+    // broke. This is the load-bearing signal for a deferred-corruption capture
+    // (the registers are best-effort: pc=0, lr=the ISR detection site). Format
+    // contract: docs/CRASH_REPORT_FORMAT.md.
+    if (rec->faultType == PANIC_FAULT_GUARD)
+    {
+      ok &= panicPut(&f, "--- Event Guard ---\n");
+      snprintf(line, sizeof(line),
+               " pendQ=%08x next=%08x prev=%08x reason=%02x\n",
+               (unsigned)rec->guardAddr, (unsigned)rec->guardNext,
+               (unsigned)rec->guardPrev, (unsigned)rec->guardReason);
+      ok &= panicPut(&f, line);
+      // Human-readable decode of the reason bitmask (one token per failed rule).
+      char why[96];
+      int wp = 0;
+      wp += snprintf(why + wp, sizeof(why) - wp, " reason:");
+      if (rec->guardReason & PANIC_GUARD_REASON_NEXT_BADPTR)
+        wp += snprintf(why + wp, sizeof(why) - wp, " next-badptr");
+      if (rec->guardReason & PANIC_GUARD_REASON_PREV_BADPTR)
+        wp += snprintf(why + wp, sizeof(why) - wp, " prev-badptr");
+      if (rec->guardReason & PANIC_GUARD_REASON_NEXT_LINK)
+        wp += snprintf(why + wp, sizeof(why) - wp, " next-link");
+      if (rec->guardReason & PANIC_GUARD_REASON_PREV_LINK)
+        wp += snprintf(why + wp, sizeof(why) - wp, " prev-link");
+      snprintf(why + wp, sizeof(why) - wp, "\n");
+      ok &= panicPut(&f, why);
     }
 
     // [stol:crashdiag-hang-spin-pc] Hang sub-case, so the reader knows how to

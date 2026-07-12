@@ -26,9 +26,10 @@ Each report is delimited by `---CRASH REPORT BEGIN` / `---CRASH REPORT END`
 ```
 ---CRASH REPORT BEGIN
 Schema: 2
-Kind: data-abort | prefetch-abort | undef | lua | hang-watchdog
+Kind: data-abort | prefetch-abort | undef | lua | hang-watchdog | event-guard-breach
  *** STACK <name> BLOWN ***          (0+ banner lines, only if a stack is blown/near-full)
  *** STACK <name> NEAR-FULL (<pct>%) ***
+ *** EVENT GUARD BREACH (audio pendQ corrupted) ***   (only if kind=event-guard-breach)
 Time Since Boot: <s>s
 Firmware Version: <v>
 Boot Count: <n>
@@ -47,6 +48,9 @@ Thread: audio | ui | <name>          (from ExcContext threadType/Handle on hw)
 --- Stacks ---                       (per-task + ISR stack high-water; trap AND hang)
  <name>          base=<hex> size=<n> used=<n> (<pct>%) canary=<ok|BLOWN>
  isr             base=<hex> size=<n> used=<n> (<pct>%) canary=<ok|BLOWN>
+--- Event Guard ---                  (kind=event-guard-breach only; corrupted audio pendQ)
+ pendQ=<hex> next=<hex> prev=<hex> reason=<hex>
+ reason: next-badptr prev-badptr next-link prev-link   (only the failed rules)
 Hang State: running (spin) | blocked (kind=hang-watchdog only; how to read sp)
 --- Stack Window ---                 (kind=hang-watchdog only; raw hung-task stack)
  sp=<hex> bytes=<n>
@@ -102,6 +106,22 @@ Recent Log Messages:
   numbers exist only on am335x hardware; the emu injector
   (`injectSynthetic("stacks")`) emits a canned blown-MAIN block so the
   format/viewer/symbolizer are testable without a trap.
+- **Event Guard.** `kind=event-guard-breach` only (`crashdiag-object-guard-event`).
+  The audio Event's pend queue is a SYS/BIOS doubly-linked-list sentinel; the
+  audio ISR validates its invariant (`next`/`prev` mapped + 4-aligned, and each
+  back-pointer points at the header) BEFORE `Event_post` walks it. On a breach it
+  seals this record with the FIRST-SEEN time (the `Time Since Boot:` line) instead
+  of trapping ~0.2s later in `Event_post` — turning "corruption detected in
+  `Event_post`" into "audio pendQ corrupted, first seen at T". `pendQ` is the
+  watched header address; `next`/`prev` are the corrupted links; `reason` is a
+  bitmask (`0x1` next-badptr, `0x2` prev-badptr, `0x4` next-link, `0x8` prev-link)
+  followed by a decoded ` reason:` line. The registers are best-effort (`pc=0`
+  because the corruptor is long gone; `lr` is the ISR detection site); the
+  load-bearing evidence is this section plus the `--- Stacks ---` section (which,
+  on the Anamnesis case, also surfaces the clobbered Task_Object). The per-breach
+  CAPTURE is am335x-hardware-only; the emu injector
+  (`injectSynthetic("event-guard-breach")`) emits a canned block so the
+  format/viewer/symbolizer are testable without the write.
 - **Hang State.** `kind=hang-watchdog` only. `running (spin)` means the audio task
   was executing when the monitor fired, so `sp` and the Stack Window are the LIVE
   interrupted context (from `Hwi_getTaskSP()`) and the window is the real spin call
@@ -161,6 +181,7 @@ report:
 require("CrashReport").injectSynthetic("data-abort")     -- app.EMULATION only
 require("CrashReport").injectSynthetic("hang-watchdog")  -- adds a Stack Window
 require("CrashReport").injectSynthetic("stacks")         -- adds a --- Stacks --- section + BLOWN banner
+require("CrashReport").injectSynthetic("event-guard-breach") -- adds an --- Event Guard --- section + banner
 ```
 
 This writes a canned schema-v2 report (canned registers + the **real** emu module

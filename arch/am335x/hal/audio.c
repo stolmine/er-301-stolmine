@@ -335,8 +335,23 @@ static Void taskAudio(UArg arg0, UArg arg1)
   }
 }
 
+// [stol:crashdiag-object-guard-event] Validate the audio Event's pend queue in
+// the EDMA/error ISRs BEFORE Event_post walks it. On the Anamnesis insert the
+// queue is already clobbered here; catching it now seals an "event-guard-breach"
+// report with the FIRST-SEEN time instead of trapping ~0.2s later in Event_post.
+// Gated on g_hangArmed exactly like the heartbeat: a single predicted branch
+// (and no call) when diagnostics are disarmed.
+static inline void audioEventGuard(void)
+{
+  if (g_hangArmed)
+  {
+    PanicBuffer_checkAudioEventGuard();
+  }
+}
+
 static void hwiOnError(UArg arg)
 {
+  audioEventGuard();
   uint32_t status = McASPTxStatusGet(SOC_MCASP_0_CTRL_REGS);
 
   // clear the errors
@@ -353,6 +368,7 @@ static void hwiOnError(UArg arg)
 static void onPingCompletion(uint32_t tcc, EDMA3_RM_TccStatus status,
                              void *appData)
 {
+  audioEventGuard();
   if (status == EDMA3_RM_XFER_COMPLETE)
   {
     Event_post(local.hEvents, pingDone);
@@ -367,6 +383,7 @@ static void onPingCompletion(uint32_t tcc, EDMA3_RM_TccStatus status,
 static void onPongCompletion(uint32_t tcc, EDMA3_RM_TccStatus status,
                              void *appData)
 {
+  audioEventGuard();
   if (status == EDMA3_RM_XFER_COMPLETE)
   {
     Event_post(local.hEvents, pongDone);
@@ -541,6 +558,11 @@ void Audio_init()
   local.error_count = 0;
   local.hEvents = Event_create(NULL, NULL);
   local.restart = false;
+
+  // [stol:crashdiag-object-guard-event] Publish the audio Event so the crash
+  // facility can guard its pend queue against the Anamnesis-style wild write
+  // (checked in the EDMA ISR below, gated on g_hangArmed = zero cost when off).
+  PanicBuffer_setAudioEvent((void *)local.hEvents);
 
   {
     Hwi_Params params;

@@ -63,6 +63,13 @@ extern "C"
       return; // a record (trap or hang) is already sealed; device is rebooting.
     }
 
+    // [stol:crashdiag-object-guard-event] Low-rate backstop for the audio-Event
+    // pend-queue guard. The audio ISR is the primary (it trips on the FIRST post
+    // after the wild write); this Swi-context poll also catches a breach that
+    // lands while the stream is stopped (no posts) or between EDMA interrupts. It
+    // seals + reboots on breach, so it must precede the heartbeat logic below.
+    PanicBuffer_checkAudioEventGuard();
+
     bool running = g_audioRunning;
     uint32_t frames = g_audioFrames;
 
