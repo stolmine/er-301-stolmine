@@ -2,6 +2,7 @@
 #include <od/glue/CrashDiag.h>
 #include <od/extras/FlightRecorder.h>
 #include <hal/modulemap.h>
+#include <hal/crash.h>
 
 #include <string>
 #include <vector>
@@ -11,6 +12,15 @@ extern "C"
 {
 #include "lua.h"
 #include "lauxlib.h"
+}
+
+// [stol:infra-crash-diag-hang-watchdog] Weak no-op default for the hang-monitor
+// arm hook. The am335x monitor (arch/am335x/hal/crash/HangWatchdog.cpp) provides
+// the strong override; on builds without it (the emu, which has no hang capture)
+// this no-op is linked so the shared arm choke point below always resolves.
+extern "C" __attribute__((weak)) void Crash_hangArm(bool on)
+{
+  (void)on;
 }
 
 namespace
@@ -66,6 +76,11 @@ namespace
   {
     bool on = lua_toboolean(L, 1) != 0;
     od::flightRecorder().arm(on);
+    // [stol:infra-crash-diag-hang-watchdog] Same choke point arms the hang
+    // monitor (real hardware arm path from the enableCrashDiagnostics setting),
+    // so the Clock monitor exists exactly when diagnostics are armed. No-op on
+    // the emu (weak default above).
+    Crash_hangArm(on);
     return 0;
   }
 

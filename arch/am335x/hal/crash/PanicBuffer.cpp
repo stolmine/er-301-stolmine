@@ -54,12 +54,25 @@ extern "C"
   // literal "Schema: 2" line in the flushed block, the shared contract in
   // docs/CRASH_REPORT_FORMAT.md) which is unchanged by binary-layout bumps.
   //   v3: added char fwVersion[] (capture-time firmware) + bounded kernel entry.
-#define PANIC_VERSION 3u
+  //   v4: added stackWindow[]/stackWindowSp for the hang watchdog (section 8).
+#define PANIC_VERSION 4u
 #define PANIC_MAX_MODULES 48
 #define PANIC_MAX_FR_EVENTS 32
 #define PANIC_FR_LABEL_LEN 48
 #define PANIC_THREAD_NAME_LEN 16
 #define PANIC_FW_VERSION_LEN 32
+
+  // [stol:infra-crash-diag-hang-watchdog] Sentinel faultType for a hang capture.
+  // The trap path stores an Exception_Type (small values: 0x11 supervisor, 0x17
+  // prefetch, 0x18 data, 0x1b undef); this ASCII 'HANG' sentinel cannot collide,
+  // so panicKindString maps it to "hang-watchdog" without disturbing the enum.
+#define PANIC_FAULT_HANG 0x484E4721u // 'HNG!'
+
+  // Raw stack window copied from a hung task (section 8.4). The offline
+  // symbolizer scans it for in-.text return addresses to reconstruct a candidate
+  // backtrace, robust to both the preempted (full frame) and blocked (switch
+  // frame) sub-cases without parsing bios-internal frame layouts.
+#define PANIC_STACK_WINDOW_BYTES 256
 
   typedef struct
   {
@@ -100,6 +113,15 @@ extern "C"
     // Flight recorder ring (chronological, oldest first)
     uint32_t frCount;
     PanicFrEvent fr[PANIC_MAX_FR_EVENTS];
+
+    // [stol:infra-crash-diag-hang-watchdog] Raw stack window for a hang capture
+    // (section 8.4). stackWindowSp is the address the window was copied FROM (so
+    // the report and any future tool can locate it); stackWindowLen is how many
+    // bytes are valid (<= PANIC_STACK_WINDOW_BYTES, clamped to the task stack).
+    // Zero stackWindowSp => no window present (the trap path leaves it zero).
+    uint32_t stackWindowSp;
+    uint32_t stackWindowLen;
+    uint8_t stackWindow[PANIC_STACK_WINDOW_BYTES];
   } PanicRecord;
 
   // [stol:crashdiag-review-nits] The reserved .panicbuf region is 16 KiB (see
@@ -125,6 +147,17 @@ extern "C"
   void Crash_arm(bool on)
   {
     od::flightRecorder().arm(on);
+    // [stol:infra-crash-diag-hang-watchdog] Same choke point arms hang capture,
+    // so the Clock monitor exists exactly when diagnostics are armed. Idempotent.
+    Crash_hangArm(on);
+  }
+
+  // [stol:infra-crash-diag-hang-watchdog] One-shot latch accessor for the hang
+  // monitor (g_captured is file-static). Lets the Clock tick skip re-declaring
+  // once any record — trap or hang — has been sealed.
+  bool Crash_captured(void)
+  {
+    return g_captured;
   }
 
   bool Crash_armed(void)
@@ -327,6 +360,146 @@ extern "C"
   }
 
   // ---------------------------------------------------------------------------
+  // [stol:infra-crash-diag-hang-watchdog] Hang capture — runs in Swi context.
+  //
+  // Called by the Clock monitor (HangWatchdog.cpp) once the audio heartbeat has
+  // stalled while the stream is running. Builds a HANG PanicRecord reusing the
+  // trap path's record / CRC / module-map / flight-recorder / one-shot-latch
+  // machinery, then cache-cleans + warm-reboots exactly like stolCrashExcHook.
+  //
+  // The module-map / flight-recorder / seal blocks are DELIBERATELY DUPLICATED
+  // from stolCrashExcHook rather than refactored into a shared helper: the trap
+  // path is bench-validated (section 6.7) and cannot be re-verified in the emu,
+  // so it is left byte-for-byte untouched. Swi context is more permissive than an
+  // abort context, but the same discipline holds: no malloc, no card I/O, no
+  // locks; only the reserved panic buffer, the lock-free dlopen map, and the
+  // audio task's OWN stack are read, all bounded.
+  // ---------------------------------------------------------------------------
+
+  void PanicBuffer_captureHang(void)
+  {
+    if (g_captured || g_inHook)
+    {
+      return; // one-shot: a record is already sealed / being sealed.
+    }
+    g_inHook = 1;
+
+    if (!od::flightRecorder().armed())
+    {
+      g_inHook = 0;
+      return;
+    }
+
+    PanicRecord *rec = panicRecord();
+    memset(rec, 0, sizeof(PanicRecord));
+    rec->version = PANIC_VERSION;
+    rec->faultType = PANIC_FAULT_HANG;
+
+    // Best-effort task state. A hang hands us no ExcContext, so pc/psr/registers
+    // stay zero and the raw stack window (below) carries the backtrace load.
+    Task_Handle t = (Task_Handle)g_audioTask;
+    if (t)
+    {
+      rec->threadType = (uint32_t)BIOS_ThreadType_Task;
+      rec->threadHandle = (uint32_t)(uintptr_t)t;
+      const char *name = (const char *)Task_getEnv(t);
+      if (name)
+      {
+        strncpy(rec->threadName, name, PANIC_THREAD_NAME_LEN - 1);
+      }
+
+      // Saved SP + stack bounds via the public Task_stat. Task_stat sets
+      // statbuf.sp = tsk->context UNCONDITIONALLY (verified in bios 6.46 Task.c:
+      // no "current task" branch), so from this Swi it returns the audio task's
+      // last-saved stack pointer, not the Swi's own SP — exactly what we want,
+      // with no bios-internal struct access (Task_Object is opaque in the public
+      // header). `stack`/`stackSize` bound the stack buffer for clamping.
+      Task_Stat st;
+      Task_stat(t, &st);
+      uintptr_t sp = (uintptr_t)st.sp;
+      uintptr_t base = (uintptr_t)st.stack;
+      uintptr_t top = base + (uintptr_t)st.stackSize;
+
+      rec->sp = (uint32_t)sp;
+
+      // Center a PANIC_STACK_WINDOW_BYTES window on the saved SP, clamped inside
+      // [base, top). Higher addresses hold the outer taskAudio frame (return PCs
+      // into the audio .text — these finger the audio task); lower addresses
+      // hold the deeper, currently-active frames. The offline symbolizer scans
+      // whichever words land in .text. Copying only the task's own stack keeps
+      // this fault-safe from Swi context.
+      if (top > base && sp >= base && sp <= top)
+      {
+        uintptr_t start = (sp >= base + PANIC_STACK_WINDOW_BYTES / 2)
+                              ? sp - PANIC_STACK_WINDOW_BYTES / 2
+                              : base;
+        if (start + PANIC_STACK_WINDOW_BYTES > top)
+        {
+          start = (top >= base + PANIC_STACK_WINDOW_BYTES)
+                      ? top - PANIC_STACK_WINDOW_BYTES
+                      : base;
+        }
+        uintptr_t avail = top - start;
+        uint32_t n = (avail < PANIC_STACK_WINDOW_BYTES)
+                         ? (uint32_t)avail
+                         : PANIC_STACK_WINDOW_BYTES;
+        memcpy(rec->stackWindow, (const void *)start, n);
+        rec->stackWindowSp = (uint32_t)start;
+        rec->stackWindowLen = n;
+      }
+    }
+
+    rec->wallclock = wallclock();
+
+#ifdef FIRMWARE_VERSION
+    strncpy(rec->fwVersion, FIRMWARE_VERSION, sizeof(rec->fwVersion) - 1);
+#endif
+
+    // Module map — allocation-free reader over the dlopen registry.
+    rec->moduleCount = (uint32_t)panicEnumerateModules(rec->modules, PANIC_MAX_MODULES);
+    if (rec->moduleCount > 0)
+    {
+      rec->modules[0].textBase = (uintptr_t)__kernel_text_start__;
+      rec->modules[0].textSize =
+          (uint32_t)((uintptr_t)__kernel_text_end__ - (uintptr_t)__kernel_text_start__);
+    }
+
+    // Flight-recorder ring (fixed struct, no heap — safe to read here).
+    {
+      od::FlightRecorder &fr = od::flightRecorder();
+      int n = fr.count();
+      if (n > PANIC_MAX_FR_EVENTS)
+      {
+        n = PANIC_MAX_FR_EVENTS;
+      }
+      for (int i = 0; i < n; i++)
+      {
+        const od::FlightRecorder::Event *e = fr.at(i);
+        if (!e)
+        {
+          continue;
+        }
+        rec->fr[rec->frCount].t = e->timestamp;
+        strncpy(rec->fr[rec->frCount].label, e->label, PANIC_FR_LABEL_LEN - 1);
+        rec->frCount++;
+      }
+    }
+
+    // Seal (magic last), latch the one-shot, cache-clean, warm-reboot — identical
+    // persistence to the trap path.
+    rec->crc = panicCrc32((const uint8_t *)&rec->version, panicPayloadLen());
+    rec->magic = PANIC_MAGIC;
+    g_captured = true;
+
+    Cache_wbInv((Ptr)__panic_buffer_start__, (SizeT)sizeof(PanicRecord), (Bits16)Cache_Type_ALL, (Bool)TRUE);
+
+    if (g_autoReboot)
+    {
+      reboot(); // WDT warm reset; DDR keeps its charge so the buffer survives.
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Validity / clear
   // ---------------------------------------------------------------------------
 
@@ -372,6 +545,10 @@ extern "C"
       return "prefetch-abort";
     case Exception_Type_UndefInst:
       return "undef";
+    // [stol:infra-crash-diag-hang-watchdog] Not an Exception_Type; the sentinel
+    // the hang monitor stores in faultType. Maps to the reserved schema Kind.
+    case PANIC_FAULT_HANG:
+      return "hang-watchdog";
     // [stol:crashdiag-review-nits] "swi"/"unknown" are outside the documented
     // Kind enum in docs/CRASH_REPORT_FORMAT.md (data-abort | prefetch-abort |
     // undef | lua | hang-watchdog). Kept because parsers tolerate an unknown
@@ -583,6 +760,35 @@ extern "C"
       ok &= panicPut(&f,line);
     }
 
+    // [stol:infra-crash-diag-hang-watchdog] Stack Window (hang captures only;
+    // stackWindowSp is zero for the trap path). Address-prefixed hex, 4 words
+    // (16 bytes) per line, ascending address == innermost-frame-first so the
+    // offline symbolizer prints a candidate backtrace in call order. Words are
+    // little-endian reads of the raw copied stack (memcpy avoids any alignment
+    // trap). Format contract: docs/CRASH_REPORT_FORMAT.md.
+    if (rec->stackWindowSp != 0 && rec->stackWindowLen > 0)
+    {
+      ok &= panicPut(&f, "--- Stack Window ---\n");
+      snprintf(line, sizeof(line), " sp=%08x bytes=%u\n",
+               (unsigned)rec->stackWindowSp, (unsigned)rec->stackWindowLen);
+      ok &= panicPut(&f, line);
+      for (uint32_t off = 0; off < rec->stackWindowLen; off += 16)
+      {
+        char words[64];
+        int wp = 0;
+        for (uint32_t j = 0; j < 16 && off + j < rec->stackWindowLen; j += 4)
+        {
+          uint32_t w = 0;
+          uint32_t avail = rec->stackWindowLen - (off + j);
+          memcpy(&w, &rec->stackWindow[off + j], avail < 4 ? avail : 4);
+          wp += snprintf(words + wp, sizeof(words) - wp, " %08x", (unsigned)w);
+        }
+        snprintf(line, sizeof(line), " %08x:%s\n",
+                 (unsigned)(rec->stackWindowSp + off), words);
+        ok &= panicPut(&f, line);
+      }
+    }
+
     ok &= panicPut(&f,"--- Flight Recorder ---\n");
     if (rec->frCount == 0)
     {
@@ -689,6 +895,13 @@ extern "C"
     }
   }
 
+#ifdef BUILDOPT_CRASH_TEST
+  // [stol:infra-crash-diag-hang-watchdog] Livelock flag for the 'h' trigger. Set
+  // here at boot, read by the audio task (arch/am335x/hal/audio.c), which spins
+  // forever on its next frame so the Clock monitor catches a deliberate hang.
+  volatile bool g_crashTestHang = false;
+#endif
+
   void PanicBuffer_checkTestTrigger(void)
   {
     bool weMounted = false;
@@ -713,7 +926,7 @@ extern "C"
       return;
     }
 
-    // Read the first byte to select the fault kind ('u' == undef).
+    // Read the first byte to select the fault kind ('u' == undef, 'h' == hang).
     int kind = 0;
     {
       FIL tf;
@@ -721,22 +934,44 @@ extern "C"
       {
         char c = 0;
         UINT br = 0;
-        if (f_read(&tf, &c, 1, &br) == FR_OK && br == 1 && (c == 'u' || c == 'U'))
+        if (f_read(&tf, &c, 1, &br) == FR_OK && br == 1)
         {
-          kind = 1;
+          if (c == 'u' || c == 'U')
+          {
+            kind = 1; // undefined instruction
+          }
+          else if (c == 'h' || c == 'H')
+          {
+            kind = 2; // hang-watchdog livelock
+          }
         }
         f_close(&tf);
       }
     }
 
     // One-shot: remove the trigger so the NEXT boot flushes the report and boots
-    // normally instead of re-trapping.
+    // normally instead of re-triggering.
     deleteFile(path);
 
     if (weMounted)
     {
       Card_unmount(1);
     }
+
+#ifdef BUILDOPT_CRASH_TEST
+    if (kind == 2)
+    {
+      // [stol:infra-crash-diag-hang-watchdog] Hang test: do NOT trap. Arm
+      // diagnostics + auto-reboot + the hang monitor, raise the livelock flag,
+      // and RETURN so boot continues to Audio_init/Audio_start. The audio task
+      // then spins on its next frame and the Clock monitor snapshots + reboots.
+      Crash_arm(true);
+      Crash_setAutoReboot(true);
+      g_crashTestHang = true;
+      logInfo("Crash test: hang livelock armed; audio task will spin next frame.");
+      return;
+    }
+#endif
 
     Crash_testTrap(kind); // does not return
   }

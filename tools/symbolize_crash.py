@@ -105,10 +105,21 @@ class Module:
         return self.bounded and not self.is_kernel
 
 
+STACK_SP_RE = re.compile(r"\bsp=([0-9a-fA-F]+)")
+STACK_WORD_RE = re.compile(r"[0-9a-fA-F]{8}")
+
+
 def parse_report(text):
-    """Return (modules, addresses) where addresses maps name -> int."""
+    """Return (modules, addresses, stack).
+
+    modules   -- list[Module] from the Module Map.
+    addresses -- {name: int} from Registers (pc/lr/sp).
+    stack     -- {"sp": int|None, "words": [int]} from the Stack Window section
+                 (hang-watchdog captures; empty for trap reports).
+    """
     modules = []
     addresses = {}
+    stack = {"sp": None, "words": []}
     section = None
     for raw in text.splitlines():
         line = raw.rstrip("\n")
@@ -126,7 +137,20 @@ def parse_report(text):
         if section == "Registers":
             for name, hexval in ADDR_RE.findall(line):
                 addresses[name] = int(hexval, 16)
-    return modules, addresses
+        if section == "Stack Window":
+            # Header line: " sp=<hex> bytes=<n>" (no colon).
+            if ":" not in line:
+                msp = STACK_SP_RE.search(line)
+                if msp:
+                    stack["sp"] = int(msp.group(1), 16)
+                continue
+            # Data line: " <addr>: <w0> <w1> <w2> <w3>". Words are the 8-hex
+            # tokens AFTER the colon (the address prefix is excluded); each is a
+            # little-endian stack word, ascending address == innermost-first.
+            body = line[line.find(":") + 1:]
+            for tok in STACK_WORD_RE.findall(body):
+                stack["words"].append(int(tok, 16))
+    return modules, addresses, stack
 
 
 class Resolution:
@@ -504,8 +528,27 @@ def symbolize_package_offset(artifact, blob_off, addr2line):
 # Driver
 # ---------------------------------------------------------------------------
 
+def _enrich(res, build_dir, addr2line):
+    """Append the file:line (or section/offset) tail for a resolved address."""
+    tail = ""
+    artifact = find_artifact(res.path, build_dir)
+    if not artifact:
+        return "   (no artifact for %s in %s)" % (
+            os.path.basename(res.path), build_dir)
+    etype = peek_elf_type(artifact)
+    if etype == ET_REL and not res.is_kernel:
+        tail = "   " + symbolize_package_offset(artifact, res.offset, addr2line)
+    else:
+        sym = run_addr2line(addr2line, artifact, res.offset)
+        if sym:
+            tail = "   %s" % sym
+        else:
+            tail = "   (%s: no line info)" % os.path.basename(artifact)
+    return tail
+
+
 def symbolize(report_text, build_dir, addr2line):
-    modules, addresses = parse_report(report_text)
+    modules, addresses, stack = parse_report(report_text)
     out_lines = []
     out_lines.append("Modules: %d (%d relocatable)" % (
         len(modules), sum(1 for m in modules if m.relocatable)))
@@ -528,25 +571,35 @@ def symbolize(report_text, build_dir, addr2line):
         line = " %s=%08x -> %s + 0x%x" % (name, addr, res.path, res.offset)
         if res.note:
             line += " [%s]" % res.note
-
         if build_dir:
-            artifact = find_artifact(res.path, build_dir)
-            if not artifact:
-                line += "   (no artifact for %s in %s)" % (
-                    os.path.basename(res.path), build_dir)
-            else:
-                etype = peek_elf_type(artifact)
-                if etype == ET_REL and not res.is_kernel:
-                    line += "   " + symbolize_package_offset(
-                        artifact, res.offset, addr2line)
-                else:
-                    sym = run_addr2line(addr2line, artifact, res.offset)
-                    if sym:
-                        line += "   %s" % sym
-                    else:
-                        line += "   (%s: no line info)" % os.path.basename(
-                            artifact)
+            line += _enrich(res, build_dir, addr2line)
         out_lines.append(line)
+
+    # Hang-watchdog stack-window scan (section 8.4). A hang hands us no register
+    # frame, so we scan the raw stack window for words that land in a BOUNDED
+    # module .text range and print them innermost-first as a candidate backtrace.
+    # A word only counts as a return-address candidate on a confident bounded
+    # match (res.note is None) -- the unbounded old-format kernel best-effort is
+    # excluded so junk stack words do not all "resolve" to kernel.
+    if stack["words"]:
+        out_lines.append("--- Stack Window scan ---")
+        if stack["sp"] is not None:
+            out_lines.append(" window base sp=%08x, %d words" % (
+                stack["sp"], len(stack["words"])))
+        candidates = []
+        for w in stack["words"]:
+            res = resolve(w, modules)
+            if not res.unresolved and res.note is None:
+                candidates.append((w, res))
+        if not candidates:
+            out_lines.append(" (no in-.text return addresses found)")
+        else:
+            out_lines.append(" candidate backtrace (innermost first):")
+            for addr, res in candidates:
+                line = "  %08x -> %s + 0x%x" % (addr, res.path, res.offset)
+                if build_dir:
+                    line += _enrich(res, build_dir, addr2line)
+                out_lines.append(line)
     return "\n".join(out_lines), addresses, modules
 
 
@@ -575,6 +628,30 @@ import sys
 # args: ... -e <file> [-j <section>] 0x<addr>
 print("myFaultingFunc")
 print("/src/core/foo.cpp:42")
+"""
+
+# Hang-watchdog report: no register frame; a raw Stack Window whose words are a
+# mix of in-.text return addresses (kernel + package) and junk (stack addresses,
+# zeros, deadbeef). The scan must recover exactly the in-range words, innermost
+# (lowest-address == stream order) first, and drop the junk.
+SELFTEST_HANG_REPORT = """\
+---CRASH REPORT BEGIN
+Schema: 2
+Kind: hang-watchdog
+Thread: audio
+--- Registers ---
+ pc=00000000 lr=00000000 sp=9ffe0100 psr=00000000
+--- Module Map ---
+ kernel                   text=80000000..80100000
+ core.so                  text=00001000..00002000  data=00002000..00003000
+--- Stack Window ---
+ sp=9ffe0100 bytes=64
+ 9ffe0100: 80012abc 00000000 9ffe0140 80013344
+ 9ffe0110: 00000000 00001500 9ffe0180 80014400
+ 9ffe0120: deadbeef 00000000 9ffe01c0 00000000
+ 9ffe0130: 00000000 00000000 9ffe0200 800aabbc
+--- Recent Log ---
+---CRASH REPORT END
 """
 
 
@@ -869,7 +946,7 @@ def selftest():
     ok = True
 
     print("== M1 resolver (bounded kernel, '?' outside all ranges) ==")
-    modules, addresses = parse_report(SELFTEST_REPORT)
+    modules, addresses, _stack = parse_report(SELFTEST_REPORT)
     assert addresses.get("pc") == 0x800014d0, addresses
 
     # pc in the bounded kernel range -> kernel, RAW addr (non-relocated).
@@ -902,12 +979,42 @@ def selftest():
     # Old-format report (unbounded kernel) -> labelled best-effort, not '?'.
     old = SELFTEST_REPORT.replace(
         "text=80000000..80100000", "text=0")
-    om, _ = parse_report(old)
+    om, _, _ = parse_report(old)
     res = resolve(0xdeadbeef, om)
     if res.path and os.path.basename(res.path) == "kernel" and res.note:
         print("PASS: old-format unbounded kernel -> labelled best-effort")
     else:
         print("FAIL: old-format kernel -> %r (%r)" % (res.path, res.note))
+        ok = False
+
+    print("\n== hang-watchdog stack-window scan ==")
+    hmods, haddrs, hstack = parse_report(SELFTEST_HANG_REPORT)
+    if hstack["sp"] == 0x9ffe0100 and len(hstack["words"]) == 16:
+        print("PASS: parsed Stack Window sp=9ffe0100, 16 words")
+    else:
+        print("FAIL: stack parse sp=%r words=%d" % (
+            hstack["sp"], len(hstack["words"])))
+        ok = False
+
+    cands = [(w, resolve(w, hmods)) for w in hstack["words"]]
+    cands = [(w, r) for w, r in cands if not r.unresolved and r.note is None]
+    want = [0x80012abc, 0x80013344, 0x00001500, 0x80014400, 0x800aabbc]
+    if [w for w, _ in cands] == want:
+        print("PASS: scan recovered 5 in-.text words innermost-first, junk dropped")
+    else:
+        print("FAIL: scan candidates %r (want %r)" % (
+            [hex(w) for w, _ in cands], [hex(w) for w in want]))
+        ok = False
+
+    # 00001500 lands in the relocated package -> core.so + 0x500; the kernel word
+    # keeps its raw (non-relocated) address as the offset.
+    hout, _, _ = symbolize(SELFTEST_HANG_REPORT, None, DEFAULT_ADDR2LINE)
+    if ("candidate backtrace (innermost first):" in hout and
+            "80012abc -> kernel + 0x80012abc" in hout and
+            "00001500 -> core.so + 0x500" in hout):
+        print("PASS: symbolize() renders the candidate backtrace")
+    else:
+        print("FAIL: hang symbolize output:\n%s" % hout)
         ok = False
 
     print("\n== ET_REL section-walk (pure-Python, synthetic ELF) ==")

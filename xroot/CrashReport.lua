@@ -79,6 +79,7 @@ end
 --   thread        "audio" | "ui" | <name>            (default "?")
 --   registerLines array of preformatted register lines (C-side kinds), or nil
 --   pc, lr        hex strings for Fault Resolution, or nil
+--   stackWindowLines array of preformatted Stack Window lines (hang kind), or nil
 --   luaMessage    Lua error message, or nil
 --   luaTrace      Lua traceback, or nil
 function M.write(fields)
@@ -133,6 +134,16 @@ function M.write(fields)
     end
     if fields.lr then
       f:write(string.format(" lr in %s\n", M.resolveAddress(fields.lr, mods)))
+    end
+  end
+
+  -- Stack Window (hang-watchdog captures only; the C flush emits this from the
+  -- hung task's raw stack. Address-prefixed hex, 4 words/line, innermost-first.
+  -- See docs/CRASH_REPORT_FORMAT.md).
+  if fields.stackWindowLines and #fields.stackWindowLines > 0 then
+    f:write("--- Stack Window ---\n")
+    for _, line in ipairs(fields.stackWindowLines) do
+      f:write(line, "\n")
     end
   end
 
@@ -262,6 +273,41 @@ end
 -- so the presentation half is testable without a real hardware trap.
 --------------------------------------------------------------------------------
 
+-- [stol:infra-crash-diag-hang-watchdog] Synthetic HANG record: no ExcContext, so
+-- registers are best-effort (pc=0, a plausible sp) and the backtrace load is
+-- carried by a canned Stack Window in the C flush's exact format. Exercises the
+-- format + viewer + symbolizer stack-scan without a real hardware hang.
+local function injectSyntheticHang()
+  local registerLines = {
+    " pc=00000000 lr=00000000 sp=9ffe0100 psr=00000000",
+    " dfsr=00000000 ifsr=00000000 dfar=00000000 ifar=00000000",
+    " r0=00000000 r1=00000000 r2=00000000 r3=00000000",
+    " r4=00000000 r5=00000000 r6=00000000 r7=00000000",
+    " r8=00000000 r9=00000000 r10=00000000 r11=00000000 r12=00000000"
+  }
+  -- Canned stack window (address-prefixed hex, 4 words/line). The synthetic
+  -- addresses do not resolve against the emu module map, but they prove the
+  -- section renders + parses; the symbolizer selftest uses its own in-range
+  -- fixture to prove the .text scan.
+  local stackWindowLines = {
+    " sp=9ffe0100 bytes=64",
+    " 9ffe0100: 80012abc 00000000 9ffe0140 80013344",
+    " 9ffe0110: 00000000 40012a00 9ffe0180 80014400",
+    " 9ffe0120: deadbeef 00000000 9ffe01c0 80010080",
+    " 9ffe0130: 00000000 00000000 9ffe0200 8001aabb"
+  }
+  local ok = M.write {
+    kind = "hang-watchdog",
+    thread = "audio",
+    registerLines = registerLines,
+    pc = "00000000",
+    lr = "00000000",
+    stackWindowLines = stackWindowLines
+  }
+  M.setPending("hang-watchdog in audio thread")
+  return ok
+end
+
 -- [stol:infra-crash-diag-emu-inject]
 function M.injectSynthetic(kind)
   if not app.EMULATION then
@@ -269,6 +315,9 @@ function M.injectSynthetic(kind)
     return false
   end
   kind = kind or "data-abort"
+  if kind == "hang-watchdog" then
+    return injectSyntheticHang()
+  end
   local registerLines = {
     " pc=40012abc lr=40012a00 sp=4fff0100 psr=60000013",
     " dfsr=00000805 ifsr=00000000 dfar=deadbeef ifar=00000000",

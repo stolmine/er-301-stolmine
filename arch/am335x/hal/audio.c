@@ -1,5 +1,6 @@
 #include <hal/priorities.h>
 #include <hal/audio.h>
+#include <hal/crash.h>
 #include <hal/gpio.h>
 #include <hal/dma.h>
 #include <hal/constants.h>
@@ -58,6 +59,16 @@ static struct AudioLocals
 
   Task_Handle hTask;
 } local;
+
+// [stol:infra-crash-diag-hang-watchdog] Heartbeat seam consumed by the hang
+// monitor (arch/am335x/hal/crash/HangWatchdog.cpp) via hal/crash.h. g_audioFrames
+// advances once per Audio_callback WHILE ARMED (a single predicted branch when
+// off, so a disarmed build is byte-unaffected at steady state); g_audioRunning
+// gates out the legitimately-stopped stream (its counter also freezes, but that
+// is not a hang); g_audioTask lets the monitor read the task's saved stack.
+volatile uint32_t g_audioFrames = 0;
+volatile bool g_audioRunning = false;
+void *g_audioTask = 0;
 
 /*
  ** Configures the McASP Transmit Section for 4 channels TDM.
@@ -208,6 +219,21 @@ static Void taskAudio(UArg arg0, UArg arg1)
       if (posted & pingDone)
       {
         Audio_callback(local.ping);
+        // [stol:infra-crash-diag-hang-watchdog] Heartbeat (gated: zero cost off).
+        if (g_hangArmed)
+        {
+          g_audioFrames++;
+        }
+#ifdef BUILDOPT_CRASH_TEST
+        // [stol:infra-crash-diag-hang-watchdog] Deliberate livelock in the audio
+        // task for the 'h' bench trigger; the Clock monitor must catch it.
+        if (g_crashTestHang)
+        {
+          while (1)
+          {
+          }
+        }
+#endif
         result = Edma3_CacheFlush((uint32_t)local.ping,
                                   local.frameSizeInBytes);
         logAssert(result == EDMA3_DRV_SOK);
@@ -230,6 +256,19 @@ static Void taskAudio(UArg arg0, UArg arg1)
       if (posted & pongDone)
       {
         Audio_callback(local.pong);
+        // [stol:infra-crash-diag-hang-watchdog] Heartbeat (gated: zero cost off).
+        if (g_hangArmed)
+        {
+          g_audioFrames++;
+        }
+#ifdef BUILDOPT_CRASH_TEST
+        if (g_crashTestHang)
+        {
+          while (1)
+          {
+          }
+        }
+#endif
         result = Edma3_CacheFlush((uint32_t)local.pong,
                                   local.frameSizeInBytes);
         logAssert(result == EDMA3_DRV_SOK);
@@ -518,6 +557,9 @@ void Audio_init()
     params.env = (Ptr)"audio";
     local.hTask = Task_create(taskAudio, &params, NULL);
     local.task_started = true;
+    // [stol:infra-crash-diag-hang-watchdog] Publish the audio task handle so the
+    // hang monitor can read its saved stack for the snapshot.
+    g_audioTask = (void *)local.hTask;
   }
 }
 
@@ -583,11 +625,18 @@ void Audio_start(void)
 
   Gpio_write(PCM4104_MUTE, 0);
   local.running = true;
+  // [stol:infra-crash-diag-hang-watchdog] Stream is live: a stalled heartbeat
+  // from here on is a real hang, so open the monitor's gate.
+  g_audioRunning = true;
 }
 
 void Audio_stop(void)
 {
   local.running = false;
+  // [stol:infra-crash-diag-hang-watchdog] Stream stopped: the heartbeat will
+  // freeze (Event_pend blocks forever) but that is NOT a hang, so close the gate
+  // before the counter can go stale.
+  g_audioRunning = false;
   Gpio_write(PCM4104_MUTE, 1);
   Gpio_write(AUDIO_EXTERNAL_CLOCK_ENABLE, 0);
 

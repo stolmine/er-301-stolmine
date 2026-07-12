@@ -42,6 +42,10 @@ Thread: audio | ui | <name>          (from ExcContext threadType/Handle on hw)
 --- Fault Resolution ---             (best-effort, on-device, symbol-free)
  pc in <pkg>.so + 0x<off>            (or 'kernel + 0x<off>' or '?')
  lr in <pkg>.so + 0x<off>
+--- Stack Window ---                 (kind=hang-watchdog only; raw hung-task stack)
+ sp=<hex> bytes=<n>
+ <addr>: <w0> <w1> <w2> <w3>
+ <addr>: <w0> <w1> <w2> <w3>
 --- Flight Recorder ---              (ring of recent trigger events; ' (empty)')
  <t>s  insert sc.cv
  <t>s  quickload slot 1
@@ -74,6 +78,21 @@ Recent Log Messages:
   symbolication (offset → `file:line`) is offline (below); the device never runs
   `addr2line`.
 
+- **Stack Window.** `kind=hang-watchdog` only. A hang hands the capture no
+  register frame (by definition the stuck code never runs the trap hook), so the
+  monitor copies a 256-byte raw window from the hung audio task's saved stack and
+  the report serializes it for offline backtrace reconstruction. First line is
+  ` sp=<hex> bytes=<n>` (the address the window was copied from and its valid
+  length); each following line is ` <addr>: <w0> <w1> <w2> <w3>` — the address
+  prefix, then four little-endian 32-bit stack words (16 bytes/line). Lines are in
+  **ascending address == innermost-frame-first** order, so a straight read of the
+  words is a call-order candidate backtrace. `tools/symbolize_crash.py` scans the
+  words for ones that land in a bounded module `.text` range and prints them as
+  the candidate backtrace (a stack word only counts on a confident bounded match,
+  so junk words — stack pointers, zeros — are dropped). The device-side `pc`/`lr`
+  are best-effort (typically `0` → `?` for a hang); the stack scan carries the
+  load.
+
 - **Flight Recorder.** Emitted by `app.flightRecorderText()`. Ring of the last
   32 crash-trigger events (unit insert, unit/chain preset load, quicksave load),
   each `<t>s  <label>`. Empty ⇒ ` (empty)`. Recording is gated by the
@@ -82,8 +101,9 @@ Recent Log Messages:
 ## Offline symbolication
 
 `tools/symbolize_crash.py` (stdlib only) reads a report's **Module Map** +
-**Registers**, resolves each `pc`/`lr` to `<module> + offset`, then to `file:line`
-via `addr2line` against a directory of matching build artifacts.
+**Registers** (and, for a hang, the **Stack Window**), resolves each `pc`/`lr` —
+and each in-`.text` stack-window word — to `<module> + offset`, then to
+`file:line` via `addr2line` against a directory of matching build artifacts.
 
 ```sh
 # resolve against the build .so/.elf files
@@ -108,7 +128,8 @@ report format, and the admin viewer are exercised by **injecting** a synthetic
 report:
 
 ```lua
-require("CrashReport").injectSynthetic("data-abort")  -- app.EMULATION only
+require("CrashReport").injectSynthetic("data-abort")     -- app.EMULATION only
+require("CrashReport").injectSynthetic("hang-watchdog")  -- adds a Stack Window
 ```
 
 This writes a canned schema-v2 report (canned registers + the **real** emu module
@@ -134,3 +155,10 @@ dismissal.
   implementation of the block; a C flush should match its section order/labels.
 - `Thread:` is the single most useful field in the habitat sagas — populate it
   from `ExcContext.threadType`/`threadHandle` (audio vs ui).
+- **Hang captures** (`Kind: hang-watchdog`) come from the Swi-context Clock
+  monitor (`arch/am335x/hal/crash/HangWatchdog.cpp`), not the ARM exception hook:
+  an audio-thread heartbeat stalls while the stream runs, the monitor snapshots
+  the hung task into the SAME panic buffer (best-effort `sp` + the 256-byte
+  **Stack Window**, `pc` left `0`), then warm-reboots. It reuses the trap path's
+  record/CRC/module-map/flight-recorder/one-shot-latch persistence verbatim. See
+  `planning/crash-diagnostics-plan.md` §8.

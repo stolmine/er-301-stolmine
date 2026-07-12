@@ -110,9 +110,52 @@ extern "C"
   // Boot-time self-trigger for the hardware test: if the front card holds a file
   // named "CRASH_TEST", delete it (one-shot, so the next boot does not re-trap)
   // and call Crash_testTrap(). The file's first byte selects the kind ('u' =
-  // undef, anything else = data-abort). Wired into app_task only when the
-  // firmware is built with -DBUILDOPT_CRASH_TEST, so production is unaffected.
+  // undef, 'h' = hang-watchdog livelock, anything else = data-abort). Wired into
+  // app_task only when the firmware is built with -DBUILDOPT_CRASH_TEST, so
+  // production is unaffected.
   void PanicBuffer_checkTestTrigger(void);
+
+  // ---- Hang watchdog [stol:infra-crash-diag-hang-watchdog] -------------------
+  //
+  // Catches HANGS (livelocks / blocked-forever audio code) that never trap, so
+  // the exception hook above never runs. A Swi-context SYS/BIOS Clock samples an
+  // audio-thread heartbeat; if the heartbeat stalls while the stream is running,
+  // it snapshots the audio task (best-effort pc/sp + a raw stack window) into the
+  // SAME panic buffer and warm-reboots. See planning/crash-diagnostics-plan.md
+  // section 8. am335x-only capture; the emu path (emu/hal/audio.c) neither
+  // defines nor reads the seam globals below.
+  //
+  // Heartbeat seam between the audio task (arch/am335x/hal/audio.c, the producer)
+  // and the monitor (arch/am335x/hal/crash/HangWatchdog.cpp, the consumer):
+  extern volatile uint32_t g_audioFrames; // bumped once per Audio_callback when armed
+  extern volatile bool g_audioRunning;    // true between Audio_start() and Audio_stop()
+  extern volatile bool g_hangArmed;       // monitor armed; also gates the heartbeat store
+  extern void *g_audioTask;               // Task_Handle of the audio task (set in Audio_init)
+
+  // Arm / disarm the hang monitor. Creates the Clock on the first arm and
+  // Clock_start/Clock_stop thereafter, so a never-armed build never creates it
+  // (zero cost when off). Idempotent. Called from the arm choke points (Crash_arm
+  // and the Lua app.flightRecorderArm binding) so the flight-recorder arm also
+  // arms hang capture. A weak no-op default (od/glue/CrashDiag.cpp) is linked on
+  // builds without the am335x monitor (the emu), so shared callers always link.
+  void Crash_hangArm(bool on);
+
+  // True once a record has been sealed (one-shot latch shared with the trap
+  // path). The monitor consults it to avoid re-declaring after a hang is sealed.
+  bool Crash_captured(void);
+
+  // Build a HANG PanicRecord from the audio task (best-effort pc/sp + a 256-byte
+  // raw stack window), reusing the trap path's record/CRC/module-map/flight-
+  // recorder/one-shot-latch machinery, then Cache_wbInv + warm-reboot. Called by
+  // the Clock monitor when a stall is declared. Runs in Swi context: allocation-
+  // free, bounded, snapshots the audio task's own stack only.
+  void PanicBuffer_captureHang(void);
+
+  // Livelock flag for the BUILDOPT_CRASH_TEST 'h' trigger: set by
+  // PanicBuffer_checkTestTrigger, read by the audio task, which spins forever on
+  // its next frame so the monitor can catch a deliberate hang. Defined only in
+  // the crash-test build; unreferenced (and undefined) otherwise.
+  extern volatile bool g_crashTestHang;
 
 #ifdef __cplusplus
 }
