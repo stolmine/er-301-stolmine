@@ -279,6 +279,33 @@ extern "C"
   // broken OR it is at/over this percent of its size.
 #define PANIC_STACK_NEARFULL_PCT 90u
 
+  // [stol:crashdiag-stack-highwater] Fault-safe bounds for inspecting stacks from
+  // an abort context. The whole 512 MB DDR window is MMU-mapped, so a read that
+  // stays inside it CANNOT fault; a read OUTSIDE it (a clobbered stack pointer, a
+  // garbage Task handle from a corrupted object list) would nested-fault the fault
+  // handler and hang the device forever (the fault re-enters the hook, the
+  // one-shot guard bails, control returns to the faulting load, it re-faults...).
+  // The Anamnesis case proves the very structures we walk here can be corrupted,
+  // so EVERY address + size is range-checked before a single dereference, and a
+  // garbage size can never drive an unbounded scan.
+#define PANIC_DDR_LO 0x80000000u
+#define PANIC_DDR_HI 0xA0000000u
+#define PANIC_MAX_STACK_BYTES (256u * 1024u)
+
+  static inline bool panicAddrInDdr(uint32_t a)
+  {
+    return a >= PANIC_DDR_LO && a < PANIC_DDR_HI;
+  }
+
+  // A stack is safe to SCAN only if [base, base+size) lies wholly inside DDR and
+  // size is plausible (>=4, <=256 KiB). Rejecting keeps the scan bounded AND every
+  // read mapped.
+  static inline bool panicStackRangeOk(uint32_t base, uint32_t size)
+  {
+    return size >= 4u && size <= PANIC_MAX_STACK_BYTES &&
+           panicAddrInDdr(base) && base <= (PANIC_DDR_HI - size);
+  }
+
   static bool panicStackIsBlown(const PanicStackEntry *e)
   {
     if (e->size == 0)
@@ -303,18 +330,22 @@ extern "C"
                                   uint32_t base, uint32_t size)
   {
     memset(e, 0, sizeof(*e));
-    if (name)
+    // Only touch the name if the pointer itself is a mapped DDR address: a
+    // corrupted Task env pointer must not fault us mid-capture.
+    if (name && panicAddrInDdr((uint32_t)(uintptr_t)name))
     {
       strncpy(e->name, name, PANIC_STACK_NAME_LEN - 1);
     }
     e->base = base;
     e->size = size;
-    if (base == 0 || size < 4)
+    if (!panicStackRangeOk(base, size))
     {
-      // Unknown / unusable bounds: report fully-used, canary broken, so the
-      // reader is not falsely reassured (and it will not trip the banner unless
-      // size>0, which it is not here).
-      e->used = size;
+      // Corrupted / implausible bounds (base outside DDR, size 0 or absurd): mark
+      // suspect (canary broken so panicStackIsBlown flags it -- a task whose stack
+      // pointer got clobbered IS a corruption signal worth surfacing) but NEVER
+      // scan, since an out-of-DDR read would nested-fault the abort handler and
+      // hang. used=0 so a bogus size cannot trip the near-full path.
+      e->used = 0;
       e->canaryOk = 0;
       return;
     }
@@ -343,6 +374,13 @@ extern "C"
          t != (Task_Handle)0 && n < PANIC_MAX_TASKS;
          t = Task_Object_next(t))
     {
+      // A corrupted object-list link can hand us a garbage handle; dereferencing
+      // one outside DDR (t->stack / t->stackSize / Task_getEnv reads) would
+      // nested-fault the abort handler. Stop the walk at the first bad handle.
+      if (!panicAddrInDdr((uint32_t)(uintptr_t)t))
+      {
+        break;
+      }
       const char *name = (const char *)Task_getEnv(t);
       // stack/stackSize are plain fields of the (fully-defined) Task_Object; this
       // is the same pair Task_stat copies, read here without the disable/restore.
