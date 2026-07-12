@@ -5,7 +5,7 @@ ER-301-STOLMINE TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**94 items** — 73 done, 19 todo, 2 blocked. *Rendered 2026-07-12.*
+**95 items** — 74 done, 19 todo, 2 blocked. *Rendered 2026-07-12.*
 
 ## Sequencer
 
@@ -119,7 +119,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |---|---|---|---|
 |   | `crashdiag-fix-flush-error-handling` | Flush ignores FatFS write errors, then destroys the only copy (M4) | manual · 2026-07-10 |
 |   | `crashdiag-fix-partial-register-capture` | Exc-hook captures only a subset of registers (sp=pc, psr/r1/r8-r11 = ffffffff) on am335x data abort | manual · 2026-07-11 |
-|   | `infra-crash-diag-hang-watchdog` | Audio-thread heartbeat + WDT catches hangs, not just traps (hardware, later) | manual · 2026-07-12 |
+|   | `crashdiag-hang-spin-pc` | Hang stack window catches scheduler/stale frames, not the spin PC, for a leaf livelock | manual · 2026-07-12 |
 |   | `infra-crash-diagnostics-debug-mode` | Dev-enabled debug mode captures C-side crash diagnostics (umbrella) | manual · 2026-07-09 |
 |   | `infra-v0616-port` | Port the TXo I2C master mod to the v0.6.16 stable firmware base | manual · 2026-07-09 |
 | ✓ | `crashdiag-fix-flightrec-insert-order` | Flight recorder records unit insert AFTER the risky work, missing the #1 trigger (H3) | manual *(attested)* · 2026-07-10 |
@@ -131,6 +131,7 @@ check`): a `done` item must have a real test or its named artifact.*
 | ✓ | `infra-crash-diag-exc-hook` | SYS/BIOS exception hook captures ExcContext + module map (hardware) | manual *(attested)* · 2026-07-11 |
 | ✓ | `infra-crash-diag-flight-recorder` | Flight recorder: ring of recent crash-trigger events | manual *(attested)* · 2026-07-10 |
 | ✓ | `infra-crash-diag-format` | Crash report schema v2 + offline symbolication tool | manual *(attested)* · 2026-07-10 |
+| ✓ | `infra-crash-diag-hang-watchdog` | Audio-thread heartbeat + WDT catches hangs, not just traps (hardware, later) | manual *(attested)* · 2026-07-12 |
 | ✓ | `infra-crash-diag-module-map` | Module map: enumerate kernel + loaded package text/data bases | manual *(attested)* · 2026-07-10 |
 | ✓ | `infra-crash-diag-panic-buffer` | Warm-reboot-surviving panic buffer flushed to crash.log on next boot (hardware) | manual *(attested)* · 2026-07-11 |
 | ✓ | `infra-ledger-regime` | Ledger + BDG regime stood up (gate, render, hooks, blessed entrypoint) | manual *(attested)* · 2026-07-09 |
