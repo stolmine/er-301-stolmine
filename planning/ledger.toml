@@ -1038,3 +1038,13 @@ attested = "2026-07-11: New operator build_selection (sequencer nav-mode SHIFT+e
 verify = { kind = "manual", ref = "new operators enter_favorites_edit / enter_mark_mode / build_selection (precondition->effect+gesture, crawler-resolved) each set a durable modal fluent; a corpus goal per operator plans + runs green; covers the modal fluent type for durable modals, with modal(editingL1) documented as an intentional transient exclusion (not counted in the denominator)" }
 note = "planning/ui-planner-coverage-plan.md §1.D. LARGEST (new operators + a crawl pass) — do last. Models the modals that ARE stable end-states (favoritesEditMode, markingMode, selectionActive). editingL1 and other in-edit transients stay an explicit permanent gap: you don't route TO a transient modal as an end-state; exclude from the coverage denominator rather than count as a hole."
 links = { depends_on = ["ui-planner-cov-facility"] }
+
+[[item]]
+id = "crashdiag-fix-partial-register-capture"
+title = "Exc-hook captures only a subset of registers (sp=pc, psr/r1/r8-r11 = ffffffff) on am335x data abort"
+status = "todo"
+stamped = "2026-07-11T20:30:05-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "on a hardware data-abort capture, sp is a real stack address (not == pc), psr is a valid CPSR (not 0xffffffff), and r1/r8-r11 hold real values — or, if SYS/BIOS's ExcContext genuinely does not populate them on a Cortex-A8 abort, that is confirmed by reading the module source and documented, with the fuller register set captured from the raw abort frame if feasible" }
+note = "BENCH FINDING 2026-07-11 (first real hardware capture, fw 9.5.2.16, empty CRASH_TEST). The capture WORKS: panic buffer survived the warm reboot (the make-or-break DRAM-retention assumption HELD), dfar=0xf0000000 exact, r2=0xf0000000/r3=0xdeadbeef (the injected fault), Kind=data-abort, Thread=app, module map + pc->kernel resolution + persist-to-crash.log all correct. BUT sp reads == pc (0x801fe2b8), psr=0xffffffff (invalid CPSR), and r1/r8/r9/r10/r11=0xffffffff while r0/r2/r3/r4/r5/r6/r7/r12 are plausible. The hook (PanicBuffer.cpp:224-243) reads the RIGHT ctx-> fields, so either SYS/BIOS's Exception_ExcContext does not fully populate the banked/secondary regs for an A8 data abort (a documentable limitation) or there's a BIOS-header/version field-offset mismatch. The DIAGNOSTIC-ESSENTIAL set (pc/lr/dfar/faulting values/thread/module map) is intact, so symbolication is unaffected; this is a capture-quality follow-up. Investigate ti/sysbios/family/arm/exc Exception.c/asm for which regs it snapshots; consider grabbing the raw abort stack frame for the full set."
+links = { depends_on = [] }

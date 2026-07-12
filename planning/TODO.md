@@ -5,7 +5,7 @@ ER-301-STOLMINE TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**93 items** — 68 done, 23 todo, 2 blocked. *Rendered 2026-07-11.*
+**94 items** — 68 done, 24 todo, 2 blocked. *Rendered 2026-07-11.*
 
 ## Sequencer
 
@@ -121,6 +121,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `crashdiag-fix-fwversion-capture-time` | Firmware Version stamped at flush time, not capture time (M2) | manual · 2026-07-10 |
 |   | `crashdiag-fix-kernel-fallback-bound` | 'kernel + offset' fallback swallows unknown package addresses (M1) | manual · 2026-07-10 |
 |   | `crashdiag-fix-oneshot-guard` | Crash hook must be one-shot: a post-capture nested fault overwrites the real report (H2) | manual · 2026-07-10 |
+|   | `crashdiag-fix-partial-register-capture` | Exc-hook captures only a subset of registers (sp=pc, psr/r1/r8-r11 = ffffffff) on am335x data abort | manual · 2026-07-11 |
 |   | `infra-crash-diag-exc-hook` | SYS/BIOS exception hook captures ExcContext + module map (hardware) | manual · 2026-07-09 |
 |   | `infra-crash-diag-hang-watchdog` | Audio-thread heartbeat + WDT catches hangs, not just traps (hardware, later) | manual · 2026-07-09 |
 |   | `infra-crash-diag-panic-buffer` | Warm-reboot-surviving panic buffer flushed to crash.log on next boot (hardware) | manual · 2026-07-09 |
