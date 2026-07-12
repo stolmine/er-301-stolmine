@@ -137,6 +137,12 @@ function M.write(fields)
     end
   end
 
+  -- [stol:crashdiag-hang-spin-pc] Hang State (hang kind only): running (spin) =>
+  -- sp is the live interrupted SP; blocked => sp is the saved block site.
+  if fields.hangState then
+    f:write(string.format("Hang State: %s\n", fields.hangState))
+  end
+
   -- Stack Window (hang-watchdog captures only; the C flush emits this from the
   -- hung task's raw stack. Address-prefixed hex, 4 words/line, innermost-first.
   -- See docs/CRASH_REPORT_FORMAT.md).
@@ -302,6 +308,7 @@ local function injectSyntheticHang()
     registerLines = registerLines,
     pc = "00000000",
     lr = "00000000",
+    hangState = "running (spin)",
     stackWindowLines = stackWindowLines
   }
   M.setPending("hang-watchdog in audio thread")

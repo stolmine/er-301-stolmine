@@ -22,6 +22,7 @@
 #include <ti/sysbios/BIOS.h>
 #include <ti/sysbios/knl/Task.h>
 #include <ti/sysbios/family/arm/exc/Exception.h>
+#include <ti/sysbios/family/arm/a8/intcps/Hwi.h> // [stol:crashdiag-hang-spin-pc] Hwi_getTaskSP
 #include <ti/sysbios/hal/Cache.h>
 
 #include <hal/fatfs/ff.h>
@@ -55,7 +56,8 @@ extern "C"
   // docs/CRASH_REPORT_FORMAT.md) which is unchanged by binary-layout bumps.
   //   v3: added char fwVersion[] (capture-time firmware) + bounded kernel entry.
   //   v4: added stackWindow[]/stackWindowSp for the hang watchdog (section 8).
-#define PANIC_VERSION 4u
+  //   v5: added hangRunning (spin vs blocked) for the live-SP hang capture.
+#define PANIC_VERSION 5u
 #define PANIC_MAX_MODULES 48
 #define PANIC_MAX_FR_EVENTS 32
 #define PANIC_FR_LABEL_LEN 48
@@ -122,6 +124,13 @@ extern "C"
     uint32_t stackWindowSp;
     uint32_t stackWindowLen;
     uint8_t stackWindow[PANIC_STACK_WINDOW_BYTES];
+
+    // [stol:crashdiag-hang-spin-pc] Hang sub-case: 1 = the audio task was RUNNING
+    // when the monitor fired (a SPIN; sp is the LIVE interrupted SP from
+    // Hwi_getTaskSP), 0 = the audio task was BLOCKED (a deadlock; sp is the
+    // Task_stat saved block site). Lets the reader interpret the backtrace.
+    // Zero for the trap path.
+    uint32_t hangRunning;
   } PanicRecord;
 
   // [stol:crashdiag-review-nits] The reserved .panicbuf region is 16 KiB (see
@@ -408,37 +417,49 @@ extern "C"
         strncpy(rec->threadName, name, PANIC_THREAD_NAME_LEN - 1);
       }
 
-      // Saved SP + stack bounds via the public Task_stat. Task_stat sets
-      // statbuf.sp = tsk->context UNCONDITIONALLY (verified in bios 6.46 Task.c:
-      // no "current task" branch), so from this Swi it returns the audio task's
-      // last-saved stack pointer, not the Swi's own SP — exactly what we want,
-      // with no bios-internal struct access (Task_Object is opaque in the public
-      // header). `stack`/`stackSize` bound the stack buffer for clamping.
+      // Stack bounds are static (valid always) via the public Task_stat; its
+      // `sp` (= tsk->context, the last context-switch-OUT SP) is the fallback.
       Task_Stat st;
       Task_stat(t, &st);
-      uintptr_t sp = (uintptr_t)st.sp;
       uintptr_t base = (uintptr_t)st.stack;
       uintptr_t top = base + (uintptr_t)st.stackSize;
 
-      rec->sp = (uint32_t)sp;
-
-      // Center a PANIC_STACK_WINDOW_BYTES window on the saved SP, clamped inside
-      // [base, top). Higher addresses hold the outer taskAudio frame (return PCs
-      // into the audio .text — these finger the audio task); lower addresses
-      // hold the deeper, currently-active frames. The offline symbolizer scans
-      // whichever words land in .text. Copying only the task's own stack keeps
-      // this fault-safe from Swi context.
-      if (top > base && sp >= base && sp <= top)
+      // [stol:crashdiag-hang-spin-pc] Pick the SP by the hang sub-case. This runs
+      // in the Swi posted by the periodic tick Hwi, so Task_self() is the task
+      // that Hwi PREEMPTED:
+      //   * preempted task IS the audio task  => it was RUNNING, i.e. SPINNING.
+      //     Its LIVE stack pointer is Hwi_getTaskSP(): the SP the FIRST Hwi saved
+      //     on the task->ISR switch (set once, not overwritten by nested Hwis,
+      //     reset only on return to the task), so it is valid through this Swi and
+      //     points at the live spin frames. Task_stat's saved SP is STALE here (it
+      //     is the last yield, e.g. a prior frame's Event_pend) and is what made
+      //     the first bench capture resolve to Idle/scheduler frames.
+      //   * preempted task is something else  => the audio task is BLOCKED
+      //     (deadlock): it is NOT running, so Hwi_getTaskSP() is another task's SP.
+      //     Task_stat's saved SP IS the block site -- use it.
+      bool spinning = (Task_self() == t);
+      uintptr_t sp = (uintptr_t)st.sp;
+      if (spinning)
       {
-        uintptr_t start = (sp >= base + PANIC_STACK_WINDOW_BYTES / 2)
-                              ? sp - PANIC_STACK_WINDOW_BYTES / 2
-                              : base;
-        if (start + PANIC_STACK_WINDOW_BYTES > top)
+        uintptr_t live = (uintptr_t)Hwi_getTaskSP();
+        if (live >= base && live < top) // trust it only inside the audio stack
         {
-          start = (top >= base + PANIC_STACK_WINDOW_BYTES)
-                      ? top - PANIC_STACK_WINDOW_BYTES
-                      : base;
+          sp = live;
         }
+      }
+      rec->sp = (uint32_t)sp;
+      rec->hangRunning = spinning ? 1u : 0u;
+
+      // Window UPWARD from sp with a small margin below. On a full-descending
+      // stack the current frame's locals + every caller's return PC live at
+      // addresses >= sp; below sp is unused. So [sp-16, sp-16+N) captures the
+      // live call chain (spin case) or the block site + its callers (blocked
+      // case), innermost-first by ascending address. Clamp to [base, top) and
+      // copy only the task's own stack so this stays fault-safe from Swi context.
+      if (top > base && sp >= base && sp < top)
+      {
+        const uintptr_t margin = 16;
+        uintptr_t start = (sp >= base + margin) ? sp - margin : base;
         uintptr_t avail = top - start;
         uint32_t n = (avail < PANIC_STACK_WINDOW_BYTES)
                          ? (uint32_t)avail
@@ -758,6 +779,17 @@ extern "C"
       panicResolve(rec, rec->lr, res, sizeof(res));
       snprintf(line, sizeof(line), " lr in %s\n", res);
       ok &= panicPut(&f,line);
+    }
+
+    // [stol:crashdiag-hang-spin-pc] Hang sub-case, so the reader knows how to
+    // read the Stack Window: "running (spin)" => sp is the LIVE interrupted SP
+    // and the window is the live call chain; "blocked" => sp is the saved block
+    // site. Emitted for hang captures only.
+    if (rec->faultType == PANIC_FAULT_HANG)
+    {
+      snprintf(line, sizeof(line), "Hang State: %s\n",
+               rec->hangRunning ? "running (spin)" : "blocked");
+      ok &= panicPut(&f, line);
     }
 
     // [stol:infra-crash-diag-hang-watchdog] Stack Window (hang captures only;

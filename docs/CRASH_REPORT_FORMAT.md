@@ -42,6 +42,7 @@ Thread: audio | ui | <name>          (from ExcContext threadType/Handle on hw)
 --- Fault Resolution ---             (best-effort, on-device, symbol-free)
  pc in <pkg>.so + 0x<off>            (or 'kernel + 0x<off>' or '?')
  lr in <pkg>.so + 0x<off>
+Hang State: running (spin) | blocked (kind=hang-watchdog only; how to read sp)
 --- Stack Window ---                 (kind=hang-watchdog only; raw hung-task stack)
  sp=<hex> bytes=<n>
  <addr>: <w0> <w1> <w2> <w3>
@@ -78,10 +79,16 @@ Recent Log Messages:
   symbolication (offset → `file:line`) is offline (below); the device never runs
   `addr2line`.
 
+- **Hang State.** `kind=hang-watchdog` only. `running (spin)` means the audio task
+  was executing when the monitor fired, so `sp` and the Stack Window are the LIVE
+  interrupted context (from `Hwi_getTaskSP()`) and the window is the real spin call
+  chain. `blocked` means the audio task was not running (a deadlock), so `sp` is the
+  saved block site (from `Task_stat`). Read the Stack Window accordingly.
 - **Stack Window.** `kind=hang-watchdog` only. A hang hands the capture no
   register frame (by definition the stuck code never runs the trap hook), so the
-  monitor copies a 256-byte raw window from the hung audio task's saved stack and
-  the report serializes it for offline backtrace reconstruction. First line is
+  monitor copies a 256-byte raw window from the hung audio task's stack (the LIVE
+  interrupted SP for a spin, the saved block site for a deadlock; see Hang State)
+  and the report serializes it for offline backtrace reconstruction. First line is
   ` sp=<hex> bytes=<n>` (the address the window was copied from and its valid
   length); each following line is ` <addr>: <w0> <w1> <w2> <w3>` — the address
   prefix, then four little-endian 32-bit stack words (16 bytes/line). Lines are in

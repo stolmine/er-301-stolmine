@@ -18,6 +18,9 @@ lua require('CrashReport').injectSynthetic('hang-watchdog')
 # The block carries a Stack Window section (the hang-only backtrace payload).
 !assert (function() for _,l in ipairs(require('CrashReport').parseReports()[1].lines) do if l:find('Stack Window') then return true end end return false end)()
 
+# [stol:crashdiag-hang-spin-pc] ...and a Hang State line (spin vs blocked).
+!assert (function() for _,l in ipairs(require('CrashReport').parseReports()[1].lines) do if l:find('Hang State: running') then return true end end return false end)()
+
 # On-boot notice fires off the pending marker.
 lua require('CrashReport').checkPendingOnBoot()
 frames 20
