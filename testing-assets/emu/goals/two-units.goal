@@ -1,0 +1,11 @@
+# two-units -- build a MULTI-unit chain from boot: two distinct core builtins
+# (Mix + Test Osc). [stol:ui-planner-cov-focus] Proves insert_after: after the
+# first insert ChainBase:loadUnit drops the empty insert section, so open_picker /
+# nav_home_to_unit_picker_dense (both keyed on the empty-insert column) are dead --
+# A* MUST route the 2nd insert through insert_after (open the picker on the
+# non-empty chain via the focused unit's Chain.InsertControl, xroot/Unit/Section
+# .lua:13). Plan: nav_home_to_unit_picker_dense, insert, insert_after, insert. Both
+# units land in the chain (order-independent goal). The _insert driver finds each
+# unit by TITLE in the live (post-first-insert reordered) picker rows.
+unit_in_chain(Mix #1)
+unit_in_chain(Test Osc #1)

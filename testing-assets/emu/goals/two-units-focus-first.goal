@@ -1,0 +1,20 @@
+# two-units-focus-first -- focus the FIRST-inserted unit of a two-unit chain.
+# [stol:ui-planner-cov-focus] This is the goal that forces focus_unit: A* likes to
+# put the focus-target LAST (the freshly inserted unit auto-focuses, so no
+# focus_unit is needed). We DENY that dodge by structuring the goal so the
+# focus-target A (Test Osc) CANNOT be last:
+#
+#   * a `# start:` directive seeds the state with A already inserted + focused
+#     (the setup route boot->start = nav_home_to_unit_picker_dense, insert(A), driven
+#     first at --run and NOT part of the measured plan; [stol:ui-planner-cov-starts]);
+#   * the goal then adds a SECOND unit B (Mix) + re-asserts focused_unit(A).
+#
+# From that start the only route is: insert_after (open the picker on the non-empty
+# chain via A's Chain.InsertControl) -> insert(B) (which DEFOCUSES A -- insert
+# auto-focuses B) -> focus_unit(A) (scroll the chain SpottedStrip back to A). So
+# focus_unit fires as a REAL re-focus (B focused -> A focused), never an idempotent
+# skip -- proven live in tests/emu/63-cov-multiunit-focus-first.test.
+# start: context(home); focused_unit(Test Osc #1); unit_in_chain(Test Osc #1)
+unit_in_chain(Mix #1)
+unit_in_chain(Test Osc #1)
+focused_unit(Test Osc #1)

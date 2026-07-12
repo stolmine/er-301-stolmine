@@ -1,0 +1,9 @@
+# ui_solve offline plan -- goal 'two-units'
+# goal (2 fluent(s)):
+#   unit_in_chain(Mix #1)
+#   unit_in_chain(Test Osc #1)
+# plan: 4 operator(s)
+nav_home_to_unit_picker_dense
+insert(Mix #1)
+insert_after(Mix #1)
+insert(Test Osc #1)

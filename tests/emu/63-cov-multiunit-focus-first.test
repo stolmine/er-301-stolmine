@@ -1,0 +1,66 @@
+# [stol:ui-planner-cov-focus] Corpus regression: the two-units-focus-first goal --
+# focus the FIRST-inserted unit of a two-unit chain. This is the goal that forces
+# focus_unit: A* likes to put the focus-target LAST (insert auto-focuses the NEW
+# unit, so no focus_unit is needed), so the goal is STRUCTURED to deny that dodge --
+# a `# start:` seed (Test Osc already inserted + focused) plus a 2nd unit means the
+# only route is insert_after -> insert(Mix) -> focus_unit(Test Osc), and focus_unit
+# fires as a REAL re-focus (Mix -> Test Osc), never an idempotent skip.
+# Realizes goals/two-units-focus-first.goal; its `# start:` setup (insert Test Osc)
+# is driven inline first here. Core builtins; hermetic; --seed 301 deterministic.
+!packages core
+
+frames 20
+!assert require('emu.UIState').topClass() == 'Chain.Root'
+
+# ── SETUP (boot -> declared start): insert Test Osc, it auto-focuses ──────────
+press MAIN3
+frames 12
+!assert require('Application').getVisibleContext():top().rows[2].right.title == 'Test Osc'
+turn 3
+frames 6
+press MAIN4
+frames 30
+!assert require('Channels').getChain(1):length() == 1
+!assert require('Channels').getChain(1):getSelection().title == 'Test Osc #1'
+
+# ── insert_after(Test Osc #1): reveal + ENTER reopens the picker (non-empty chain)
+!assert require('Channels').getChain(1).pDisplay:getSelectedSpotIndex() == 0
+press ENTER
+frames 15
+!assert require('emu.UIState').topClass() == 'Unit.Chooser.Dense'
+
+# ── insert(Mix #1): picker#2 row 1 right cell is Mix; it auto-focuses, DEFOCUSING Test Osc
+!assert require('Application').getVisibleContext():top().rows[2].right.title == 'Mix'
+turn 3
+frames 6
+press MAIN4
+frames 30
+!assert require('Channels').getChain(1):length() == 2
+# PROOF the focus moved OFF Test Osc: the new unit (Mix) is focused now.
+!assert require('Channels').getChain(1):getSelection().title == 'Mix #1'
+
+# ── focus_unit(Test Osc #1): scroll the chain SpottedStrip back to Test Osc ────
+# a REAL re-focus (Mix -> Test Osc): 6 nav-mode encoder steps (3 raw detents each).
+turn 3
+frames 6
+turn 3
+frames 6
+turn 3
+frames 6
+turn 3
+frames 6
+turn 3
+frames 6
+turn 3
+frames 6
+# effect: focused_unit(Test Osc #1) -- the FIRST-inserted unit, NOT the last.
+!assert require('Channels').getChain(1):getSelection().title == 'Test Osc #1'
+
+# ── FINAL: satisfies({unit_in_chain(Mix #1), unit_in_chain(Test Osc #1),
+#                      focused_unit(Test Osc #1)}) ──────────────────────────────
+!assert require('Channels').getChain(1):length() == 2
+!assert (function() local c=require('Channels').getChain(1); for i=1,c:length() do local u=c:getUnit(i); if u and u.title=='Mix #1' then return true end end return false end)()
+!assert require('Channels').getChain(1):getSelection().title == 'Test Osc #1'
+
+!trace-golden route
+quit

@@ -20,7 +20,7 @@ generator = "tools/ui_crawl.py"
 seeds = ["boot", "linked12", "sequencer", "unit_inserted"]
 states = 24
 transitions = 185
-resolved = 7
+resolved = 8
 
 [bounds]
 max_depth = 3
@@ -1533,6 +1533,14 @@ gesture = ["turn {3*row}", "frames 6", "press {MAIN1=left|MAIN4=right}", "frames
 effect = ["unit_in_chain(u)", "focused_unit(u)", "context(home)"]
 rule = "The picker is a 2-column channel-count-filtered sorted list (read live from window.rows). row = target row index (0-based); N = 3 raw detents/row (EncoderThreshold.Default); pick MAIN1 for the left cell, MAIN4 for the right. Lands home, unit focused+expanded."
 proof = "{picked=row 1 right (turn 3, MAIN4); picker_rows=0:Custom Effect|Custom Source ; 1:Mix|Test Osc; post=91f87da673d6; pre=4ff1653cc841; title=Test Osc #1; view=expanded}"
+
+[[resolved]]
+id = "insert_after"
+precondition = ["context(home)", "focused_unit(u)"]
+gesture = ["turn {-3*k to insert spot}", "press ENTER", "frames 15"]
+effect = ["context(unit_picker_dense)"]
+rule = "Open the dense picker on a NON-empty chain via the focused unit's Chain.InsertControl (xroot/Unit/Section.lua:13, view-slot vc[1] before the header). Reveal it by scrolling the chain SpottedStrip cursor LEFT to the focused unit's insert spot (getSelectedSpotIndex == 0; the freshly inserted unit auto-lands there), then ENTER (Chain.InsertControl:enterReleased -> activateChooser(goal=\"insert\")). This is the ONLY picker-open on a non-empty chain -- open_picker's empty-insert column is dropped by loadUnit on the first insert -- so it is what makes a MULTI-unit chain (and hence focus_unit) reachable. PROVEN by a real 2nd insert: chain length 1 -> 2, both unit titles present."
+proof = "{chain_after=Mix #1,Test Osc #1; chain_before=Test Osc #1; insert_control=Chain.InsertControl; insert_spot=0; len_after=2; len_before=1; opened=true; opened_hash=4ff1653cc841; post=69f044910752; pre=91f87da673d6}"
 
 [[resolved]]
 id = "open_picker"

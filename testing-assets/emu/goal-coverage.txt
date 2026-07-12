@@ -6,7 +6,7 @@
 # headline numbers grow monotonically as goals/*.goal are added.
 # Deterministic: sorted, no timestamps/paths.
 
-operators covered: 20/21
+operators covered: 22/22
 goal-fluent types: 8/8
 
 [goals]  (name -> plan length -> operators exercised)
@@ -29,12 +29,16 @@ nav-sequencer           2  nav_home_to_scope,nav_scope_to_sequencer
 open-picker             1  nav_home_to_unit_picker_dense
 seq-cv1-c3              9  nav_home_to_scope,nav_scope_to_sequencer,select_column,set_cell
 seq-cv2-fifth           4  nav_home_to_scope,nav_scope_to_sequencer,select_column,set_cell
+two-units               4  insert,insert_after,nav_home_to_unit_picker_dense
+two-units-focus-first   3  focus_unit,insert,insert_after
 
-[operators.covered]  (20)
+[operators.covered]  (22)
 build_selection
 collapse
 expand
+focus_unit
 insert
+insert_after
 link
 nav_admin_to_home
 nav_admin_to_sample_pool
@@ -52,8 +56,7 @@ open_picker
 select_column
 set_cell
 
-[operators.uncovered]  (1)
-focus_unit                     # no operator opens the picker on a NON-empty chain (loadUnit drops the empty-insert slot), so a 2nd unit can't be inserted; needs an insert_after operator
+[operators.uncovered]  (0)
 
 [fluent_types.covered]  (8)
 cell

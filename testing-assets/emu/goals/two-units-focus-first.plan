@@ -1,0 +1,10 @@
+# ui_solve offline plan -- goal 'two-units-focus-first'
+# start: context(home); focused_unit(Test Osc #1); unit_in_chain(Test Osc #1)
+# goal (3 fluent(s)):
+#   focused_unit(Test Osc #1)
+#   unit_in_chain(Mix #1)
+#   unit_in_chain(Test Osc #1)
+# plan: 3 operator(s)
+insert_after(Test Osc #1)
+insert(Mix #1)
+focus_unit(Test Osc #1)

@@ -6,9 +6,12 @@
 PERFECT ORACLE -- no learning anywhere. It drives gestures against the headless
 emu, observes the ACTUAL resulting state through emu.uiState() projected to the
 shared fluent vocabulary (tools/ui_fluents.py), records the empirical transitions,
-and RESOLVES the 6 `needs_crawl` operators in testing-assets/emu/ui-operators.toml
-(open_picker, insert, focus_unit, set_cell, expand, collapse) to concrete
-precondition->gesture rules with driven proofs.
+and RESOLVES the `needs_crawl` operators in testing-assets/emu/ui-operators.toml
+(open_picker, insert, insert_after, focus_unit, set_cell, build_selection, expand,
+collapse) to concrete precondition->gesture rules with driven proofs.
+[stol:ui-planner-cov-focus] insert_after opens the picker on a NON-empty chain via
+the focused unit's Chain.InsertControl -- what open_picker (empty-insert column,
+dropped by loadUnit on the first insert) cannot.
 
 ──────────────────────────────────────────────────────────────────────────────
 ALGORITHM
@@ -429,7 +432,7 @@ class Crawl:
 # ── operator resolution (targeted drive + observe; perfect-oracle proofs) ───────
 
 class Resolver:
-    """Drives each of the 6 needs_crawl operators explicitly and records the
+    """Drives each of the needs_crawl operators explicitly and records the
     observed precondition->gesture->effect with concrete fluent proofs."""
 
     def __init__(self, cfg, packages):
@@ -453,11 +456,100 @@ class Resolver:
         out = []
         out.append(self._open_picker())
         out.append(self._insert())
+        out.append(self._insert_after())       # [stol:ui-planner-cov-focus]
         out.append(self._focus_unit())
         out.append(self._set_cell())
         out.append(self._build_selection())   # [stol:ui-planner-cov-modals]
         out.extend(self._expand_collapse())
         return sorted(out, key=lambda x: x["id"])
+
+    # [stol:ui-planner-cov-focus]
+    # insert_after: open the dense picker on a NON-empty chain via the focused
+    # unit's Chain.InsertControl (xroot/Unit/Section.lua:13, view-slot vc[1] BEFORE
+    # the header). After the first insert, ChainBase:loadUnit removes the empty
+    # insert section (xroot/Chain/Base.lua ~L458), so open_picker (keyed on the
+    # empty-insert column) is dead. The per-unit InsertControl opens the SAME chooser
+    # (goal="insert"): reveal it by scrolling the chain SpottedStrip cursor LEFT to
+    # the focused unit's insert spot (getSelectedSpotIndex == 0; after `insert` the
+    # cursor auto-lands there), then ENTER (Chain.InsertControl:enterReleased ->
+    # activateChooser). PROVEN by a real 2nd insert: chain length 1 -> 2, both titles.
+    def _spot_idx(self, e):
+        return e.lua("tostring(require('Channels').getChain(1).pDisplay"
+                     ":getSelectedSpotIndex())")
+
+    def _chain_titles(self, e):
+        return e.lua("(function() local c=require('Channels').getChain(1); local t={}; "
+                     "for i=1,c:length() do local u=c:getUnit(i); t[i]=u and u.title or '?' end; "
+                     "return table.concat(t,',') end)()")
+
+    def _insert_after(self):
+        e = self._fresh()
+        try:
+            e.replay(SEEDS["unit_inserted"])          # Test Osc inserted + focused
+            pre, _ = e.observe()
+            len_before = e.lua("tostring(require('Channels').getChain(1):length())")
+            titles_before = self._chain_titles(e)
+            # Reveal the InsertControl: scroll the chain cursor left to the focused
+            # unit's insert spot (spotIdx 0). The freshly inserted unit already lands
+            # there, so this is a no-op here; the closed loop makes it robust.
+            guard = 0
+            while guard < 16 and self._spot_idx(e) != "0":
+                e.replay(["turn -%d" % ENCODER_DETENTS, "frames 6"])
+                guard += 1
+            spot = self._spot_idx(e)
+            insert_ctrl = e.lua(
+                "(function() local sec=require('Channels').getChain(1):getSelection(); "
+                "local c=sec and sec.controls and sec.controls.insert; "
+                "return c and c:getClassName() or '' end)()")
+            e.replay(["press ENTER", "frames 15"])    # -> the dense picker
+            opened, _ = e.observe()
+            opened_node = node_of(opened)
+            # PROVE a real 2nd insert: pick Mix (a distinct core builtin) by title.
+            loc = e.lua(
+                "(function() local w=require('Application').getVisibleContext():top(); "
+                "for i,r in ipairs(w.rows or {}) do "
+                "if r.left and r.left.title=='Mix' then return (i-1)..',L' end; "
+                "if r.right and r.right.title=='Mix' then return (i-1)..',R' end "
+                "end return 'nil' end)()")
+            row_s, side = (loc.split(",") + ["0", "L"])[:2]
+            g2 = 0
+            while g2 < 16:
+                cur = int(e.lua("tostring(require('Application').getVisibleContext()"
+                                ":top().cursorRow)"))
+                if cur == int(row_s):
+                    break
+                step = ENCODER_DETENTS if int(row_s) > cur else -ENCODER_DETENTS
+                e.replay(["turn %d" % step, "frames 6"])
+                g2 += 1
+            e.replay(["press MAIN%d" % (1 if side == "L" else 4), "frames 30"])
+            post, _ = e.observe()
+            len_after = e.lua("tostring(require('Channels').getChain(1):length())")
+            titles_after = self._chain_titles(e)
+        finally:
+            e.close()
+        return {
+            "id": "insert_after",
+            "precondition": ["context(home)", "focused_unit(u)"],
+            "gesture": ["turn {-3*k to insert spot}", "press ENTER", "frames 15"],
+            "effect": ["context(unit_picker_dense)"],
+            "rule": "Open the dense picker on a NON-empty chain via the focused unit's "
+                    "Chain.InsertControl (xroot/Unit/Section.lua:13, view-slot vc[1] "
+                    "before the header). Reveal it by scrolling the chain SpottedStrip "
+                    "cursor LEFT to the focused unit's insert spot "
+                    "(getSelectedSpotIndex == 0; the freshly inserted unit auto-lands "
+                    "there), then ENTER (Chain.InsertControl:enterReleased -> "
+                    "activateChooser(goal=\"insert\")). This is the ONLY picker-open on "
+                    "a non-empty chain -- open_picker's empty-insert column is dropped "
+                    "by loadUnit on the first insert -- so it is what makes a MULTI-unit "
+                    "chain (and hence focus_unit) reachable. PROVEN by a real 2nd "
+                    "insert: chain length 1 -> 2, both unit titles present.",
+            "proofs": [{"insert_spot": spot, "insert_control": insert_ctrl,
+                        "opened": opened_node == "unit_picker_dense",
+                        "len_before": len_before, "len_after": len_after,
+                        "chain_before": titles_before, "chain_after": titles_after,
+                        "pre": fhash(pre), "opened_hash": fhash(opened),
+                        "post": fhash(post)}],
+        }
 
     # [stol:ui-planner-cov-modals]
     # build_selection: nav-mode shift+encoder builds a DURABLE row-range selection

@@ -15,16 +15,16 @@
 [meta]
 schema = 1
 generator = "tools/extract_operators.py"
-total = 21
+total = 22
 sources = ["manifest", "map", "ui_plan"]
 
 [meta.by_source]
 manifest = 5
 map = 12
-ui_plan = 4
+ui_plan = 5
 
 [meta.by_verified]
-needs_crawl = 7
+needs_crawl = 8
 static = 14
 
 # Shared fluent vocabulary (name = arity). Must match the schema
@@ -103,6 +103,16 @@ pre = ["context(unit_picker_dense)"]
 eff = ["unit_in_chain(u)", "focused_unit(u)", "context(home)"]
 gesture = ["press MAIN1", "frames 30"]
 note = "CRAWLER-REFINED: prefix with `turn N` to land the cursor on u's row (N = 3 raw detents/row) and pick MAIN1 (left) / MAIN4 (right) per u's cell in the live, channel-count-filtered, sorted picker list."
+
+[[operator]]
+id = "insert_after"
+source = "ui_plan"
+verified = "needs_crawl"
+params = ["u"]
+pre = ["context(home)", "focused_unit(u)"]
+eff = ["context(unit_picker_dense)"]
+gesture = ["press ENTER", "frames 15"]
+note = "[stol:ui-planner-cov-focus] Open the dense picker on a NON-empty chain via the focused unit u's Chain.InsertControl (xroot/Unit/Section.lua:13, vc[1] before the header). CRAWLER-REFINED: reveal the insert control by scrolling the chain SpottedStrip cursor LEFT to u's insert spot (getSelectedSpotIndex == 0; after `insert`/`focus_unit` the cursor auto-lands there), then ENTER fires Chain.InsertControl:enterReleased -> activateChooser(goal=\"insert\"). Unlike open_picker (keyed on the empty-insert column that loadUnit drops on the first insert), this works when the chain already holds units, so the 2nd+ insert routes through it. Justified by manifest Chain.InsertControl enterReleased -> chooser:open."
 
 [[operator]]
 id = "link"

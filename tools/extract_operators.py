@@ -237,6 +237,38 @@ def action_operators(manifest_classes, columns):
              "cell in the live, channel-count-filtered, sorted picker list.",
     ))
 
+    # [stol:ui-planner-cov-focus]
+    # insert_after(u) — open the dense picker on a NON-empty chain. After the first
+    # insert, ChainBase:loadUnit removes the empty insert section (xroot/Chain/
+    # Base.lua ~L458), so open_picker / nav_home_to_unit_picker_dense (both keyed on
+    # the empty-insert column) are dead and a 2nd unit could never be inserted. But
+    # every unit's view carries its OWN Chain.InsertControl at view-slot vc[1], BEFORE
+    # the header (xroot/Unit/Section.lua:13), which opens the SAME dense chooser
+    # (goal="insert") relative to that unit. Reveal it by scrolling the chain cursor
+    # left to the focused unit's insert spot, then ENTER (Chain.InsertControl:
+    # enterReleased -> activateChooser). This is the ONLY operator that opens the
+    # picker on a non-empty chain, so it is what makes a MULTI-unit chain (and hence
+    # focus_unit, which needs >=2 units to re-focus a non-last one) reachable.
+    ops.append(Op(
+        id="insert_after",
+        source="ui_plan",
+        verified="needs_crawl",
+        params=["u"],
+        pre=["context(home)", "focused_unit(u)"],
+        eff=["context(unit_picker_dense)"],
+        gesture=["press ENTER", "frames 15"],
+        note="[stol:ui-planner-cov-focus] Open the dense picker on a NON-empty chain "
+             "via the focused unit u's Chain.InsertControl (xroot/Unit/Section.lua:13, "
+             "vc[1] before the header). CRAWLER-REFINED: reveal the insert control by "
+             "scrolling the chain SpottedStrip cursor LEFT to u's insert spot "
+             "(getSelectedSpotIndex == 0; after `insert`/`focus_unit` the cursor "
+             "auto-lands there), then ENTER fires Chain.InsertControl:enterReleased -> "
+             "activateChooser(goal=\"insert\"). Unlike open_picker (keyed on the "
+             "empty-insert column that loadUnit drops on the first insert), this works "
+             "when the chain already holds units, so the 2nd+ insert routes through it. "
+             "Justified by manifest Chain.InsertControl enterReleased -> chooser:open.",
+    ))
+
     # focus_unit(u) — scroll the chain focus onto an already-inserted unit.
     ops.append(Op(
         id="focus_unit",

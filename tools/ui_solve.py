@@ -302,6 +302,10 @@ def _is_concrete_fluent(s):
 PARAM_SOURCE = {
     "link": ("linked", ["a", "b"]),
     "insert": ("__unit__", ["u"]),
+    # [stol:ui-planner-cov-focus] insert_after(u) reopens the picker via unit u's
+    # Chain.InsertControl; u is any currently-focused chain unit (its focused_unit(u)
+    # precondition), sourced from the goal's focused_unit / unit_in_chain titles.
+    "insert_after": ("__unit__", ["u"]),
     "focus_unit": ("__unit__", ["u"]),
     "expand": ("focused_unit", ["u"]),
     "collapse": ("focused_unit", ["u"]),
@@ -450,7 +454,16 @@ def applicable(gop, state):
     #    shifts (M3->M4), so the live-resolved open_picker must be used instead.
     if gop.op.id == "link" and _has(state, "unit_in_chain"):
         return False
-    if gop.op.id == "nav_home_to_unit_picker_dense" and _has(state, "linked"):
+    #  * nav_home_to_unit_picker_dense (and open_picker) open the picker via the
+    #    EMPTY-insert column, which ChainBase:loadUnit drops on the FIRST insert
+    #    (xroot/Chain/Base.lua ~L458). So on a NON-empty chain (any unit_in_chain)
+    #    the fixed MAIN3 picker edge is dead -- the 2nd+ insert must route through
+    #    insert_after (the focused unit's per-unit Chain.InsertControl). open_picker
+    #    is already gated by its EmptySection.EmptyControl slot precondition (absent
+    #    once a unit exists); the map's nav edge has no such slot guard, so add one
+    #    here. [stol:ui-planner-cov-focus]
+    if gop.op.id == "nav_home_to_unit_picker_dense" and (
+            _has(state, "linked") or _has(state, "unit_in_chain")):
         return False
     for pre in gop.pre:
         neg = pre.startswith("~")
@@ -612,6 +625,11 @@ def render_gesture(gop, column_map):
         return render_setcell(gop), True
     if oid == "open_picker":
         return ["press MAIN{i}   # [live] i = slot holding EmptySection.EmptyControl",
+                "frames 15"], True
+    if oid == "insert_after":
+        return ["turn {-3*k}   # [live] scroll chain cursor left to %r's insert spot (spotIdx 0)"
+                % gop.binding.get("u"),
+                "press ENTER   # Chain.InsertControl:enterReleased -> activateChooser(goal=insert)",
                 "frames 15"], True
     if oid == "insert":
         return ["turn {3*row}   # [live] row of %r in the live picker" % gop.binding.get("u"),
@@ -842,6 +860,8 @@ class Executor:
             return self._select_column(gop)
         if oid == "open_picker":
             return self._open_picker(gop)
+        if oid == "insert_after":
+            return self._insert_after(gop)
         if oid == "insert":
             return self._insert(gop)
         if oid == "focus_unit":
@@ -880,6 +900,30 @@ class Executor:
         if i is None:
             return False, "no EmptySection.EmptyControl column on screen"
         self.send("press MAIN%d" % i)
+        self._settle(15)
+        return self._check_effects(gop)
+
+    def _insert_after(self, gop):
+        # [stol:ui-planner-cov-focus] Open the dense picker on a NON-empty chain via
+        # the focused unit's Chain.InsertControl (xroot/Unit/Section.lua:13). Reveal
+        # it by scrolling the chain SpottedStrip cursor LEFT to the focused unit's
+        # insert spot (getSelectedSpotIndex == 0; after `insert`/`focus_unit` the
+        # cursor auto-lands there), then ENTER (enterReleased -> activateChooser).
+        if not self.truth("require('emu.UIState').selectionSectionClass() == 'Unit'"):
+            return False, "no focused unit to insert after (chain empty?)"
+        guard = 0
+        while guard < 64:
+            idx = self.lua("tostring(require('Channels').getChain(1).pDisplay"
+                           ":getSelectedSpotIndex())")
+            if idx == "0":
+                break
+            self.send("turn -%d" % ENCODER_THRESHOLD)
+            self._settle(6)
+            guard += 1
+        if self.lua("tostring(require('Channels').getChain(1).pDisplay"
+                    ":getSelectedSpotIndex())") != "0":
+            return False, "could not reveal the insert control (spot != 0)"
+        self.send("press ENTER")
         self._settle(15)
         return self._check_effects(gop)
 
@@ -1076,7 +1120,7 @@ def selftest():
     print("ui_solve.py --selftest (classical planning vs merged operator library)")
 
     # -- merge sanity ------------------------------------------------------------
-    check(len(operators) == 21, "merged library has 21 operators")
+    check(len(operators) == 22, "merged library has 22 operators")
     check("modal(editingL1)" in operators["set_cell"].eff,
           "set_cell effect merged modal(editingL1) from ui-crawl.map [[resolved]]")
     check(operators["set_cell"].gesture[:1] == ["press ENTER"],
@@ -1167,6 +1211,46 @@ def selftest():
         "context(sequencer)\nmodal(selectionActive)"))
     plan = solve(operators, sel_state, sel_goal)
     check(ids(plan) == [], "selection already active -> empty plan (guard)")
+
+    # -- 10. insert_after: a MULTI-unit chain [stol:ui-planner-cov-focus] ---------
+    check("insert_after" in operators, "insert_after operator is present")
+    check(operators["insert_after"].live, "insert_after is live (needs_crawl)")
+    check(operators["insert_after"].eff == ["context(unit_picker_dense)"],
+          "insert_after effect opens the dense picker")
+    check(operators["insert_after"].pre == ["context(home)", "focused_unit(u)"],
+          "insert_after precondition = home + a focused unit (chain non-empty)")
+    # A two-unit goal must route the 2nd insert through insert_after: open_picker /
+    # nav_home_to_unit_picker_dense are dead once the chain holds a unit.
+    two_goal = ui_fluents.parse_goal(
+        "unit_in_chain(Mix #1)\nunit_in_chain(Test Osc #1)")
+    plan = solve(operators, boot_start(), two_goal)
+    check(plan is not None, "two-unit goal is solvable")
+    got = ids(plan)
+    check(got == ["nav_home_to_unit_picker_dense", "insert", "insert_after", "insert"],
+          "two-unit plan = nav, insert, insert_after, insert: %s" % got)
+    # the 2nd picker-open is insert_after (a single MAIN3 reopen would be invalid on
+    # a non-empty chain -- the empty-insert column is gone after the first insert).
+    check(got.count("insert") == 2 and got.count("insert_after") == 1,
+          "two-unit plan has exactly 2 inserts + 1 insert_after")
+    check("nav_home_to_unit_picker_dense" not in got[1:],
+          "no bogus 2nd MAIN3 reopen on the non-empty chain (guard forces insert_after)")
+
+    # -- 11. focus_unit forced: focus the FIRST-inserted of two --------------------
+    # A goal fixing focus on the first unit (declared start = that unit inserted +
+    # focused) forces A* through insert_after (2nd insert) THEN focus_unit (re-focus
+    # the first, which insert defocuses) -- A* cannot dodge focus_unit by reordering.
+    ff_start = frozenset(ui_fluents.normalize_fluent(f) for f in ui_fluents.parse_goal(
+        "context(home)\nfocused_unit(Test Osc #1)\nunit_in_chain(Test Osc #1)"))
+    ff_goal = ui_fluents.parse_goal(
+        "unit_in_chain(Mix #1)\nunit_in_chain(Test Osc #1)\nfocused_unit(Test Osc #1)")
+    plan = solve(operators, ff_start, ff_goal)
+    check(plan is not None, "focus-first goal is solvable from the declared start")
+    got = ids(plan)
+    check(got == ["insert_after", "insert", "focus_unit"],
+          "focus-first plan = insert_after, insert, focus_unit: %s" % got)
+    fu = [g for g in plan.ops if g.op.id == "focus_unit"]
+    check(fu and fu[0].binding["u"] == "Test Osc #1",
+          "focus_unit re-focuses the FIRST unit (Test Osc #1), not the last-inserted")
 
     print()
     if failures:

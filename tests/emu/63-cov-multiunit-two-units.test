@@ -1,0 +1,57 @@
+# [stol:ui-planner-cov-focus] Corpus regression: the two-units goal -- a MULTI-unit
+# chain. Realizes goals/two-units.goal {unit_in_chain(Mix #1), unit_in_chain(Test
+# Osc #1)}; committed plan (goals/two-units.plan) is
+#   nav_home_to_unit_picker_dense, insert(Mix #1), insert_after(Mix #1), insert(Test Osc #1)
+# and the --run route is goals/two-units.trace (tools/ui_goals.py --run drives it
+# live). The 2nd insert PROVES insert_after: after the first insert ChainBase:
+# loadUnit drops the empty-insert section (xroot/Chain/Base.lua ~L458), so the
+# picker can only reopen via the focused unit's Chain.InsertControl (reveal to the
+# insert spot, spotIdx 0, then ENTER). Core builtins; hermetic; picker layout is
+# deterministic under --seed 301 (asserted before each pick so a drift fails loud).
+!packages core
+
+frames 20
+!assert require('emu.UIState').topClass() == 'Chain.Root'
+
+# ── nav_home_to_unit_picker_dense: MAIN3 on the empty boot chain ──────────────
+!assert require('emu.UIState').controlClassAt('M3') == 'EmptySection.EmptyControl'
+press MAIN3
+frames 12
+!assert require('emu.UIState').topClass() == 'Unit.Chooser.Dense'
+
+# ── insert(Mix #1): boot picker row 1 left cell is Mix ────────────────────────
+!assert require('Application').getVisibleContext():top().rows[2].left.title == 'Mix'
+turn 3
+frames 6
+press MAIN1
+frames 30
+!assert require('emu.UIState').topClass() == 'Chain.Root'
+!assert require('Channels').getChain(1):length() == 1
+# the freshly inserted unit auto-focuses; the cursor lands on its insert spot.
+!assert require('Channels').getChain(1):getSelection().title == 'Mix #1'
+!assert require('Channels').getChain(1).pDisplay:getSelectedSpotIndex() == 0
+
+# ── insert_after(Mix #1): reveal Mix's Chain.InsertControl (spot 0) + ENTER ────
+# open_picker is DEAD here -- the empty-insert section is gone (chain non-empty).
+!assert (function() for _,c in ipairs(require('emu.UIState').describe().controls) do if c.class=='EmptySection.EmptyControl' then return false end end return true end)()
+press ENTER
+frames 15
+# effect: context(unit_picker_dense) -- the picker REOPENED on the non-empty chain
+!assert require('emu.UIState').topClass() == 'Unit.Chooser.Dense'
+
+# ── insert(Test Osc #1): picker#2 (reordered) row 1 right cell is Test Osc ─────
+!assert require('Application').getVisibleContext():top().rows[2].right.title == 'Test Osc'
+turn 3
+frames 6
+press MAIN4
+frames 30
+
+# ── FINAL: satisfies({unit_in_chain(Mix #1), unit_in_chain(Test Osc #1)}) ──────
+!assert require('emu.UIState').topClass() == 'Chain.Root'
+# chain length 1 -> 2: a real MULTI-unit chain built via insert_after.
+!assert require('Channels').getChain(1):length() == 2
+!assert (function() local c=require('Channels').getChain(1); for i=1,c:length() do local u=c:getUnit(i); if u and u.title=='Mix #1' then return true end end return false end)()
+!assert (function() local c=require('Channels').getChain(1); for i=1,c:length() do local u=c:getUnit(i); if u and u.title=='Test Osc #1' then return true end end return false end)()
+
+!trace-golden route
+quit
