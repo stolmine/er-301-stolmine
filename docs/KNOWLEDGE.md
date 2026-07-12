@@ -50,6 +50,12 @@ Hardware synth developer working on ER-301 eurorack firmware (stolmine fork). De
 
 ## Emulator Notes
 
+### Driving the headless emu + UI goal-solver (agents START HERE)
+- `docs/AGENT_EMU_GUIDE.md` — the playbook for running the headless emu, introspecting
+  with `emu.uiState()`, and routing to a goal with `tools/ui_solve.py`/`ui_plan.py`.
+  If you are reading `xroot/` source to work out how to reach a screen or set a value,
+  read that guide first: navigation is a solved planning problem, not a code-crawl.
+
 ### SDL2/HiDPI
 - sdl2-compat on Arch breaks HiDPI; use `SDL_RenderSetLogicalSize` not `SDL_RenderSetScale`
 
