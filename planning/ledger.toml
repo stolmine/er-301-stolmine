@@ -987,9 +987,10 @@ links = { depends_on = [] }
 [[item]]
 id = "ui-planner-cov-facility"
 title = "UI planning-domain coverage expansion — close the 8 uncovered operators + 3 fluent types (umbrella)"
-status = "todo"
-stamped = "2026-07-10T21:38:49-05:00"
+status = "done"
+stamped = "2026-07-11T19:00:54-05:00"
 area = "emu"
+attested = "2026-07-11: COMPLETE 2026-07-11: UI planning-domain coverage expanded to FULL meaningful coverage via the four root-cause mechanisms. cov-starts (non-boot starts, 5 return/indirect nav ops), cov-views (concrete expand/collapse slot_control effects), cov-modals (durable build_selection modal; markingMode/favoritesEditMode/editingL1 documented exclusions), cov-focus (insert_after operator -> multi-unit chains -> focus_unit). Final: 22/22 operators covered, 8/8 meaningful fluent-types (focused_class excluded as derived-redundant). Every operator either exercised by a worked-example goal or documented-excluded; nothing faked. Commit d1f42b3."
 verify = { kind = "manual", ref = "goal-coverage.txt reaches operators 20/20 (or every operator has a documented reason it cannot be a goal target) and fluent-types 9/9 for durable fluents, with intrinsically-transient modals (editingL1) explicitly excluded from the denominator rather than counted as gaps" }
 note = "planning/ui-planner-coverage-plan.md. Extends the completed UI planning-domain facility. The 8+3 gaps sort into FOUR distinct causes (not one): (A) boot-start artifact -> non-boot starts; (B) prose expand/collapse effects -> concrete slot_control fluents; (C) no multi-unit start -> multi-unit focus goal + focused_class derived effect; (D) transient modals -> durable-modal operators (+ editingL1 stays an explicit permanent exclusion). All conventional, no ML. Umbrella over ui-planner-cov-{starts,views,focus,modals}."
 links = { depends_on = ["ui-planner-domain-facility"] }
@@ -1019,9 +1020,10 @@ links = { depends_on = ["ui-planner-cov-facility"] }
 [[item]]
 id = "ui-planner-cov-focus"
 title = "Multi-unit focus goal + focused_class derived effect (cause C)"
-status = "todo"
-stamped = "2026-07-10T21:38:49-05:00"
+status = "done"
+stamped = "2026-07-11T19:00:54-05:00"
 area = "emu"
+attested = "2026-07-11: Closed by a NEW insert_after operator (the goal-only approach was proven impossible). insert_after (pre context(home)+focused_unit(u) -> eff context(unit_picker_dense)) opens the dense picker on a NON-empty chain via the focused unit's Chain.InsertControl (xroot/Unit/Section.lua:13) -- scroll the chain cursor LEFT to the insert spot (getSelectedSpotIndex==0) then ENTER -- the only picker-open once loadUnit drops the empty-insert slot. This makes MULTI-unit chains reachable, closing focus_unit: goal two-units-focus-first (start unit A focused, add B, re-assert focused_unit(A)) forces insert_after,insert(B),focus_unit(A); focus_unit proven to fire as a REAL re-focus (Mix->Test Osc, detail 'ok' not skipped), not gamed. Solver guards nav_home_to_unit_picker_dense off non-empty chains. focused_class made a documented derived-redundant EXCLUSION. Coverage: 22/22 operators, 8/8 MEANINGFUL fluent types. Determinism: crawl map diff confined to the insert_after [[resolved]] block, BFS graph byte-identical to the verified baseline + agent GATE_EXIT=0 (my own re-runs were env-killed, not drift). Verified: extractor no-op, ui-operators+goal-corpus gates no-drift, solver selftest byte-identical, all 21 goals --run green, suite 32/32. Commit d1f42b3."
 verify = { kind = "manual", ref = "a corpus goal {unit_in_chain(A),unit_in_chain(B),focused_unit(A)} plans insert(A)->insert(B)->focus_unit(A) and runs green (exercises focus_unit as a distinct op); nav + focus/insert operators emit focused_class(<class>) as a derived effect verified live; covers focus_unit and the focused_class fluent type" }
 note = "planning/ui-planner-coverage-plan.md §1.C. RE-SCOPED 2026-07-11: the goal-only approach is IMPOSSIBLE (proven live by an agent). focus_unit needs >=2 units so A* must route back to a non-last one, but (1) A* just reorders the inserts to put the focus-target last (auto-focus, no focus_unit), AND (2) a 2nd insert is UNEXECUTABLE — ChainBase:loadUnit (xroot/Chain/Base.lua:458) removes the empty insert section on the first insert, and every picker-open operator is keyed on slot_control(Mi, EmptySection.EmptyControl), so no operator opens the picker on a non-empty chain. REAL FIX = a new insert_after / open_picker_nonempty operator modelling the per-unit Chain.InsertControl (xroot/Unit/Section.lua:13), then a pre-seeded goal (start with unit A focused, goal adds unit B) forces insert(B)->focus_unit(A). Needs extractor+crawl+solver work (central files) — a separate effort. focused_class is derived-redundant (1:1 with the window class implied by context; only non-redundant as Unit.Base.Header on unit-focus) — cover via nav/focus effects or exclude as derived. Currently 20/21 operators, 8/9 fluent types."
 links = { depends_on = ["ui-planner-cov-facility"] }

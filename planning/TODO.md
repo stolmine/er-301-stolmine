@@ -5,7 +5,7 @@ ER-301-STOLMINE TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**93 items** — 66 done, 25 todo, 2 blocked. *Rendered 2026-07-11.*
+**93 items** — 68 done, 23 todo, 2 blocked. *Rendered 2026-07-11.*
 
 ## Sequencer
 
@@ -74,8 +74,6 @@ check`): a `done` item must have a real test or its named artifact.*
 
 | | id | item | verify |
 |---|---|---|---|
-|   | `ui-planner-cov-facility` | UI planning-domain coverage expansion — close the 8 uncovered operators + 3 fluent types (umbrella) | manual · 2026-07-10 |
-|   | `ui-planner-cov-focus` | Multi-unit focus goal + focused_class derived effect (cause C) | manual · 2026-07-10 |
 | ✓ | `crashdiag-fix-emu-symbolication-base` | Emu symbolication base off by p_vaddr (M3) | manual *(attested)* · 2026-07-10 |
 | ✓ | `emu-admin-golden-fragile` | 10-admin-nav pixel golden is env-fragile (font-dependent render across builds) | manual *(attested)* · 2026-07-10 |
 | ✓ | `emu-capture-deterministic` | Same UI state produces a byte-identical capture | screenshot: drive the emulator to a fixed UI state, settle, and capture twice; confirm the two PNGs are byte-identical (diff clean); document the settle convention for animated elements *(attested)* · 2026-07-09 |
@@ -98,6 +96,8 @@ check`): a `done` item must have a real test or its named artifact.*
 | ✓ | `ui-model-facility` | Deterministic UI model for agent-driven 301 operation (umbrella) | manual *(attested)* · 2026-07-10 |
 | ✓ | `ui-model-introspect` | Runtime emu.uiState() — context/focus/controls/slots/affordances as structured data | manual *(attested)* · 2026-07-10 |
 | ✓ | `ui-model-planner` | Goal -> gesture-sequence path planner, verified by driving the emu | manual *(attested)* · 2026-07-10 |
+| ✓ | `ui-planner-cov-facility` | UI planning-domain coverage expansion — close the 8 uncovered operators + 3 fluent types (umbrella) | manual *(attested)* · 2026-07-11 |
+| ✓ | `ui-planner-cov-focus` | Multi-unit focus goal + focused_class derived effect (cause C) | manual *(attested)* · 2026-07-11 |
 | ✓ | `ui-planner-cov-modals` | Durable-modal operators cover the modal fluent type (cause D) | manual *(attested)* · 2026-07-11 |
 | ✓ | `ui-planner-cov-starts` | Non-boot start states close the 5 return/indirect nav operators (cause A) | manual *(attested)* · 2026-07-11 |
 | ✓ | `ui-planner-crawler` | Empirical UI crawler resolves dynamic operators + discovers preconditions (perfect oracle) | manual *(attested)* · 2026-07-10 |
