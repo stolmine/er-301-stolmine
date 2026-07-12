@@ -5,7 +5,7 @@ ER-301-STOLMINE TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**96 items** — 76 done, 18 todo, 2 blocked. *Rendered 2026-07-12.*
+**103 items** — 76 done, 25 todo, 2 blocked. *Rendered 2026-07-12.*
 
 ## Sequencer
 
@@ -32,6 +32,7 @@ check`): a `done` item must have a real test or its named artifact.*
 
 | | id | item | verify |
 |---|---|---|---|
+|   | `crashdiag-ui-flightrecorder-seams` | On-device flight recorder captures UI seam events (P1b) | manual · 2026-07-12 |
 |   | `ui-audio-editor-selection-ops` | Audio editor: selection-scoped destructive operations (idea) | manual · 2026-07-09 |
 |   | `ui-chain-ref-invalidation-link-unlink` | Chain-reference invalidation on stereo link/unlink (LocalChooser / Source.Chooser) | manual · 2026-07-09 |
 |   | `ui-core-keyword-type-revamp` | Core package keyword + type revamp: sampling glyph + keyword audit | manual · 2026-07-09 |
@@ -120,6 +121,12 @@ check`): a `done` item must have a real test or its named artifact.*
 |---|---|---|---|
 |   | `crashdiag-fix-flush-error-handling` | Flush ignores FatFS write errors, then destroys the only copy (M4) | manual · 2026-07-10 |
 |   | `crashdiag-fix-partial-register-capture` | Exc-hook captures only a subset of registers (sp=pc, psr/r1/r8-r11 = ffffffff) on am335x data abort | manual · 2026-07-11 |
+|   | `crashdiag-flush-log-ring` | Flush the C-side log ring into the crash report (C2) | manual · 2026-07-12 |
+|   | `crashdiag-insert-lifecycle-markers` | Flight recorder marks unit construct-complete / first-process (P1c) | manual · 2026-07-12 |
+|   | `crashdiag-object-guard-event` | Guard/canary the audio Event object to catch heap corruption near the write (P2) | manual · 2026-07-12 |
+|   | `crashdiag-resolve-lr` | Crash report resolves or explicitly flags lr against the module map (C1) | manual · 2026-07-12 |
+|   | `crashdiag-stack-highwater` | Crash report carries per-task + ISR stack high-water and canary (P0) | manual · 2026-07-12 |
+|   | `crashdiag-ui-heartbeat` | Hang monitor covers the UI/main thread, not just audio (P1a) | manual · 2026-07-12 |
 |   | `infra-crash-diagnostics-debug-mode` | Dev-enabled debug mode captures C-side crash diagnostics (umbrella) | manual · 2026-07-09 |
 |   | `infra-v0616-port` | Port the TXo I2C master mod to the v0.6.16 stable firmware base | manual · 2026-07-09 |
 | ✓ | `crashdiag-fix-flightrec-insert-order` | Flight recorder records unit insert AFTER the risky work, missing the #1 trigger (H3) | manual *(attested)* · 2026-07-10 |

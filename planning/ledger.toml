@@ -1174,3 +1174,81 @@ area = "ui"
 attested = "2026-07-12: enableCrashDiagnostics was defined + fully wired (its onSet arms the flight recorder, the am335x exception hook, AND the hang monitor via the shared choke point; the value persists -- Settings.load calls Boolean:set which calls onSet, so it RE-ARMS on every boot, surviving the crash-reboot) but was NEVER listed in xroot/Settings/Interface.lua, so it had no UI row and could not be turned on from the device. Added it to the General category UNCONDITIONALLY (not behind app.TESTING like the sibling enableDevMode), so a field user enables trap + hang capture from Admin > System Settings with no special firmware build. Emu-verified: tests/emu/46-crash-diag-settings-toggle.test shows the interface and scrolls its main list to find the enableCrashDiagnostics row (FOUND); full emu suite green."
 verify = { kind = "manual", ref = "in a normal (non-TESTING) build, Admin > System Settings > General lists 'Enable crash diagnostics?'; toggling it to yes arms trap+hang capture and the choice persists across reboots" }
 links = { depends_on = ["infra-crash-diag-debug-mode-ui"] }
+
+
+[[item]]
+id = "crashdiag-stack-highwater"
+title = "Crash report carries per-task + ISR stack high-water and canary (P0)"
+status = "todo"
+modified = "2026-07-12T12:31:03-05:00"
+created = "2026-07-12T12:31:03-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "a crash/hang report includes a '--- Stacks ---' section with every task's base/size/high-water-used/canary-intact + the ISR stack, and a banner when any stack is BLOWN/near-full; inserting the frozen Anamnesis with diagnostics armed names the offending task (used>=size or canary BLOWN) or proves no overflow" }
+note = "planning/crash-diag-harness-sharpening.md P0 (HIGHEST VALUE). Closes the attribution gap AND is the UI-coverage entry point AND directly tests the Anamnesis stack-overflow hypothesis. Feasible in bios 6.46: Task_Stat.used (high-water, needs Task.initStackFlag pre-fill 0xBE -- confirm/set in common.cfg; checkStackFlag currently false is fine, we compute at capture), Task_Object_first/next to enumerate ALL tasks, the 0xBE canary + Task_SupportProxy_checkStack, Hwi_getStackInfo for the ISR stack. Add PanicStackEntry[] to PanicRecord (bump PANIC_VERSION), a panicEnumerateStacks() shared by trap hook + hang capture, a '--- Stacks ---' flush section + BLOWN banner, symbolizer parse. Abort-context safety: prefer a self-contained 0xBE scan (bounded memory reads, no scheduler lock) over Task_stat's internal Task_disable in the trap hook. Emu: injectSynthetic a Stacks block + tests/emu/47. HARDWARE capture verified against the frozen Anamnesis insert."
+links = { depends_on = ["infra-crash-diag-panic-buffer"] }
+
+[[item]]
+id = "crashdiag-ui-heartbeat"
+title = "Hang monitor covers the UI/main thread, not just audio (P1a)"
+status = "todo"
+modified = "2026-07-12T12:31:03-05:00"
+created = "2026-07-12T12:31:03-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "a UI-thread livelock (a spinning gesture handler / constructor, via a BUILDOPT_CRASH_TEST 'U' trigger) is caught by the hang monitor and produces a Kind=hang-watchdog report with Thread=main and a stack window resolving into the UI dispatch path; audio coverage unchanged" }
+note = "planning/crash-diag-harness-sharpening.md P1a. Today the Swi Clock monitor watches ONLY audio; a UI-thread spin (hanging constructor, infinite draw) yields NO report. Add g_uiFrames + g_uiBusy (exposed to Lua via a CrashDiag glue call, no-op when disarmed). In xroot/Application.lua loop(): set busy=true + bump at startEventTimer() (processing begins; that seam already exists -- inspect it, it may already be a soft event-duration watchdog to piggyback on), clear busy before waitForEvent() (idle block). Monitor: g_uiBusy && g_uiFrames stale K ticks -> captureHang targeting the main task (reuse the live-SP path; Task_self() in the Swi is the spinning main task). The idle-block gate is the crux: Events_wait legitimately blocks, so a bare loop-stall is not a hang. Reuses the hang-watchdog spine. 'U' bench trigger analog to 'h'."
+links = { depends_on = ["infra-crash-diag-hang-watchdog"] }
+
+[[item]]
+id = "crashdiag-ui-flightrecorder-seams"
+title = "On-device flight recorder captures UI seam events (P1b)"
+status = "todo"
+modified = "2026-07-12T12:31:03-05:00"
+created = "2026-07-12T12:31:03-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "with diagnostics armed, the flight recorder in a crash report shows the UI trail (context switch / window show-hide / stack push-pop) leading into the crash, e.g. 'ctx admin -> insert X -> ctx <unit>', not a lone marker; silent when disarmed" }
+note = "planning/crash-diag-harness-sharpening.md P1b. The emu already models these seams (xroot/emu/Trace.lua, EMULATION-only): Application.setVisibleContext, Window:show/hide, Context:add/remove. Wire the SAME centralized choke points to the on-device FlightRecorder.record() (a no-op branch when disarmed -- always safe). Keep the set small (context/window/stack only; the Signal bus is chatty). Subsumes the 'finer markers' ask. Lua-only, cheap."
+links = { depends_on = ["infra-crash-diag-flight-recorder"] }
+
+[[item]]
+id = "crashdiag-insert-lifecycle-markers"
+title = "Flight recorder marks unit construct-complete / first-process (P1c)"
+status = "todo"
+modified = "2026-07-12T12:31:03-05:00"
+created = "2026-07-12T12:31:03-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "inserting a unit records 'insert' then 'construct-complete' (main thread, after UnitFactory.instantiate) and, ideally, 'first-process' (audio thread, first process() call), so a crash in the 0.2s insert window is attributable to a construction vs first-process phase" }
+note = "planning/crash-diag-harness-sharpening.md P1c. xroot/Chain/Base.lua loadUnit already records 'insert' + 'insert-ok'; add 'construct-complete <id>' right after UnitFactory.instantiate (separates a constructor fault from a first-process fault). 'first-process' is audio-thread (the FR ring is C-side + audio-safe) but needs a hook in the audio unit-dispatch path -- defer if awkward. Optional draw-enter marker for heavy graphics, deferred unless P0/P1a fail to localize."
+links = { depends_on = ["infra-crash-diag-flight-recorder"] }
+
+[[item]]
+id = "crashdiag-object-guard-event"
+title = "Guard/canary the audio Event object to catch heap corruption near the write (P2)"
+status = "todo"
+modified = "2026-07-12T12:31:03-05:00"
+created = "2026-07-12T12:31:03-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "a stray write into the audio Event region is detected at/near the write (guard-word breach checked at Event_post or a low-rate watchdog) and recorded with first-seen time + pc, rather than only surfacing as a downstream Event_post data-abort" }
+note = "planning/crash-diag-harness-sharpening.md P2. Deepest attribution win but most invasive; pursue ONLY if crashdiag-stack-highwater shows NO blown stack (i.e. the corruptor is a stray heap write, not an overflow). Guard words around local.hEvents (arch/am335x/hal/audio.c, Audio_init) checked cheaply at Event_post (audio.c:358/372). Stretch: an MMU guard region so the offending WRITE itself traps with the corruptor pc -- feasible only if the A8 MMU config has a spare region (investigate arch/am335x MMU setup first)."
+links = { depends_on = ["crashdiag-stack-highwater"] }
+
+[[item]]
+id = "crashdiag-resolve-lr"
+title = "Crash report resolves or explicitly flags lr against the module map (C1)"
+status = "todo"
+modified = "2026-07-12T12:31:03-05:00"
+created = "2026-07-12T12:31:03-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "an lr outside all known module ranges prints 'lr = ? (outside all known module ranges)' (not a bare '?'), and the module map is cross-checked for a missing package range" }
+note = "planning/crash-diag-harness-sharpening.md C1. In the Anamnesis capture lr=0x81a5aaa4 gave 'lr in ?'. panicResolve already runs on lr; make the outside-all-ranges case explicit so the reader knows it is unresolved-not-forgotten, and confirm the map is not missing a range (vs garbage from the partial-frame issue). Trivial."
+links = { depends_on = [] }
+
+[[item]]
+id = "crashdiag-flush-log-ring"
+title = "Flush the C-side log ring into the crash report (C2)"
+status = "todo"
+modified = "2026-07-12T12:31:03-05:00"
+created = "2026-07-12T12:31:03-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "a crash report's '--- Recent Log ---' section carries the last N C-side log lines (not '(not captured C-side)'), read allocation-free/bounded from the capture context" }
+note = "planning/crash-diag-harness-sharpening.md C2. The C-side LogThread ring (arch/am335x/hal/log.cpp, a LockFreeQueue) is not drained into the panic buffer today. Copy the last N lines into a new PanicRecord field (bump PANIC_VERSION) and emit under the existing '--- Recent Log ---' header. Read the ring allocation-free + bounded from the fault/Swi context. Adds human-readable context around the trigger."
+links = { depends_on = [] }
