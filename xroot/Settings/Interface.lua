@@ -29,6 +29,15 @@ menuItems[#menuItems + 1] = {
   "addVariable",
   "outputScale"
 }
+-- [stol:crashdiag-ui-arm-toggle] Expose the crash-diagnostics arm toggle in the
+-- normal (non-TESTING) settings menu. Its onSet arms the flight recorder + the
+-- am335x exception hook + the hang monitor, and the value persists (re-armed on
+-- boot via Settings.load -> Boolean:set -> onSet), so a field user can turn on
+-- trap/hang capture from Admin > System Settings with no special firmware build.
+menuItems[#menuItems + 1] = {
+  "addVariable",
+  "enableCrashDiagnostics"
+}
 if app.TESTING then
   menuItems[#menuItems + 1] = {
     "addVariable",

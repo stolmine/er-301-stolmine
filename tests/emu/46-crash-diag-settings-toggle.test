@@ -1,0 +1,16 @@
+# [stol:crashdiag-ui-arm-toggle] The crash-diagnostics ARM toggle must be reachable
+# in the normal System Settings menu (NOT gated behind app.TESTING / enableDevMode),
+# so a field user can turn trap + hang capture on from the UI with no special
+# firmware build. The setting + its onSet (arms the flight recorder, the am335x
+# exception hook, and the hang monitor) already existed; this proves the UI row is
+# present. Regression guard for xroot/Settings/Interface.lua.
+
+frames 20
+!assert require('Application').getVisibleContext():top():getClassName() == 'Chain.Root'
+
+# Show the settings interface and scroll its main list looking for the crash-diag
+# row (list items are keyed by the setting name via addVariable). FOUND => the
+# toggle is exposed. Bounded scroll so a missing row fails instead of looping.
+!assert (function() local I = require('Settings.Interface') I:show() local ml = I.mainList for i = 1, 60 do if ml:getSelectedData() == 'enableCrashDiagnostics' then return true end ml:scrollDown() end return false end)()
+
+quit

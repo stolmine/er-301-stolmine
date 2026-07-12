@@ -5,7 +5,7 @@ ER-301-STOLMINE TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**95 items** — 75 done, 18 todo, 2 blocked. *Rendered 2026-07-12.*
+**96 items** — 76 done, 18 todo, 2 blocked. *Rendered 2026-07-12.*
 
 ## Sequencer
 
@@ -38,6 +38,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `ui-dense-picker-residuals` | Dense picker residual sub-features: I/O-fan sort, admin hidden-units restore list, sub-display preview pane | manual · 2026-07-09 |
 |   | `ui-encoder-capture-saturation` | Encoder capture under UI saturation: instrument then de-couple input from render | manual · 2026-07-09 |
 |   | `ui-screensaver-polish` | Screensaver polish: forest full-screen coverage + rain splash particles | screenshot: run the forest screensaver and confirm full-screen coverage; run the rain screensaver and confirm splash particles on impact · 2026-07-09 |
+| ✓ | `crashdiag-ui-arm-toggle` | Expose the crash-diagnostics arm toggle in the normal System Settings menu | manual *(attested)* · 2026-07-12 |
 | ✓ | `infra-crash-diag-debug-mode-ui` | Debug-mode admin toggle + on-boot crash screen + past-report viewer | screenshot: with an injected report present, boot shows a 'crash captured' screen; the admin diagnostics viewer lists and displays past reports; captured as a tests/emu golden/trace *(attested)* · 2026-07-10 |
 | ✓ | `ui-chain-replace-picker-favorites` | Chain-UI replace picker opens in normal browse, not favorites-tagging mode | manual *(attested)* · 2026-07-09 |
 | ✓ | `ui-dense-unit-picker` | Dense 2-column unit picker: type glyphs, alphabet ribbon, sort/filter, M-key gestures | screenshot: Admin > Settings > Units > Unit picker style: dense; capture the 2-column layout with type glyphs, alphabet jump ribbon, and section dividers; cycle M2 sort modes and M3 type filter *(attested)* · 2026-07-09 |
