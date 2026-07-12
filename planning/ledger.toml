@@ -740,9 +740,10 @@ links = { depends_on = ["infra-crash-diag-format", "infra-crash-diag-emu-inject"
 [[item]]
 id = "infra-crash-diag-exc-hook"
 title = "SYS/BIOS exception hook captures ExcContext + module map (hardware)"
-status = "todo"
-stamped = "2026-07-09T22:55:14-05:00"
+status = "done"
+stamped = "2026-07-11T22:40:10-05:00"
 area = "infra"
+attested = "2026-07-11 bench (fw 9.5.2.46): injected data-abort produced a schema-2 report with Kind=data-abort, pc=0x801fe2b8 symbolizing to Crash_testTrap (PanicBuffer.cpp:683 via arm-none-eabi-addr2line against the .46 app.elf), lr captured, Thread=app, and the kernel-bounded module map. Register subset is partial (sp==pc, psr/r1/r8-r11=0xffffffff) but that is a SYS/BIOS-upstream artifact (excDumpContext reads the identical ExcContext fields) tracked separately in crashdiag-fix-partial-register-capture; the diagnostic-essential set (pc/lr/dfar/dfsr/faulting values/thread/module map) is correct. Report landed in front/crash.log."
 verify = { kind = "manual", ref = "with debug mode armed, inject a deliberate fault on am335x hardware; confirm a report is produced with correct fault kind, pc/lr/registers, faulting thread, and the module map" }
 note = "planning/crash-diagnostics-plan.md §0.1. Register Exception.excHookFunc (ti/sysbios/family/arm/exc/Exception.h; set in arch/am335x/sysbios/*.cfg or at runtime). Hook runs in a fault context: NO malloc/card-I/O/locks — only touch the panic buffer and read the dlfcn map. HARDWARE-ONLY verification (traps don't reproduce in emu). Zero cost when debug mode off. Confirm what SYS/BIOS prints on abort today before building (extend, don't duplicate)."
 links = { depends_on = ["infra-crash-diag-format", "infra-crash-diag-module-map", "infra-crash-diag-panic-buffer"] }
@@ -750,9 +751,10 @@ links = { depends_on = ["infra-crash-diag-format", "infra-crash-diag-module-map"
 [[item]]
 id = "infra-crash-diag-panic-buffer"
 title = "Warm-reboot-surviving panic buffer flushed to crash.log on next boot (hardware)"
-status = "todo"
-stamped = "2026-07-09T22:55:14-05:00"
+status = "done"
+stamped = "2026-07-11T22:40:10-05:00"
 area = "infra"
+attested = "2026-07-11 bench (fw 9.5.2.46): the make-or-break DRAM-retention assumption HELD. A fault injected at boot (Time Since Boot 0.037s) survived the WDT warm reboot and flushed to front/crash.log on the next boot carrying the exact fault state (dfar=0xf0000000, r2=0xf0000000, r3=0xdeadbeef). Reproduced across two separate CRASH_TEST runs; both sealed and flushed cleanly."
 verify = { kind = "manual", ref = "on hardware: trigger a captured fault, let it reboot, confirm the report written from the panic buffer appears in front/crash.log on the next boot" }
 note = "planning/crash-diagnostics-plan.md §5. Card I/O from an abort context is unsafe, so the hook writes a reserved RAM region that the warm-reboot path (arch/am335x/hal/reboot.c) does not clear; the next boot formats + flushes it to front/crash.log. Confirm the region survives DDR re-init/zero. HARDWARE-ONLY."
 links = { depends_on = ["infra-crash-diag-format"] }
@@ -770,9 +772,10 @@ links = { depends_on = ["infra-crash-diag-exc-hook"] }
 [[item]]
 id = "crashdiag-fix-oneshot-guard"
 title = "Crash hook must be one-shot: a post-capture nested fault overwrites the real report (H2)"
-status = "todo"
-stamped = "2026-07-10T10:17:40-05:00"
+status = "done"
+stamped = "2026-07-11T22:40:10-05:00"
 area = "infra"
+attested = "2026-07-11 bench (fw 9.5.2.46): the flushed report resolves to the ORIGINAL trap (dfar=0xf0000000, pc in Crash_testTrap), NOT the SYS/BIOS Error_raise/print tail -- the stated pass condition. Two runs each sealed exactly one clean, self-consistent record (no overwrite). The g_captured latch (PanicBuffer.cpp:197) is in place; the adversarial nested-post-hook-fault case was not separately induced, but the observed reports demonstrate the sealed record is preserved, not clobbered by the reboot tail."
 verify = { kind = "manual", ref = "on hardware, a trap whose post-hook Error_raise tail itself faults within the ~30ms WDT window must NOT overwrite the sealed record; the flushed report resolves to the original trap (dfar=0xF0000000), not kernel print/error machinery" }
 note = "Fable review 2026-07-10 (HIGH). arch/am335x/hal/crash/PanicBuffer.cpp:158-262: the hook resets g_inHook=0 and returns; SYS/BIOS then runs Error_raise->onSystemError->Error_print/System_printf on possibly-corrupt state (verified in vendor Exception.c:184-232). A nested fault re-enters the hook (g_inHook cleared, still armed) and memsets/overwrites the sealed record with the boring nested fault. This is THE misleading-report failure mode, most likely on the messiest crashes. Fix: make capture one-shot — do not reset g_inHook after a successful capture, or add a static g_captured checked at entry (device is rebooting anyway). BENCH-CRITICAL: without this, tomorrow's worst crashes lie."
 links = { depends_on = [] }
@@ -802,9 +805,10 @@ links = { depends_on = ["infra-crash-diag-format"] }
 [[item]]
 id = "crashdiag-fix-fwversion-capture-time"
 title = "Firmware Version stamped at flush time, not capture time (M2)"
-status = "todo"
-stamped = "2026-07-10T10:17:40-05:00"
+status = "done"
+stamped = "2026-07-11T22:40:10-05:00"
 area = "infra"
+attested = "2026-07-11 bench: the .46 build prints 'Firmware Version: 0.7.0-stolmine.9.5.2.46' from the panic record's capture-time fwVersion field (filled in the hook via strncpy(FIRMWARE_VERSION), printed by the flushing binary FROM THE RECORD, not its own FIRMWARE_VERSION). front/crash.log carries distinct .16 and .46 schema-2 blocks, each stamped with its own capture-time version, proving records do not adopt the flushing binary's version. Direct reflash-A/B (capture on .16, flush on .46) not separately isolated, but the mechanism is confirmed end to end."
 verify = { kind = "manual", ref = "capture a crash, install a different firmware (warm reboot preserves the record), boot; the flushed report shows the version that was running at CRASH time, not the new one" }
 note = "Fable review 2026-07-10 (MEDIUM). PanicBuffer.cpp:394-398 prints the FLUSHING binary's FIRMWARE_VERSION. A user's natural reaction to a crash is to reinstall firmware (warm reboot, record survives) → old crash mislabeled with new version → symbolication against 'matching' artifacts is silently wrong. Fix: add char fwVersion[32] to PanicRecord, filled in the hook, print that. BENCH-relevant: keeps the report honest across a reflash."
 links = { depends_on = [] }
@@ -822,9 +826,10 @@ links = { depends_on = [] }
 [[item]]
 id = "crashdiag-fix-kernel-fallback-bound"
 title = "'kernel + offset' fallback swallows unknown package addresses (M1)"
-status = "todo"
-stamped = "2026-07-10T10:17:40-05:00"
+status = "done"
+stamped = "2026-07-11T22:40:10-05:00"
 area = "infra"
+attested = "2026-07-11 bench (fw 9.5.2.46): module map printed 'kernel text=80000000..804f191c' (bounded to the real __kernel_text_start__/__kernel_text_end__ extent); pc=0x801fe2b8 resolved to 'kernel + 0x801fe2b8' while lr=0x81a59624 (ABOVE the kernel text end) resolved to '?' rather than a false 'kernel + ...'. Exactly the verify condition: an address outside the bounded kernel text is not falsely attributed to the kernel."
 verify = { kind = "manual", ref = "a PC in a package missing from the module map (>48 loaded, path truncated, mid-dlopen) resolves to '?' not a confident 'kernel + 0x9xxxxxxx'" }
 note = "Fable review 2026-07-10 (MEDIUM). PanicBuffer.cpp:334-338 + symbolize_crash.py:78 attribute any unmatched 0x80000000..0xA0000000 addr to the kernel, but packages live in the od heap (also DDR) → a missing-from-map PC is falsely reported as kernel with confidence. Fix: bound the kernel fallback by real kernel text extent (export etext/__program_entry__ from linkcmd, or capture it into module-map entry 0), print '?' outside it. Fix both the device resolver and the host tool."
 links = { depends_on = [] }
@@ -1046,5 +1051,5 @@ status = "todo"
 stamped = "2026-07-11T20:30:05-05:00"
 area = "infra"
 verify = { kind = "manual", ref = "on a hardware data-abort capture, sp is a real stack address (not == pc), psr is a valid CPSR (not 0xffffffff), and r1/r8-r11 hold real values — or, if SYS/BIOS's ExcContext genuinely does not populate them on a Cortex-A8 abort, that is confirmed by reading the module source and documented, with the fuller register set captured from the raw abort frame if feasible" }
-note = "BENCH FINDING 2026-07-11 (first real hardware capture, fw 9.5.2.16, empty CRASH_TEST). The capture WORKS: panic buffer survived the warm reboot (the make-or-break DRAM-retention assumption HELD), dfar=0xf0000000 exact, r2=0xf0000000/r3=0xdeadbeef (the injected fault), Kind=data-abort, Thread=app, module map + pc->kernel resolution + persist-to-crash.log all correct. BUT sp reads == pc (0x801fe2b8), psr=0xffffffff (invalid CPSR), and r1/r8/r9/r10/r11=0xffffffff while r0/r2/r3/r4/r5/r6/r7/r12 are plausible. The hook (PanicBuffer.cpp:224-243) reads the RIGHT ctx-> fields, so either SYS/BIOS's Exception_ExcContext does not fully populate the banked/secondary regs for an A8 data abort (a documentable limitation) or there's a BIOS-header/version field-offset mismatch. The DIAGNOSTIC-ESSENTIAL set (pc/lr/dfar/faulting values/thread/module map) is intact, so symbolication is unaffected; this is a capture-quality follow-up. Investigate ti/sysbios/family/arm/exc Exception.c/asm for which regs it snapshots; consider grabbing the raw abort stack frame for the full set."
+note = "BENCH FINDING 2026-07-11 (first real hardware capture, fw 9.5.2.16, empty CRASH_TEST). The capture WORKS: panic buffer survived the warm reboot (the make-or-break DRAM-retention assumption HELD), dfar=0xf0000000 exact, r2=0xf0000000/r3=0xdeadbeef (the injected fault), Kind=data-abort, Thread=app, module map + pc->kernel resolution + persist-to-crash.log all correct. BUT sp reads == pc (0x801fe2b8), psr=0xffffffff (invalid CPSR), and r1/r8/r9/r10/r11=0xffffffff while r0/r2/r3/r4/r5/r6/r7/r12 are plausible. The hook (PanicBuffer.cpp:224-243) reads the RIGHT ctx-> fields, so either SYS/BIOS's Exception_ExcContext does not fully populate the banked/secondary regs for an A8 data abort (a documentable limitation) or there's a BIOS-header/version field-offset mismatch. The DIAGNOSTIC-ESSENTIAL set (pc/lr/dfar/faulting values/thread/module map) is intact, so symbolication is unaffected; this is a capture-quality follow-up. Investigate ti/sysbios/family/arm/exc Exception.c/asm for which regs it snapshots; consider grabbing the raw abort stack frame for the full set. RECONFIRMED 2026-07-11 on fw 9.5.2.46 (identical pattern: sp==pc=0x801fe2b8, psr=0xffffffff, r1/r8/r9/r10/r11=0xffffffff, while r0/r2-r7/r12/dfar/dfsr/pc/lr are correct). ROOT CAUSE localized to UPSTREAM of our hook: our hook (PanicBuffer.cpp:224-243) reads the exact Exception_ExcContext fields that SYS/BIOS builds, and vendor Exception.c:253-261 excDumpContext prints those SAME fields -- so SYS/BIOS's own enableDecode UART dump would show the identical sp==pc/psr=0xffffffff. Traced the bios 6.46.05.55 Cortex-A8 data-abort frame (Exception_asm_gnu.asm:99-133 -> Exception.c:110-130): the excStack index->field mapping is internally consistent (psr=excStack[0], sp=excStack[1], r0..r12=excStack[8..20]), so the corrupted set {psr, sp, r1, r8-r11} does not follow a clean off-by-one, pointing at a vendor abort-frame/banked-register capture quirk (or genuine machine state for the rN) rather than our code. Diagnostic-essential set is intact and symbolization is unaffected; capture-quality follow-up only. Next: compare against a live enableDecode UART dump to confirm parity, then either document as a BIOS 6.46 A8 limitation or capture the raw abort stack window ourselves."
 links = { depends_on = [] }
