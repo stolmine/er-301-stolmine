@@ -5,7 +5,7 @@ ER-301-STOLMINE TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**95 items** — 74 done, 19 todo, 2 blocked. *Rendered 2026-07-12.*
+**95 items** — 75 done, 18 todo, 2 blocked. *Rendered 2026-07-12.*
 
 ## Sequencer
 
@@ -119,7 +119,6 @@ check`): a `done` item must have a real test or its named artifact.*
 |---|---|---|---|
 |   | `crashdiag-fix-flush-error-handling` | Flush ignores FatFS write errors, then destroys the only copy (M4) | manual · 2026-07-10 |
 |   | `crashdiag-fix-partial-register-capture` | Exc-hook captures only a subset of registers (sp=pc, psr/r1/r8-r11 = ffffffff) on am335x data abort | manual · 2026-07-11 |
-|   | `crashdiag-hang-spin-pc` | Hang stack window catches scheduler/stale frames, not the spin PC, for a leaf livelock | manual · 2026-07-12 |
 |   | `infra-crash-diagnostics-debug-mode` | Dev-enabled debug mode captures C-side crash diagnostics (umbrella) | manual · 2026-07-09 |
 |   | `infra-v0616-port` | Port the TXo I2C master mod to the v0.6.16 stable firmware base | manual · 2026-07-09 |
 | ✓ | `crashdiag-fix-flightrec-insert-order` | Flight recorder records unit insert AFTER the risky work, missing the #1 trigger (H3) | manual *(attested)* · 2026-07-10 |
@@ -127,6 +126,7 @@ check`): a `done` item must have a real test or its named artifact.*
 | ✓ | `crashdiag-fix-kernel-fallback-bound` | 'kernel + offset' fallback swallows unknown package addresses (M1) | manual *(attested)* · 2026-07-11 |
 | ✓ | `crashdiag-fix-oneshot-guard` | Crash hook must be one-shot: a post-capture nested fault overwrites the real report (H2) | manual *(attested)* · 2026-07-11 |
 | ✓ | `crashdiag-fix-package-symbolication` | Offline symbolication of package PCs is broken by design — the headline use case (H1) | manual *(attested)* · 2026-07-10 |
+| ✓ | `crashdiag-hang-spin-pc` | Hang stack window catches scheduler/stale frames, not the spin PC, for a leaf livelock | manual *(attested)* · 2026-07-12 |
 | ✓ | `crashdiag-review-nits` | Crash-diag review LOW/NIT cleanup batch | manual *(attested)* · 2026-07-10 |
 | ✓ | `infra-crash-diag-exc-hook` | SYS/BIOS exception hook captures ExcContext + module map (hardware) | manual *(attested)* · 2026-07-11 |
 | ✓ | `infra-crash-diag-flight-recorder` | Flight recorder: ring of recent crash-trigger events | manual *(attested)* · 2026-07-10 |
