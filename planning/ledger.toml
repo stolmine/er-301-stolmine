@@ -26,6 +26,9 @@
 #           source tree (od/xroot/emu/hal/mods)
 #   links   optional { depends_on = [...], supersedes = [...] }
 #   note    optional free text
+#   created  machine-written once, when the item first appears (never hand-write).
+#   modified machine-written; bumps on ANY content change vs HEAD (any field but
+#            the timestamps). Both come from the gate's stamp step; ask scripts/dev now.
 #
 # Tool invocations go through the blessed entrypoint: `scripts/dev {check,render,
 # status,now,commit,...}`. Never write a date from memory — ask `scripts/dev now`.
@@ -34,7 +37,8 @@
 id = "infra-ledger-regime"
 title = "Ledger + BDG regime stood up (gate, render, hooks, blessed entrypoint)"
 status = "done"
-stamped = "2026-07-09T20:28:42-05:00"
+created = "2026-07-09T20:28:42-05:00"
+modified = "2026-07-09T20:28:42-05:00"
 area = "infra"
 verify = { kind = "manual", ref = "scripts/dev check exits 0; planning/TODO.md renders from ledger" }
 attested = "2026-07-09: ported ledger.py, scripts/dev, gate/stop hooks from Ligature per planning/ledger-regime-portable.md; check+render+status validated clean"
@@ -55,7 +59,8 @@ attested = "2026-07-09: ported ledger.py, scripts/dev, gate/stop hooks from Liga
 id = "i2c-txo-master"
 title = "TXo I2C master output: interrupt-driven CV/gate TX with gain + V/Oct mode"
 status = "done"
-stamped = "2026-07-09T20:28:42-05:00"
+created = "2026-07-09T20:28:42-05:00"
+modified = "2026-07-09T20:28:42-05:00"
 area = "i2c"
 verify = { kind = "manual", ref = "instantiate TXo TR/CV units; scope TXo expander outputs while driving gate + V/Oct pitch; confirm gain control scales output" }
 attested = "2026-03-20 (commit 19bf34f 'Add TXo I2C master output mod'): interrupt-driven I2C master TX to TXo output expanders, with per-unit gain control and V/Oct mode. This is the fork's flagship feature. Bench-validated on hardware against a TXo expander (I2C master addr 0x60, configurable 0x60-0x67). Cannot be exercised in emu (no I2C bus emulation)."
@@ -65,7 +70,8 @@ note = "Master takes over the I2C2 CON register during TX; see i2c-teletype-coex
 id = "i2c-teletype-coexist"
 title = "Teletype slave RX coexists with TXo master TX on the shared I2C2 peripheral"
 status = "done"
-stamped = "2026-07-09T20:28:42-05:00"
+created = "2026-07-09T20:28:42-05:00"
+modified = "2026-07-09T20:28:42-05:00"
 area = "i2c"
 verify = { kind = "manual", ref = "with a Teletype leading and a TXo following, confirm ER-301 receives SC.CV/SC.TR from Teletype (slave 0x31) while simultaneously driving the TXo (master 0x60); no crash" }
 attested = "2026-03-20 (commit 19bf34f, refined through the 9.x line): single I2C2 peripheral shared between slave (Teletype, addr 0x31) and master (TXo). Master claims the CON register during TX, then restoreSlaveMode() re-enables slave RX after. Documented in docs/KNOWLEDGE.md 'I2C System'. Hardware-verified; the README warns users to pick leading OR following per patch since doing both has shown crashes in some faderbank bursts (F8R issue still open)."
@@ -76,7 +82,8 @@ note = "F8R/16n faderbank at 400kHz still fails as a leader (open, tracked in KN
 id = "infra-swig-vanilla-compat"
 title = "SWIG pinned to 4.2.1 + runtime version bridge so vanilla community packages load"
 status = "done"
-stamped = "2026-07-09T20:28:42-05:00"
+created = "2026-07-09T20:28:42-05:00"
+modified = "2026-07-09T20:28:42-05:00"
 area = "infra"
 verify = { kind = "manual", ref = "install a community package compiled against upstream v0.7.0 firmware (e.g. a mutable-instruments/habitats .pkg); confirm it loads, instantiates, and shares SWIG types without hang" }
 attested = "2026-03-25 (commit e9870e5 'Pin SWIG 4.2.1 for runtime v4 compatibility' + 0ed9bad 'Add SWIG runtime version bridge'; bridge restored in 874d224 after a regression): SWIG pinned at 4.2.1 with a runtime version bridge so packages built against upstream firmware share the same SWIG type registry and load correctly. Method dispatch is name-based so appending non-virtual methods is safe; details in docs/KNOWLEDGE.md 'ABI & Compatibility'."
@@ -85,7 +92,8 @@ attested = "2026-03-25 (commit e9870e5 'Pin SWIG 4.2.1 for runtime v4 compatibil
 id = "infra-package-diagnostics"
 title = "Detailed package load diagnostics for .pkg archive + .so ELF failures"
 status = "done"
-stamped = "2026-07-09T20:28:42-05:00"
+created = "2026-07-09T20:28:42-05:00"
+modified = "2026-07-09T20:28:42-05:00"
 area = "infra"
 verify = { kind = "manual", ref = "attempt to install a corrupt archive and an .so with an unresolved symbol; confirm the error screen names the specific failure (unresolved symbol, corrupt archive, header mismatch) rather than a generic error" }
 attested = "2026-04-04 (commit 6eabaa8 'Add detailed error diagnostics for package archive and ELF load failures'): package manager surfaces specific reasons for archive-open and dynamic-link failures (unresolved symbols, corrupt archives, header mismatches) instead of a generic failure. Listed in README 'What's different from upstream'."
@@ -94,7 +102,8 @@ attested = "2026-04-04 (commit 6eabaa8 'Add detailed error diagnostics for packa
 id = "ui-favorites-picker"
 title = "Favorites in the unit picker: shift-toggle edit mode, own category above Recents"
 status = "done"
-stamped = "2026-07-09T20:28:42-05:00"
+created = "2026-07-09T20:28:42-05:00"
+modified = "2026-07-09T20:28:42-05:00"
 area = "ui"
 verify = { kind = "manual", ref = "in the unit picker hold shift to enter favorites-edit; S1 tags/untags the highlighted unit; confirm a Favorites category appears above Recents and persists across a reboot/quicksave" }
 attested = "2026-04-09 and earlier, shipped in v0.7.0-stolmine.9.0.0 (tag 0df7a03, 2026-04-09): shift-toggle favorites-edit in the picker with in-place border toggle (no list rebuild) and deferred save on mode exit; favorites render as their own category above Recents; clear-all guarded by a settings-toggleable confirmation. Documented in docs/KNOWLEDGE.md 'Favorites system'."
@@ -103,7 +112,8 @@ attested = "2026-04-09 and earlier, shipped in v0.7.0-stolmine.9.0.0 (tag 0df7a0
 id = "ui-readout-name-table"
 title = "Readout/Fader mapped display text via addName()/clearNames()"
 status = "done"
-stamped = "2026-07-09T20:28:42-05:00"
+created = "2026-07-09T20:28:42-05:00"
+modified = "2026-07-09T20:28:42-05:00"
 area = "ui"
 verify = { kind = "manual", ref = "call addName() on a Readout to map a value to text; confirm the display shows the mapped label instead of the numeric value" }
 attested = "2026-04-03 (commit b76b65b 'Add name table support to Readout widget' + 32c4a20 'Add addName/clearNames API'): Readout widgets can map value ranges to display text via addName()/clearNames(). Listed in README 'What's different from upstream'; SWIG-usage note in docs/KNOWLEDGE.md."
@@ -112,7 +122,8 @@ attested = "2026-04-03 (commit b76b65b 'Add name table support to Readout widget
 id = "ui-readout-threshold-labels"
 title = "Readout/Fader threshold labels map float ranges to descriptive text"
 status = "done"
-stamped = "2026-07-09T20:28:42-05:00"
+created = "2026-07-09T20:28:42-05:00"
+modified = "2026-07-09T20:28:42-05:00"
 area = "ui"
 verify = { kind = "manual", ref = "call addThresholdLabel(0.0,'LP')/(0.33,'BP')/(0.66,'HP') on a filter mode control; confirm the readout shows LP/BP/HP across the range" }
 attested = "2026-04-07 (commit abb92b7 'Add threshold label mapping for float controls on Readout'): addThresholdLabel(float,string)/clearThresholdLabels() on both Readout and Fader. Priority order name-table > threshold-labels > min/max text > numeric, per docs/KNOWLEDGE.md 'Readout threshold labels'."
@@ -122,7 +133,8 @@ links = { depends_on = ["ui-readout-name-table"] }
 id = "ui-master-output-scale"
 title = "Master output scale: percentage-based output level in admin settings"
 status = "done"
-stamped = "2026-07-09T20:28:42-05:00"
+created = "2026-07-09T20:28:42-05:00"
+modified = "2026-07-09T20:28:42-05:00"
 area = "ui"
 verify = { kind = "manual", ref = "in Admin settings set master output scale to 100/75/50/25/10%; confirm the OUT levels scale accordingly" }
 attested = "2026-03-28 (commit 4049ead 'Add output scale control and screensaver preview action'): percentage-based master output level control (100/75/50/25/10%) in admin settings. Listed in README 'What's different from upstream'."
@@ -131,7 +143,8 @@ attested = "2026-03-28 (commit 4049ead 'Add output scale control and screensaver
 id = "ui-screensavers"
 title = "Screensaver suite: snow, rain, forest, maze, perlin, voronoi + cycle mode"
 status = "done"
-stamped = "2026-07-09T20:28:42-05:00"
+created = "2026-07-09T20:28:42-05:00"
+modified = "2026-07-09T20:28:42-05:00"
 area = "ui"
 verify = { kind = "screenshot", ref = "let the device idle past the screensaver timeout; capture each of snow/rain/forest/maze/perlin/voronoi and confirm cycle mode rotates between them" }
 attested = "2026-03-28 onward (commit b805029 'Add snow, rain, and forest screensavers' + f65889e 'Add pipes, maze, and bonsai'; forest z-layer/godrays through 228d1ff which adds cycle mode): snow, rain, forest, maze, perlin noise, voronoi screensavers with automatic cycle mode. Pipes/bonsai later removed. Documented in docs/KNOWLEDGE.md 'Screensavers'."
@@ -140,7 +153,8 @@ attested = "2026-03-28 onward (commit b805029 'Add snow, rain, and forest screen
 id = "ui-screensaver-doom"
 title = "Doom screensaver: doomgeneric with autoplay bot, letterboxed to 102x64"
 status = "done"
-stamped = "2026-07-09T20:28:42-05:00"
+created = "2026-07-09T20:28:42-05:00"
+modified = "2026-07-09T20:28:42-05:00"
 area = "ui"
 verify = { kind = "screenshot", ref = "select the Doom screensaver manually (not in the cycle list); confirm the bot plays, renders 320x200 letterboxed into a 102x64 viewport, and auto-restarts on death" }
 attested = "2026-04-07/08 (commit a1b6fdb 'Add Doom screensaver with autoplay bot' + 685f99e ZCajun bot port + d022c69 'Fix Doom death-screen freeze and remove from screensaver cycle'): vendored doomgeneric (GPL-2.0) with a ZCajun-derived bot writing directly to ticcmd_t, 320x200 rendered to a 102x64 letterboxed viewport, auto-restart on death, manual-selection-only. WAD at front/ER-301/doom/DOOM1.WAD. Full notes in docs/KNOWLEDGE.md 'Doom screensaver'."
@@ -150,7 +164,8 @@ links = { depends_on = ["ui-screensavers"] }
 id = "ui-slot-machine-text"
 title = "Slot-machine text input: 6 columns under M1-M6, hold-to-focus + encoder scroll"
 status = "done"
-stamped = "2026-07-09T20:28:42-05:00"
+created = "2026-07-09T20:28:42-05:00"
+modified = "2026-07-09T20:28:42-05:00"
 area = "ui"
 verify = { kind = "manual", ref = "switch keyboard mode to 'slot' in Interface settings; hold an M-key to focus its column, scroll the encoder to a symbol, release to insert; confirm idle encoder scrolls all columns together" }
 attested = "2026-04-07 (commit dc259ce 'Add slot machine text input as alternate keyboard method'): alternate keyboard with 6 SlidingList columns under M1-M6; hold a button to focus a column, encoder scrolls it, release inserts; idle encoder scrolls all columns; grid/slot toggle in Interface settings; history supported. Documented in docs/KNOWLEDGE.md 'Slot machine text input'."
@@ -159,7 +174,8 @@ attested = "2026-04-07 (commit dc259ce 'Add slot machine text input as alternate
 id = "ui-quicksave-overwrite-confirm"
 title = "Quicksave overwrite confirmation + 48 quicksave slots"
 status = "done"
-stamped = "2026-07-09T20:28:42-05:00"
+created = "2026-07-09T20:28:42-05:00"
+modified = "2026-07-09T20:28:42-05:00"
 area = "ui"
 verify = { kind = "manual", ref = "save over an occupied quicksave slot; confirm a settings-toggleable overwrite-confirmation dialog appears; confirm 48 slots are available" }
 attested = "shipped in the early 9.x line (documented in docs/KNOWLEDGE.md 'Quicksave overwrite confirmation'): confirmation dialog when saving over an occupied slot (toggleable in settings) and 48 quicksave slots (up from the original count)."
@@ -168,7 +184,8 @@ attested = "shipped in the early 9.x line (documented in docs/KNOWLEDGE.md 'Quic
 id = "ui-dense-unit-picker"
 title = "Dense 2-column unit picker: type glyphs, alphabet ribbon, sort/filter, M-key gestures"
 status = "done"
-stamped = "2026-07-09T20:28:42-05:00"
+created = "2026-07-09T20:28:42-05:00"
+modified = "2026-07-09T20:28:42-05:00"
 area = "ui"
 verify = { kind = "screenshot", ref = "Admin > Settings > Units > Unit picker style: dense; capture the 2-column layout with type glyphs, alphabet jump ribbon, and section dividers; cycle M2 sort modes and M3 type filter" }
 attested = "2026-05-30, released as v0.7.0-stolmine.9.3.0 (tag aa8429d): dense 2-column picker as an admin-selectable alternative to the classic Mondrian view (dense is default). 8-10 visible units, alphabet jump ribbon, category-first/keyword-fallback type glyphs (~ source / > effect / $ modulate / * timing / . utility / ? unknown), section dividers, M-key gesture set (M2 sort cycle, M3 type filter, M5/M6 hide/fav edit, hold-M2/M3 + encoder for live scrub), sequencer-style cursor easing. Recency persists in ~/.od/rear/recencyHistory.lua. Full CHANGELOG under v0.7.0-stolmine.9.3.0."
@@ -178,7 +195,8 @@ links = { depends_on = ["ui-favorites-picker"] }
 id = "dsp-parallel-dsp"
 title = "Parallel DSP via BUILDOPT_PARALLEL_DSP WorkerPool"
 status = "done"
-stamped = "2026-07-09T20:28:42-05:00"
+created = "2026-07-09T20:28:42-05:00"
+modified = "2026-07-09T20:28:42-05:00"
 area = "dsp"
 verify = { kind = "manual", ref = "build with BUILDOPT_PARALLEL_DSP enabled; run a multi-chain CPU-heavy patch and confirm inter-chain/branch parallelism reduces xruns vs the serial build; confirm am335x still builds with the gate compiled out" }
 attested = "2026-04-28 (per project memory; WorkerPool gated in commit 67df6cd 'WorkerPool: gate impl under BUILDOPT_PARALLEL_DSP for am335x build'): inter-chain + branch parallelism behind the BUILDOPT_PARALLEL_DSP build flag, with the am335x build compiling the WorkerPool impl out. Primarily targets the next-gen multi-core platform; am335x remains single-core."
@@ -187,7 +205,8 @@ attested = "2026-04-28 (per project memory; WorkerPool gated in commit 67df6cd '
 id = "scenes-hold-mode"
 title = "Hold-mode scenes with CV-selectable A/B via SceneIndexArbiter"
 status = "done"
-stamped = "2026-07-09T20:28:42-05:00"
+created = "2026-07-09T20:28:42-05:00"
+modified = "2026-07-09T20:28:42-05:00"
 area = "scenes"
 verify = { kind = "manual", ref = "build a hold-mode PinSet with A/B scene states; assign a CV source to the A/B selector; confirm the crossfade/select follows the CV with GainBias semantics and survives quicksave" }
 attested = "2026-06-04, released as v0.7.0-stolmine.9.4.0 (tag 7168d39 'Merge feature/hold-mode-scenes'): CV-controllable A/B scene selection via M2/M3 and a SceneIndexArbiter, with kIndex normalized and audio-thread autonomy (arbiter CV rides on top of bias, delta-since-entry). Scene mode defaults on for new installs. Consolidated tracker docs/planning/hold-mode-scenes-todos.md."
@@ -196,7 +215,8 @@ attested = "2026-06-04, released as v0.7.0-stolmine.9.4.0 (tag 7168d39 'Merge fe
 id = "sequencer-external-clock"
 title = "Grid sequencer external clock + reset with per-slot stL honoring"
 status = "done"
-stamped = "2026-07-09T20:28:42-05:00"
+created = "2026-07-09T20:28:42-05:00"
+modified = "2026-07-09T20:28:42-05:00"
 area = "sequencer"
 verify = { kind = "manual", ref = "under AdminMode enable the grid sequencer external clock; feed an external clock + reset; confirm each slot advances on ticks honoring its stL (step length) via the atomic tick counter, and BPM readout locks" }
 attested = "2026-06-05 external-clock bring-up (merge 4aec4da, shipped in v0.7.0-stolmine.9.5.0, tag 0f36ac7 2026-06-10) with the stL regression fixed in v0.7.0-stolmine.9.5.1 (tag e75334f 2026-06-10, commit 33620b1 'external clock honors stL via atomic tick counter' + 8048032): 6-ply SpottedStrip with external clock, reset, and 4 division faders; slot advance counts atomic ticks against each currentRow's stL. This was the last firmware feature before the RPi/CM4 port."
@@ -205,7 +225,8 @@ attested = "2026-06-05 external-clock bring-up (merge 4aec4da, shipped in v0.7.0
 id = "sequencer-modal-sweep-hardening"
 title = "Sequencer modal-mutual-exclusion sweep: single encoder owner, no colliding modes"
 status = "done"
-stamped = "2026-07-09T20:28:42-05:00"
+created = "2026-07-09T20:28:42-05:00"
+modified = "2026-07-09T20:28:42-05:00"
 area = "sequencer"
 verify = { kind = "manual", ref = "run the 40-row modal sweep matrix: enter/exit mark mode, L1 edit, selection, BPM latch in every collision order; confirm exactly one encoder owner at all times and no ambiguous cursor/sub-bar state" }
 attested = "2026-06-09 (commit f76a666 'sequencer modal-mutual-exclusion sweep: single encoder owner', plus follow-ups F4/D1/H6/H8 in the 9.4.0.29 dev line): 40-row modal collision matrix bench-validated, all 8 collisions pass. Recorded in project memory 'Seq modal sweep test results 2026-06-09'."
@@ -214,7 +235,8 @@ attested = "2026-06-09 (commit f76a666 'sequencer modal-mutual-exclusion sweep: 
 id = "sequencer-terminal-edit-leds"
 title = "Sequencer terminal L1 cell edit + encoder coarse/fine LEDs"
 status = "done"
-stamped = "2026-07-09T20:28:42-05:00"
+created = "2026-07-09T20:28:42-05:00"
+modified = "2026-07-09T20:28:42-05:00"
 area = "sequencer"
 verify = { kind = "manual", ref = "enter L1 inline cell edit; confirm editingL1 is a terminal modal (S2 mark, layer toggle etc. commit-and-exit first); confirm encoder coarse/fine state drives the panel LEDs from GridView" }
 attested = "2026-06-09, released in v0.7.0-stolmine.9.5.0 (merge 7569864 'feature/sequencer-edit-terminal', commit bb8f63b 'C1+E2 terminal edit mode + S-key rebind'): editingL1 made a terminal modal; encoder coarse/fine LEDs driven from GridView. 18/18 bench matrix pass, recorded in project memory 'Seq edit terminal + LEDs shipped 2026-06-09'."
@@ -224,7 +246,8 @@ links = { depends_on = ["sequencer-modal-sweep-hardening"] }
 id = "sequencer-l1-cancel-revert"
 title = "Sequencer L1 CANCEL reverts a cell edit to its pre-edit value"
 status = "done"
-stamped = "2026-07-09T20:28:42-05:00"
+created = "2026-07-09T20:28:42-05:00"
+modified = "2026-07-09T20:28:42-05:00"
 area = "sequencer"
 verify = { kind = "manual", ref = "start editing an L1 cell, nudge the value, press CANCEL; confirm the cell reverts to the pre-edit value; confirm UP still commits" }
 attested = "2026-06-29, released as v0.7.0-stolmine.9.5.2 (tag d7b5287 'fix(sequencer): CANCEL reverts L1 cell edit to pre-edit value'): GridView.lua snapshots an editBackup on edit entry and restores it on CANCEL, while UP commits. Patch release; recorded in project memory 'Release 9.5.2 shipped 2026-06-29'."
@@ -234,7 +257,8 @@ links = { depends_on = ["sequencer-terminal-edit-leds"] }
 id = "emu-ui-pacer-fix"
 title = "Emulator UI loop pacer hits real 55 fps (matches hardware refresh)"
 status = "done"
-stamped = "2026-07-09T20:28:42-05:00"
+created = "2026-07-09T20:28:42-05:00"
+modified = "2026-07-09T20:28:42-05:00"
 area = "emu"
 verify = { kind = "manual", ref = "run the emulator under load; measure the UI frame rate; confirm ~55 fps (matching GRAPHICS_REFRESH_RATE) rather than the previous 45 fps best-case" }
 attested = "2026-06-04 (commit f0a0bb8 'emu: fix UI loop pacer; achieves real 55 fps (was 45 fps best-case)', building on a85850c 'GRAPHICS_REFRESH_RATE = 55 Hz'): fixed a wallclock/ticks type confusion + start-before-delay bug that collapsed the pacer to always-sleep-full-target. Animations now match hardware timing. Recorded in project memory 'emu UI loop pacer fix 2026-06-04'."
@@ -245,7 +269,8 @@ attested = "2026-06-04 (commit f0a0bb8 'emu: fix UI loop pacer; achieves real 55
 id = "emu-headless-boot"
 title = "Emulator boots with --headless (no SDL window), firmware runs, clean exit"
 status = "done"
-stamped = "2026-07-09T21:49:47-05:00"
+created = "2026-07-09T21:49:47-05:00"
+modified = "2026-07-09T21:49:47-05:00"
 area = "emu"
 anchor = true
 attested = "2026-07-09: boots with --headless (SDL dummy video), no window, runs firmware, clean exit; verified DISPLAY-unset + SDL_AUDIODRIVER=dummy. Fixed a session-state determinism bleed in the same pass (headless skips ~/.od/emu.session; defaults STORAGE=user -> boots on Chain.Root). Commit c788b51."
@@ -256,7 +281,8 @@ note = "Foundation for scripted/CI use. Select the SDL dummy video driver so no 
 id = "emu-control-channel"
 title = "Line-oriented control channel read inside the emulator loop"
 status = "done"
-stamped = "2026-07-09T21:49:47-05:00"
+created = "2026-07-09T21:49:47-05:00"
+modified = "2026-07-09T21:49:47-05:00"
 area = "emu"
 anchor = true
 attested = "2026-07-09: line protocol over stdin (default) / --control FIFO, drained in Emulator::loop with strict-order gating; @-sigil replies; unsolicited @ready handshake. Commit c788b51."
@@ -268,7 +294,8 @@ links = { depends_on = ["emu-headless-boot"] }
 id = "emu-cmd-buttons"
 title = "Button press/release commands with hold duration via Gpio_write"
 status = "done"
-stamped = "2026-07-09T21:49:47-05:00"
+created = "2026-07-09T21:49:47-05:00"
+modified = "2026-07-09T21:49:47-05:00"
 area = "emu"
 anchor = true
 attested = "2026-07-09: press/down/up drive front-panel GPIO (inverted logic); verified gestures reach firmware (SUB3->Card.FileChooser, MAIN2->Source.ExternalChooser). 60ms press = safe tap below the ~28-frame repeat threshold. Commit c788b51."
@@ -280,7 +307,8 @@ links = { depends_on = ["emu-control-channel"] }
 id = "emu-cmd-encoder"
 title = "Encoder turn command adjusts encoderValue"
 status = "done"
-stamped = "2026-07-09T21:49:47-05:00"
+created = "2026-07-09T21:49:47-05:00"
+modified = "2026-07-09T21:49:47-05:00"
 area = "emu"
 anchor = true
 attested = "2026-07-09: turn N adjusts encoderValue; verified focus/value movement in the running app. Commit c788b51."
@@ -292,7 +320,8 @@ links = { depends_on = ["emu-control-channel"] }
 id = "emu-cmd-toggles"
 title = "Storage / mode toggle-switch commands"
 status = "done"
-stamped = "2026-07-09T21:49:47-05:00"
+created = "2026-07-09T21:49:47-05:00"
+modified = "2026-07-09T21:49:47-05:00"
 area = "emu"
 anchor = true
 attested = "2026-07-09: storage/mode absolute positioning; verified storage up->user(Chain.Root), center->admin(Menu/Admin), down->eject(Card.StatusViewer). Commit c788b51."
@@ -304,7 +333,8 @@ links = { depends_on = ["emu-control-channel"] }
 id = "emu-capture-fb"
 title = "Capture command dumps the framebuffers decoded to PNG"
 status = "done"
-stamped = "2026-07-09T21:49:47-05:00"
+created = "2026-07-09T21:49:47-05:00"
+modified = "2026-07-09T21:49:47-05:00"
 area = "emu"
 anchor = true
 attested = "2026-07-09: cap PATH = queued app.UIThread.saveScreenShotTo; verified admin-menu PNG written and byte-matches on re-render. Commit c788b51."
@@ -316,7 +346,8 @@ links = { depends_on = ["emu-headless-boot", "emu-lua-eval"] }
 id = "emu-capture-deterministic"
 title = "Same UI state produces a byte-identical capture"
 status = "done"
-stamped = "2026-07-09T21:49:47-05:00"
+created = "2026-07-09T21:49:47-05:00"
+modified = "2026-07-09T21:49:47-05:00"
 area = "emu"
 attested = "2026-07-09: two caps in one run on a static screen byte-identical; two separate --seed 301 runs byte-identical (animation=disabled fixture freezes tweens). Admin golden generated + re-matched by the harness. Commit c788b51."
 verify = { kind = "screenshot", ref = "drive the emulator to a fixed UI state, settle, and capture twice; confirm the two PNGs are byte-identical (diff clean); document the settle convention for animated elements" }
@@ -327,7 +358,8 @@ links = { depends_on = ["emu-capture-fb"] }
 id = "emu-lua-eval"
 title = "Lua expression command routed to the app interpreter"
 status = "done"
-stamped = "2026-07-09T21:49:47-05:00"
+created = "2026-07-09T21:49:47-05:00"
+modified = "2026-07-09T21:49:47-05:00"
 area = "emu"
 anchor = true
 attested = "2026-07-09: emu SWIG module hasControlInput/popControlLine/pushControlReply; Application.lua drains under app.EMULATION in onDisplayReady; verified 'lua return 1+1' -> @ok 2 and live app-state introspection. Commit c788b51."
@@ -341,7 +373,8 @@ links = { depends_on = ["emu-control-channel"] }
 id = "dsp-stereo-mix-quicksave-drop"
 title = "Stereo Mix output drops to silence after quicksave load"
 status = "blocked"
-stamped = "2026-07-09T20:28:42-05:00"
+created = "2026-07-09T20:28:42-05:00"
+modified = "2026-07-09T20:28:42-05:00"
 area = "dsp"
 verify = { kind = "manual", ref = "load the user's plumbutter-loaded quicksave (stereo linked channel, Stereo Mix with both inputs occupied, Mono Mix passthrough downstream); confirm/deny that the Stereo Mix output scopes silent while its subchain inputs read signal" }
 attested = "2026-06-15 (TODO.md 'Bug Report: Stereo Mix Output Drops on Quicksave Load', commits 0f1265f + 55f771a filing the report and 70edea1 'cannot repro, gathering more info'): user-reported, reproduces on both stolmine AND vanilla v0.7.0 so it is upstream, not a stolmine regression. The wedged state serialize/deserialize round-trips faithfully (quicksave reload preserves the break); deleting and rebuilding the units by hand fixes it on both firmwares. Bram cannot reproduce locally; blocked pending the broken quicksave file + exact unit versions from the reporter."
@@ -365,7 +398,8 @@ note = "Suspected onLoadGraph vs serialize/deserialize mismatch on the Stereo Mi
 id = "ui-chain-replace-picker-favorites"
 title = "Chain-UI replace picker opens in normal browse, not favorites-tagging mode"
 status = "done"
-stamped = "2026-07-09T20:40:20-05:00"
+created = "2026-07-09T20:40:20-05:00"
+modified = "2026-07-09T20:40:20-05:00"
 area = "ui"
 verify = { kind = "manual", ref = "on a chain unit invoke Replace (shift+M3 in the header sub-menu); confirm the unit picker opens in normal browse mode (not favorites-tagging), so a replacement can be picked without releasing shift first" }
 attested = "2026-06-08 (commit 8135fc1 'polish: BPM latch UP+onHide + Replace picker shift + TXo passthrough toggle'), first released in v0.7.0-stolmine.9.5.0 (tag 0f36ac7, 2026-06-10). Fix: added an empty shiftPressed handler to xroot/Unit/Chooser/Default.lua (line ~479) so the shift-held picker entry is consumed and no phantom shiftReleased fires toggleFavoritesEditMode on first refresh. NOTE: TODO.md tagged this 'target: .9.2.1' and the summary bullet says 'shipped 9.2.1', but no 9.2.1 tag exists — the commit actually landed in the 2026-06-08 polish round and first shipped in 9.5.0."
@@ -375,7 +409,8 @@ note = "From docs/planning/todo-archive.md section 'Chain UI: Replace Picker Ope
 id = "sequencer-bpm-latch-exit"
 title = "Sequencer BPM latch releases on UP and on takeover hide (no sticky encoder routing)"
 status = "done"
-stamped = "2026-07-09T20:40:20-05:00"
+created = "2026-07-09T20:40:20-05:00"
+modified = "2026-07-09T20:40:20-05:00"
 area = "sequencer"
 verify = { kind = "manual", ref = "latch BPM (shift+S2) in the sequencer takeover; press UP and confirm the latch releases and the dialed BPM persists to Settings; separately, latch BPM then exit the takeover (shift+ENTER / mode toggle / home) and re-enter, confirming the encoder is no longer routed to BPM" }
 attested = "2026-06-08 (commit 8135fc1 'polish: BPM latch UP+onHide + Replace picker shift + TXo passthrough toggle'), first released in v0.7.0-stolmine.9.5.0 (tag 0f36ac7, 2026-06-10). upReleased gained a bpmLatched branch (xroot/Sequencer/GridView.lua:2103-2110) parallel to cancelReleased's, and onHide now releases the latch and persists BPM (GridView.lua:1199-1216). NOTE: TODO.md tagged this 'target: .9.2.1' and the summary bullet says '9.4.0.16'; actual commit is the 2026-06-08 polish round, first shipped in 9.5.0."
@@ -385,7 +420,8 @@ note = "From docs/planning/todo-archive.md section 'Sequencer BPM Latch: Exit Ge
 id = "i2c-txo-passthrough-toggle"
 title = "TXo TR/CV units expose a top-level passthrough toggle (I2C-pure send vs audio passthrough)"
 status = "done"
-stamped = "2026-07-09T20:40:20-05:00"
+created = "2026-07-09T20:40:20-05:00"
+modified = "2026-07-09T20:40:20-05:00"
 area = "i2c"
 verify = { kind = "manual", ref = "instantiate a TXo TR (or CV) unit; confirm a top-level passthrough control that, when off, mutes the chain-input-to-Out1 passthrough while the I2C send (gate detection / V-oct CV) still fires on the TXo (hardware-only, needs a TXo expander)" }
 attested = "2026-06-08 (commit 8135fc1 'polish: BPM latch UP+onHide + Replace picker shift + TXo passthrough toggle'), first released in v0.7.0-stolmine.9.5.0 (tag 0f36ac7, 2026-06-10). Implemented in mods/txo/assets/TR.lua (and CV.lua) as a toggle-mode app.Comparator named 'passthrough' gating an app.Multiply 'vca' on the Out1 path, surfaced as a Gate control (differs from the TODO's proposed Multiply+Fader-on-ParameterAdapter design, same user-facing effect). NOTE: TODO.md tagged this 'target: .9.2.1' / summary bullet '9.2.1'; actual commit landed 2026-06-08, first shipped in 9.5.0."
@@ -396,7 +432,8 @@ note = "From docs/planning/todo-archive.md section 'TXo Units: Top-Level Passthr
 id = "dsp-multi-output-framework"
 title = "Multi-output unit framework: units expose sub-outs picked from LocalChooser, vanilla-safe"
 status = "done"
-stamped = "2026-07-09T20:40:20-05:00"
+created = "2026-07-09T20:40:20-05:00"
+modified = "2026-07-09T20:40:20-05:00"
 area = "dsp"
 verify = { kind = "manual", ref = "instantiate the multiout QuadLFO fixture; confirm its sub-outs (>2) are pickable as sources from the local chooser on stolmine; load the same preset on vanilla firmware and confirm graceful fallback to the primary out (no crash)" }
 attested = "2026-04-21 (commits 7d99be1 'multi-out unit framework: Unit Lua + LocalChooser picker UI' + a9cc47d 'multiout package: QuadLFO test fixture'), first released in v0.7.0-stolmine.9.2.0. Validated end-to-end on stolmine emu, stolmine hardware, and vanilla firmware (graceful fallback to primary). Author guide in er-301-habitat/docs/multi-output-units-author-guide.md."
@@ -406,7 +443,8 @@ note = "From docs/planning/todo-archive.md section 'Multi-Output Unit Framework 
 id = "ui-settings-picker-scene-categories"
 title = "Settings menu splits Unit Picker + Scenes into their own categories"
 status = "done"
-stamped = "2026-07-09T20:40:20-05:00"
+created = "2026-07-09T20:40:20-05:00"
+modified = "2026-07-09T20:40:20-05:00"
 area = "ui"
 verify = { kind = "screenshot", ref = "open Admin > Settings > Interface; confirm a 'Unit Picker' category (pickerStyle, showFavorites, pickerSectionDividers, pickerDefaultSort, pickerPinFavorites, pickerPinRecents) and a 'Scenes' category (sceneMode), distinct from the catch-all 'Units' and from 'Sequencer' / 'QuickSaves'" }
 attested = "2026-06-04 (commit ed95e0d 'settings: split picker + scene-mode into own categories'), first released in v0.7.0-stolmine.9.4.0 (tag 7168d39, 2026-06-04). xroot/Settings/Interface.lua now emits addCategory 'Unit Picker' (line ~76) with the six picker variables and addCategory 'Scenes' (line ~107) with sceneMode."
@@ -419,7 +457,8 @@ note = "From docs/planning/todo-archive.md section 'Settings Menu: Picker + Scen
 id = "sequencer-shift-home-all-slots"
 title = "shift+HOME resets all 4 slot playheads (unified-transport scope)"
 status = "todo"
-stamped = "2026-07-09T20:40:20-05:00"
+created = "2026-07-09T20:40:20-05:00"
+modified = "2026-07-09T20:40:20-05:00"
 area = "sequencer"
 verify = { kind = "manual", ref = "run all 4 sequencer slots; press shift+HOME (outside L1 cell-edit); confirm every slot's playhead resets to 0, matching the S1 start/stop unified-transport scope, not just the active slot" }
 note = "From docs/planning/todo-archive.md section 'Sequencer: shift+HOME Resets All Slot Playheads'. VERIFIED STILL OPEN: xroot/Sequencer/GridView.lua:2180-2185 (zeroReleased) calls seq:resetSlot(self.slot) — single slot only. Fix is a loop `for s = 0, 3 do seq:resetSlot(s) end`. The in-edit-mode branch (zeros the focused cell) at GridView.lua:2172-2179 stays untouched."
@@ -428,7 +467,8 @@ note = "From docs/planning/todo-archive.md section 'Sequencer: shift+HOME Resets
 id = "sequencer-gate-len-zero-random"
 title = "Include 0 (no-gate / rest) in the gate-len random pool"
 status = "todo"
-stamped = "2026-07-09T20:40:20-05:00"
+created = "2026-07-09T20:40:20-05:00"
+modified = "2026-07-09T20:40:20-05:00"
 area = "sequencer"
 verify = { kind = "manual", ref = "roll gate-len via a ? action and via the selection-RAND softkey enough times; confirm 0 (silent/rest step) can occur, not just firing gate lengths" }
 note = "From docs/planning/todo-archive.md section 'Sequencer: Include 0 in gate-len Random Pool'. VERIFIED STILL OPEN: the pool excludes 0 in both places — Lua xroot/Sequencer/GridView.lua:680 kRandomBeats = {0.0625,0.125,0.25,0.5,1.0,2.0}; C++ od/sequencer/ActionApply.cpp:110-113 beats[] = {0.0625f,0.125f,0.25f,0.5f,1.0f,2.0f} with b(0,5). Both must add 0 and the C++ dist bump to (0,6) to stay in sync. TODO flags an open design choice: uniform vs weight the pool toward firing."
@@ -437,7 +477,8 @@ note = "From docs/planning/todo-archive.md section 'Sequencer: Include 0 in gate
 id = "sequencer-enter-in-edit-toggle"
 title = "Admin toggle for ENTER-in-edit behavior (advance vs exit)"
 status = "todo"
-stamped = "2026-07-09T20:40:20-05:00"
+created = "2026-07-09T20:40:20-05:00"
+modified = "2026-07-09T20:40:20-05:00"
 area = "sequencer"
 verify = { kind = "manual", ref = "set the proposed sequencerEnterInEditMode admin setting to 'exit'; in single-cell L1 edit, press ENTER and confirm it commits + exits to navigation (rather than advancing the focus head one row and staying in edit); with 'advance' (default) confirm current advance behavior" }
 note = "From docs/planning/todo-archive.md section 'Sequencer: Admin Toggle for ENTER-in-Edit Behavior'. VERIFIED STILL OPEN and NOT superseded by the terminal-edit change (sequencer-terminal-edit-leds): editingL1 became a terminal modal in the sense that OTHER modal-entry gestures commit-and-exit the edit first (GridView.lua _commitOtherModalsBefore), but ENTER inside editingL1 still advances the focus head — xroot/Sequencer/GridView.lua:2024-2028 does focusHeadRow = clamp(focusHeadRow+1, ...) and re-snapshots the cell. No sequencerEnterInEditMode setting exists (grep clean). The advance-vs-exit asymmetry the TODO describes is intact, so this remains open design work."
@@ -448,7 +489,8 @@ note = "From docs/planning/todo-archive.md section 'Sequencer: Admin Toggle for 
 id = "ui-dense-picker-residuals"
 title = "Dense picker residual sub-features: I/O-fan sort, admin hidden-units restore list, sub-display preview pane"
 status = "todo"
-stamped = "2026-07-09T20:40:20-05:00"
+created = "2026-07-09T20:40:20-05:00"
+modified = "2026-07-09T20:40:20-05:00"
 area = "ui"
 verify = { kind = "manual", ref = "in the dense picker cycle M2 to an 'I/O fan' sort mode and confirm units order by input/output count; in Admin > Settings find a hidden-units list with per-row restore; confirm the sub-display shows a live preview pane (description / I-O fan / last-used) for the focused unit" }
 links = { depends_on = ["ui-dense-unit-picker"] }
@@ -458,7 +500,8 @@ note = "From docs/planning/todo-archive.md sections 'Unit Picker Readability + E
 id = "ui-core-keyword-type-revamp"
 title = "Core package keyword + type revamp: sampling glyph + keyword audit"
 status = "todo"
-stamped = "2026-07-09T20:40:20-05:00"
+created = "2026-07-09T20:40:20-05:00"
+modified = "2026-07-09T20:40:20-05:00"
 area = "ui"
 verify = { kind = "manual", ref = "add a 'sampling' type (7th glyph) to xroot/Unit/Chooser/Glyph.lua and audit mods/core/assets/toc.lua keywords; confirm sampling-family core units render with the new glyph, no core unit renders as '?' unknown, and keywords use canonical forms (modulate/cv/oscillator)" }
 links = { depends_on = ["ui-dense-unit-picker"] }
@@ -468,7 +511,8 @@ note = "From docs/planning/todo-archive.md section 'Core Package Keyword + Type 
 id = "ui-screensaver-polish"
 title = "Screensaver polish: forest full-screen coverage + rain splash particles"
 status = "todo"
-stamped = "2026-07-09T20:40:20-05:00"
+created = "2026-07-09T20:40:20-05:00"
+modified = "2026-07-09T20:40:20-05:00"
 area = "ui"
 verify = { kind = "screenshot", ref = "run the forest screensaver and confirm full-screen coverage; run the rain screensaver and confirm splash particles on impact" }
 links = { depends_on = ["ui-screensavers"] }
@@ -478,7 +522,8 @@ note = "From docs/planning/todo-archive.md section 'Screensaver Polish'. Two sma
 id = "ui-audio-editor-selection-ops"
 title = "Audio editor: selection-scoped destructive operations (idea)"
 status = "todo"
-stamped = "2026-07-09T20:40:20-05:00"
+created = "2026-07-09T20:40:20-05:00"
+modified = "2026-07-09T20:40:20-05:00"
 area = "ui"
 verify = { kind = "manual", ref = "with a sample-editor selection active (shift+scroll range), invoke an M-key operation (reverse / gain / cut / copy / paste) and confirm it scopes to the range; with no selection, confirm the same operation applies to the whole sample" }
 note = "From docs/planning/todo-archive.md section 'Audio Editor: Selection-Scoped Operations (idea, 2026-06-13)'. IDEA STAGE — not yet designed. Layer Audacity/Audition-style ops on the existing shift+scroll selection convention; same button, two scopes (selection vs whole-sample). Candidate ops: copy/cut/paste (cross-sample needs a clipboard), reverse, gain, pitch/time-stretch (gate behind its own pass). Undo/redo and a non-destructive edit layer are explicitly out of scope for the idea phase; pick an undo model before building."
@@ -487,7 +532,8 @@ note = "From docs/planning/todo-archive.md section 'Audio Editor: Selection-Scop
 id = "ui-chain-ref-invalidation-link-unlink"
 title = "Chain-reference invalidation on stereo link/unlink (LocalChooser / Source.Chooser)"
 status = "todo"
-stamped = "2026-07-09T20:40:20-05:00"
+created = "2026-07-09T20:40:20-05:00"
+modified = "2026-07-09T20:40:20-05:00"
 area = "ui"
 verify = { kind = "manual", ref = "with a LocalChooser / Source.Chooser holding a chain reference, link then unlink the stereo channel; confirm the chooser reseeds or dismisses cleanly instead of dangling on a destroyed chain object" }
 note = "From docs/planning/todo-archive.md section 'Chain-Reference Invalidation on Stereo Link/Unlink (pre-v9.1.0)'. Known fix shape: stereo link/unlink destroys+recreates chain objects but only UserMode subscribes to channelsModified; LocalChooser and Source/Chooser hold references that dangle. Apply the stock Signal.weakRegister pattern (as in Source/Chooser.lua:41, GlobalChains/Interface.lua:315-317) with reseed-or-dismiss semantics. Full analysis: docs/planning/chain_invalidation_on_link_unlink.md."
@@ -496,7 +542,8 @@ note = "From docs/planning/todo-archive.md section 'Chain-Reference Invalidation
 id = "ui-encoder-capture-saturation"
 title = "Encoder capture under UI saturation: instrument then de-couple input from render"
 status = "todo"
-stamped = "2026-07-09T20:40:20-05:00"
+created = "2026-07-09T20:40:20-05:00"
+modified = "2026-07-09T20:40:20-05:00"
 area = "ui"
 verify = { kind = "manual", ref = "drive the UI into CPU saturation (heavy Lua views / redraw during transitions); confirm encoder movement reaches the underlying parameter value within a few hundred ms even when the display lags — sluggish-but-trackable, never captured with seconds of ghost-motion backlog" }
 note = "From docs/planning/todo-archive.md section 'Encoder Capture Under UI Saturation'. DESIGN INVESTIGATION, not a spot fix. Root cause: only the audio thread has CPU accounting; the UI thread has no budget/watchdog/degradation path, so events pile up unbounded under overload. First step (before any fix): UI-thread budget instrumentation (analogous to od::extras::Profiler) to characterize which states saturate and how badly. Candidate remedies: input aging/coalescing, render-skip circuit breaker, input fast-path bypassing render, priority-inversion event drain."
@@ -507,7 +554,8 @@ note = "From docs/planning/todo-archive.md section 'Encoder Capture Under UI Sat
 id = "infra-v0616-port"
 title = "Port the TXo I2C master mod to the v0.6.16 stable firmware base"
 status = "todo"
-stamped = "2026-07-09T20:40:20-05:00"
+created = "2026-07-09T20:40:20-05:00"
+modified = "2026-07-09T20:40:20-05:00"
 area = "infra"
 verify = { kind = "manual", ref = "build the TXo I2C master mod against a v0.6.16 firmware base; confirm it loads and drives a TXo expander on that base (which retains third-party-package compatibility that v0.7 breaks)" }
 links = { depends_on = ["i2c-txo-master"] }
@@ -517,7 +565,8 @@ note = "From docs/planning/todo-archive.md section 'v0.6.16 Port'. v0.7 breaks c
 id = "docs-intro-video"
 title = "Produce a short intro video for the stolmine firmware"
 status = "todo"
-stamped = "2026-07-09T20:40:20-05:00"
+created = "2026-07-09T20:40:20-05:00"
+modified = "2026-07-09T20:40:20-05:00"
 area = "docs"
 verify = { kind = "manual", ref = "produce the video per the script outline in video.md; confirm it introduces the stolmine firmware's differentiators end-to-end" }
 note = "From docs/planning/todo-archive.md section 'Intro Video'. Script outline lives in video.md."
@@ -528,7 +577,8 @@ note = "From docs/planning/todo-archive.md section 'Intro Video'. Script outline
 id = "dsp-multi-output-followups"
 title = "Multi-output framework follow-ups (preset rewriter, picker glyph, topology surfacing, LUT audit)"
 status = "todo"
-stamped = "2026-07-09T20:40:20-05:00"
+created = "2026-07-09T20:40:20-05:00"
+modified = "2026-07-09T20:40:20-05:00"
 area = "dsp"
 verify = { kind = "manual", ref = "confirm each non-blocking follow-up: (1) a stolmine-side save-time rewriter snaps sub-out indices >2 to primary for lossless vanilla degradation; (2) the unit picker shows a fan-out count next to multi-out unit types; (3) the focused multi-out unit's view surfaces its sub-out list; (4) any multi-out unit whose audio path shows the package trig bug uses a sinf/cosf LUT" }
 links = { depends_on = ["dsp-multi-output-framework"] }
@@ -538,7 +588,8 @@ note = "From docs/planning/todo-archive.md section 'Multi-Output Unit Framework 
 id = "dsp-stolmine-core-package"
 title = "Stolmine Core package: multi-output core units, default install with vanilla Core bundled"
 status = "todo"
-stamped = "2026-07-09T20:40:20-05:00"
+created = "2026-07-09T20:40:20-05:00"
+modified = "2026-07-09T20:40:20-05:00"
 area = "dsp"
 verify = { kind = "manual", ref = "on a fresh install confirm stolmine Core activates by default (multi-out filters/envelopes/clocks/LFOs) while vanilla Core ships in the staging area and can be opted into via the package manager; confirm the two coexist without duplicate picker entries and that inactive sub-outs short-circuit their compute" }
 links = { depends_on = ["dsp-multi-output-framework"] }
@@ -550,7 +601,8 @@ note = "From docs/planning/todo-archive.md section 'Stolmine Core Package (Multi
 id = "scenes-authoring-edit-guards"
 title = "Close remaining scene-authoring edit-leak guards (retroactive gain-unfocus + subchain source-picker)"
 status = "todo"
-stamped = "2026-07-09T20:40:20-05:00"
+created = "2026-07-09T20:40:20-05:00"
+modified = "2026-07-09T20:40:20-05:00"
 area = "scenes"
 verify = { kind = "manual", ref = "enter scene authoring while already focused on a non-routed sub readout (e.g. GainBias gain) and confirm the encoder can no longer edit it (enterSceneMode force-unfocuses non-routed slots); dive into a subchain during authoring and confirm the source picker refuses to reassign the subchain input source" }
 links = { depends_on = ["scenes-hold-mode"] }
@@ -560,7 +612,8 @@ note = "From docs/planning/hold-mode-scenes-todos.md 'Open' section (delegated t
 id = "scenes-serialize-roundtrip-verify"
 title = "Bench-verify scene serialize/deserialize round-trip end-to-end"
 status = "todo"
-stamped = "2026-07-09T20:40:20-05:00"
+created = "2026-07-09T20:40:20-05:00"
+modified = "2026-07-09T20:40:20-05:00"
 area = "scenes"
 verify = { kind = "manual", ref = "build a chain with 2+ scenes carrying deltas across 2+ units incl. a nested branch, assign to A/B, save quickset, reboot, reload; confirm scene names, A/B assignments, delta counts/values, bias-fill indicator, authoring highlights, and audio sweep all restore; repeat with 8+ scenes for scroll viewport; cross-firmware (save stolmine, load vanilla → gracefully ignored) and old-preset compat" }
 links = { depends_on = ["scenes-hold-mode"] }
@@ -572,7 +625,8 @@ note = "From docs/planning/hold-mode-scenes-todos.md 'Open' section. Serialize/d
 id = "i2c-sccv-insert-crash"
 title = "Crash when inserting sc.cv at the end of a chain (habitats + TXo + Teletype)"
 status = "blocked"
-stamped = "2026-07-09T20:40:20-05:00"
+created = "2026-07-09T20:40:20-05:00"
+modified = "2026-07-09T20:40:20-05:00"
 area = "i2c"
 verify = { kind = "manual", ref = "on the latest firmware, build a chain with mutable units from the habitats package and TXo + Teletype enabled; insert an sc.cv unit at the end of the chain; confirm/deny the crash and capture a crashdump" }
 note = "From docs/planning/todo-archive.md section 'Crash Report: sc.cv insert at end of chain'. BLOCKED pending a device crashdump + exact unit list/order from the reporter (same blocking shape as dsp-stereo-mix-quicksave-drop). To collect: crashdump, exact unit list + order, whether link/unlink state matters, whether removing TXo or Teletype changes reproducibility. Cannot reproduce/diagnose without the crashdump."
@@ -581,7 +635,8 @@ note = "From docs/planning/todo-archive.md section 'Crash Report: sc.cv insert a
 id = "docs-porting-guide-301"
 title = "301-ecosystem porting guide for the ledger + BDG regime"
 status = "done"
-stamped = "2026-07-09T20:40:20-05:00"
+created = "2026-07-09T20:40:20-05:00"
+modified = "2026-07-09T20:40:20-05:00"
 area = "docs"
 verify = { kind = "manual", ref = "planning/ledger-regime-porting-301.md exists and reflects the shipped tooling" }
 attested = "2026-07-09: wrote planning/ledger-regime-porting-301.md — companion to Ligature's ledger-regime-portable.md; captures the applied stolmine delta (STOL_/[stol:]/areas/no-build commit path/develop-allowed), 301-ecosystem constraints (release-dance tagging outside dev, testing/ is build output, Lua tag scanning, hardware-vs-emu attestation, headless emu as future substrate), and per-target notes (habitat first). Stolmine copies are canonical for 301 ports."
@@ -592,7 +647,8 @@ links = { depends_on = ["infra-ledger-regime"] }
 id = "infra-crash-diagnostics-debug-mode"
 title = "Dev-enabled debug mode captures C-side crash diagnostics (umbrella)"
 status = "todo"
-stamped = "2026-07-09T20:55:17-05:00"
+created = "2026-07-09T20:55:17-05:00"
+modified = "2026-07-09T20:55:17-05:00"
 area = "infra"
 verify = { kind = "manual", ref = "with debug mode enabled, a deliberately-injected fault in a package .so produces a persisted crash report whose PC/LR resolve via addr2line to the correct package, function, and offset; with debug mode off, steady-state CPU headroom is unchanged" }
 note = "PLANNED + SPLIT 2026-07-09 into planning/crash-diagnostics-plan.md: children infra-crash-diag-{format,module-map,flight-recorder,emu-inject,debug-mode-ui,exc-hook,panic-buffer,hang-watchdog}. This item stays the umbrella; done when the children close. KEY design axis: capture half is am335x-hardware-only (traps don't reproduce in emu), presentation half (UI + format + viewer) is emu-verifiable via the headless harness by injecting a synthetic report. Primitives already exist (verified): SYS/BIOS ARM Exception ExcContext+hook (register/thread capture), the dlopen mLoaded map (module bases), xroot/Crash.lua (persisted report). Motivation (researched 2026-07-09 across habitat crash history): the Lua side is already covered — xroot/Crash.lua persists message + traceback + LogHistory to crash.log — but habitat's many crashes are C-side, hardware-only audio-thread traps that today leave ZERO evidence (freeze or silent reboot), so every one cost a multi-day bisect (Ngoma differential-switch saga 2.5.5.92-.98, mi AAPCS/tree-vectorize saga 1.0.3.5-.18, xform-target ABI saga). Recurring root-cause families from habitat lore: -ftree-vectorize NEON alignment-hint traps (top cause), stack-local NEON :64 hints, runtime-branched DSP dispatch with differential bodies, AAPCS spill at audio-thread state swaps, float ulp/wrap edges in delay indexing, SWIG class-size mismatch, package-vs-firmware ABI drift. Firmware crashes by contrast: a handful ever. Capture plan (debug mode = admin toggle, zero steady-state cost when off): (1) ARM abort/undef handlers snapshot PC, LR, SP, CPSR, fault address, and a raw stack window; (2) a module map (kernel base + every loaded package .so base/size) persisted so PC/LR symbolize offline via addr2line against the build artifacts — this single feature would have pointed straight at the trapping vld1 in every NEON saga; (3) audio-thread watchdog heartbeat to catch hangs (several sagas froze rather than trapped) with the same snapshot; (4) flight-recorder ring of recent trigger events (unit insert, engine/mode switch, preset load — every historical crash was user-action-triggered); (5) persistence via a warm-reboot-surviving RAM panic buffer flushed to crash.log on next boot, since writing the card from a fault handler is unsafe. Audit first: what if anything the am335x side does today on data abort (sc.cv bug report assumed a 'crashdump from device' exists — verify). Policy note: AM335x line is patch-only, but this is developer diagnostics serving habitat package dev on real hardware (the crashes do NOT reproduce in emu, so the headless-emu substrate cannot cover this class); also directly portable to the CM4 line where Linux coredumps + the same module-map convention apply. Cross-reference: habitat memory files feedback_disable_tree_vectorize_am335x, feedback_neon_aapcs_call_barrier, feedback_runtime_branched_dsp_dispatch, feedback_neon_hint_surfaces."
@@ -602,7 +658,8 @@ links = { depends_on = [] }
 id = "emu-cmd-stable"
 title = "stable-frames primitive: resolve when N consecutive rendered frames are byte-identical"
 status = "done"
-stamped = "2026-07-09T21:49:47-05:00"
+created = "2026-07-09T21:49:47-05:00"
+modified = "2026-07-09T21:49:47-05:00"
 area = "emu"
 anchor = true
 attested = "2026-07-09: stable N [timeout] resolves @ok on a static screen, @err timeout during boot animation/toasts. Commit c788b51."
@@ -614,7 +671,8 @@ links = { depends_on = ["emu-control-channel"] }
 id = "emu-seed-flag"
 title = "--seed N makes the emulator's RNG deterministic"
 status = "done"
-stamped = "2026-07-09T21:49:47-05:00"
+created = "2026-07-09T21:49:47-05:00"
+modified = "2026-07-09T21:49:47-05:00"
 area = "emu"
 anchor = true
 attested = "2026-07-09: --seed N -> deterministic splitmix stream in emu/hal/rng.c; unseeded path unchanged; cross-run captures byte-identical. Commit c788b51."
@@ -625,7 +683,8 @@ note = "planning/headless-emu-plan.md §6 threat 2. od::Random::init seeds from 
 id = "emu-hermetic-sandbox"
 title = "Per-run sandbox: front/rear roots built from committed fixtures, no state bleed between runs"
 status = "done"
-stamped = "2026-07-09T21:49:47-05:00"
+created = "2026-07-09T21:49:47-05:00"
+modified = "2026-07-09T21:49:47-05:00"
 area = "emu"
 attested = "2026-07-09: tools/emu_test.py builds per-test FRONT/REAR from testing-assets/emu/fixtures + generated emu.config; settings fixture disables screensaver/confirmations, forces dense picker; verified two runs share no state. Closed the un-sandboxed emu.session leak in emu core. Commit c788b51."
 verify = { kind = "manual", ref = "run the same test twice back-to-back; confirm the second run sees no recents/favorites/boot-count/settings from the first (fixture-defined state only, screensaver disabled)" }
@@ -636,7 +695,8 @@ links = { depends_on = ["emu-headless-boot"] }
 id = "emu-harness-runner"
 title = "Automated test runner: discovers tests/emu/*.test, drives headless emu, diffs goldens, TAP output"
 status = "done"
-stamped = "2026-07-09T21:49:47-05:00"
+created = "2026-07-09T21:49:47-05:00"
+modified = "2026-07-09T21:49:47-05:00"
 area = "emu"
 attested = "2026-07-09: tools/emu_test.py: discovers tests/emu/*.test, TAP output, !golden/!assert/!expect/!packages, watchdog, STOL_UPDATE_GOLDEN regen; --selftest green (22 checks); 00-boot + 10-admin-nav green against real emu.elf. Commit c788b51."
 verify = { kind = "manual", ref = "scripts/dev test discovers and runs tests/emu/*.test; a passing suite exits 0 with TAP lines; a golden mismatch or err reply exits nonzero naming the test; STOL_UPDATE_GOLDEN=1 regenerates baselines" }
@@ -647,7 +707,8 @@ links = { depends_on = ["emu-capture-deterministic", "emu-hermetic-sandbox", "em
 id = "emu-ui-map"
 title = "Machine-readable UI map: contexts as nodes with Lua recognition predicates, gestures as edges"
 status = "done"
-stamped = "2026-07-09T22:21:27-05:00"
+created = "2026-07-09T22:21:27-05:00"
+modified = "2026-07-09T22:21:27-05:00"
 area = "emu"
 attested = "2026-07-09: testing-assets/emu/ui-map.toml: all 12 edges live-verified with per-edge arrival events; tests/emu/30-ui-map-reachability.test walks every edge and asserts arrival (green). Headline: boot Chain.Root -> Unit.Chooser.Dense is `press MAIN3` (spot-press on the empty insert section, not a cursor-move+ENTER). node.unit_picker_classic retained but unreachable under the dense fixture (no inbound edge). Commit 0d67ea7."
 verify = { kind = "manual", ref = "testing-assets/emu/ui-map.toml parses; for each mapped node, executing its inbound edge sequence from boot lands on a screen whose recognize predicate returns true through 'lua'" }
@@ -658,7 +719,8 @@ links = { depends_on = ["emu-lua-eval"] }
 id = "emu-ui-trace-hooks"
 title = "UI-seam trace hooks emit frame-stamped structured transition events to the control channel"
 status = "done"
-stamped = "2026-07-09T22:21:27-05:00"
+created = "2026-07-09T22:21:27-05:00"
+modified = "2026-07-09T22:21:27-05:00"
 area = "emu"
 anchor = true
 attested = "2026-07-09: EMULATION-only xroot/emu/Trace.lua wraps Application.setVisibleContext + Context:add/remove, emitting frame-stamped @trace lines via emu.pushControlReply; `trace on/off/mark` command. Independently verified: 0 trace lines when off, context show/hide + push/pop with frame stamps when on, silent again after `trace off`. Commit 0d67ea7."
@@ -670,7 +732,8 @@ links = { depends_on = ["emu-control-channel", "emu-lua-eval"] }
 id = "emu-trace-golden"
 title = "Golden trace comparison: test runs produce transition logs diffable against baselines and the UI map"
 status = "done"
-stamped = "2026-07-09T22:21:27-05:00"
+created = "2026-07-09T22:21:27-05:00"
+modified = "2026-07-09T22:21:27-05:00"
 area = "emu"
 attested = "2026-07-09: tools/emu_test.py !trace-golden directive: frame-stripped route signature diffed against testing-assets/emu/goldens/<test>/<name>.trace, STOL_UPDATE_GOLDEN regen, unified diff on mismatch. Verified live: corrupting picker-route.trace fails 20-picker-open, restore passes; --selftest covers match+mismatch+update. Middle verification tier (route) between !assert (state) and !golden (pixels). Anchor tag lives in tools/ (not scanned), so no anchor=true. Commit 0d67ea7."
 verify = { kind = "manual", ref = "a test with '!trace-golden NAME' records the run's @trace stream, normalizes it, and byte-compares against testing-assets/emu/goldens/<test>/<NAME>.trace; a deliberate route change fails with a readable diff; the reachability smoke test cross-checks observed transitions against ui-map.toml edges" }
@@ -681,7 +744,8 @@ links = { depends_on = ["emu-ui-trace-hooks", "emu-harness-runner"] }
 id = "infra-crash-diag-format"
 title = "Crash report schema v2 + offline symbolication tool"
 status = "done"
-stamped = "2026-07-10T08:05:02-05:00"
+created = "2026-07-10T08:05:02-05:00"
+modified = "2026-07-10T08:05:02-05:00"
 area = "infra"
 anchor = true
 attested = "2026-07-10: docs/CRASH_REPORT_FORMAT.md schema v2 + tools/symbolize_crash.py; xroot/CrashReport.lua writes conformant reports. Verified: --selftest 4/4 (resolver, mock-addr2line file:line, graceful degrade); an injected report parses + symbolizes. Commit be4076f."
@@ -693,7 +757,8 @@ links = { depends_on = [] }
 id = "infra-crash-diag-module-map"
 title = "Module map: enumerate kernel + loaded package text/data bases"
 status = "done"
-stamped = "2026-07-10T08:05:02-05:00"
+created = "2026-07-10T08:05:02-05:00"
+modified = "2026-07-10T08:05:02-05:00"
 area = "infra"
 anchor = true
 attested = "2026-07-10: od::ElfFile public text/data accessors + hal/modulemap.h enumerator, two arch impls (am335x over dlopen mLoaded, emu over dl_iterate_phdr). Verified in emu: map renders non-empty (kernel + 23 objects), test 40 green. am335x runtime path compiles (make firmware exit 0); its live capture is exercised by the hardware half. Commit be4076f."
@@ -705,7 +770,8 @@ links = { depends_on = ["infra-crash-diag-format"] }
 id = "infra-crash-diag-flight-recorder"
 title = "Flight recorder: ring of recent crash-trigger events"
 status = "done"
-stamped = "2026-07-10T08:05:02-05:00"
+created = "2026-07-10T08:05:02-05:00"
+modified = "2026-07-10T08:05:02-05:00"
 area = "infra"
 anchor = true
 attested = "2026-07-10: od/extras/FlightRecorder C ring (N=32) + seams at unit insert (Chain/Base) and preset/quicksave load (Persist). Verified: test 44 records a real insert when armed; test 41 confirms zero-cost-when-off. Commit be4076f."
@@ -717,7 +783,8 @@ links = { depends_on = ["infra-crash-diag-format"] }
 id = "infra-crash-diag-emu-inject"
 title = "Emulator affordance to inject a synthetic crash report"
 status = "done"
-stamped = "2026-07-10T08:05:02-05:00"
+created = "2026-07-10T08:05:02-05:00"
+modified = "2026-07-10T08:05:02-05:00"
 area = "emu"
 anchor = true
 attested = "2026-07-10: CrashReport.injectSynthetic(kind), app.EMULATION-guarded, driven via the lua control command; writes a schema-v2 block (canned regs + real emu module map + flight recorder) + a front/crash.pending marker. Verified: independent injection produced a conformant report; tests 42/43 green. Commit be4076f."
@@ -729,7 +796,8 @@ links = { depends_on = ["infra-crash-diag-format"] }
 id = "infra-crash-diag-debug-mode-ui"
 title = "Debug-mode admin toggle + on-boot crash screen + past-report viewer"
 status = "done"
-stamped = "2026-07-10T08:05:02-05:00"
+created = "2026-07-10T08:05:02-05:00"
+modified = "2026-07-10T08:05:02-05:00"
 area = "ui"
 anchor = true
 attested = "2026-07-10: enableCrashDiagnostics setting arms the ring; on-boot crash notice (CrashReport.checkPendingOnBoot) + AdminMode 'Crash Reports' viewer (CrashReportViewer.lua). Verified in emu: test 42 asserts the boot notice + golden crash-notice, test 43 lists two injected reports + opens detail scroll. Commit be4076f."
@@ -741,7 +809,8 @@ links = { depends_on = ["infra-crash-diag-format", "infra-crash-diag-emu-inject"
 id = "infra-crash-diag-exc-hook"
 title = "SYS/BIOS exception hook captures ExcContext + module map (hardware)"
 status = "done"
-stamped = "2026-07-11T22:40:10-05:00"
+created = "2026-07-11T22:40:10-05:00"
+modified = "2026-07-11T22:40:10-05:00"
 area = "infra"
 attested = "2026-07-11 bench (fw 9.5.2.46): injected data-abort produced a schema-2 report with Kind=data-abort, pc=0x801fe2b8 symbolizing to Crash_testTrap (PanicBuffer.cpp:683 via arm-none-eabi-addr2line against the .46 app.elf), lr captured, Thread=app, and the kernel-bounded module map. Register subset is partial (sp==pc, psr/r1/r8-r11=0xffffffff) but that is a SYS/BIOS-upstream artifact (excDumpContext reads the identical ExcContext fields) tracked separately in crashdiag-fix-partial-register-capture; the diagnostic-essential set (pc/lr/dfar/dfsr/faulting values/thread/module map) is correct. Report landed in front/crash.log."
 verify = { kind = "manual", ref = "with debug mode armed, inject a deliberate fault on am335x hardware; confirm a report is produced with correct fault kind, pc/lr/registers, faulting thread, and the module map" }
@@ -752,7 +821,8 @@ links = { depends_on = ["infra-crash-diag-format", "infra-crash-diag-module-map"
 id = "infra-crash-diag-panic-buffer"
 title = "Warm-reboot-surviving panic buffer flushed to crash.log on next boot (hardware)"
 status = "done"
-stamped = "2026-07-11T22:40:10-05:00"
+created = "2026-07-11T22:40:10-05:00"
+modified = "2026-07-11T22:40:10-05:00"
 area = "infra"
 attested = "2026-07-11 bench (fw 9.5.2.46): the make-or-break DRAM-retention assumption HELD. A fault injected at boot (Time Since Boot 0.037s) survived the WDT warm reboot and flushed to front/crash.log on the next boot carrying the exact fault state (dfar=0xf0000000, r2=0xf0000000, r3=0xdeadbeef). Reproduced across two separate CRASH_TEST runs; both sealed and flushed cleanly."
 verify = { kind = "manual", ref = "on hardware: trigger a captured fault, let it reboot, confirm the report written from the panic buffer appears in front/crash.log on the next boot" }
@@ -763,7 +833,8 @@ links = { depends_on = ["infra-crash-diag-format"] }
 id = "infra-crash-diag-hang-watchdog"
 title = "Audio-thread heartbeat + WDT catches hangs, not just traps (hardware, later)"
 status = "todo"
-stamped = "2026-07-09T22:55:14-05:00"
+created = "2026-07-09T22:55:14-05:00"
+modified = "2026-07-09T22:55:14-05:00"
 area = "infra"
 verify = { kind = "manual", ref = "on hardware with debug mode armed, induce an audio-thread hang; confirm the watchdog fires, snapshots state to the panic buffer, and the report appears after reboot" }
 note = "planning/crash-diagnostics-plan.md §3 + full DESIGN PASS §8 (2026-07-11). Several habitat sagas FROZE rather than trapped, which the exception hook alone never catches. DESIGN RESOLVED: audio DSP runs in a Task (taskAudio, TASK_PRIORITY_AUDIO=11, EDMA-Event-driven; Audio_callback = package process() = the hang sites), so a Swi-context monitor (SYS/BIOS Clock function, ~100ms) preempts a spinning audio task with NO raw timer/HWI programming (HWI>Swi>Task; default Clock tick, no free DMTIMER needed). Mechanism: (1) heartbeat = g_audioFrames counter bumped per Audio_callback + g_audioRunning flag gated at McASP/EDMA start/stop (essential: a stopped stream also freezes the counter -> false positive without the gate); (2) Clock monitor, armed-only, flags a hang when audioRunning && counter stale K ticks (~250ms); (3) snapshot Kind=hang into the EXISTING panic buffer (reuses flush/flight-recorder/fwVersion/one-shot latch), then reboot(). Coverage: task livelock/NaN-storm (IRQs on) = FULL capture (preempting HWI already saved the full frame); deadlock/blocked = partial (block site); driver-ISR spin = out of MVP; IRQ-disabled spin = hardware WDT1 backstop (phase 2, recovery-only, NO capture, documented gap). KEY NEW PIECE: acquiring a hung task's state -- MVP captures a raw 256-byte stack window + saved SP into PanicRecord (+~0x104, budget fine vs 0x4000) and defers to symbolize_crash.py scanning the window for in-.text return addresses against the module map -> a backtrace, robust to both sub-cases, no bios-internal frame parsing. Bench trigger: extend BUILDOPT_CRASH_TEST so CRASH_TEST first byte 'h' makes Audio_callback livelock (mirrors the 'u' undef / data-abort triggers). Build order in §8.7. reboot()=WDT1 poke, callable from monitor. Zero-cost-when-off (heartbeat gated; Clock only while armed). HARDWARE-ONLY capture; format/viewer/symbolizer-stack-scan emu-testable via a synthetic hang record. Ready to dispatch."
@@ -773,7 +844,8 @@ links = { depends_on = ["infra-crash-diag-exc-hook"] }
 id = "crashdiag-fix-oneshot-guard"
 title = "Crash hook must be one-shot: a post-capture nested fault overwrites the real report (H2)"
 status = "done"
-stamped = "2026-07-11T22:40:10-05:00"
+created = "2026-07-11T22:40:10-05:00"
+modified = "2026-07-11T22:40:10-05:00"
 area = "infra"
 attested = "2026-07-11 bench (fw 9.5.2.46): the flushed report resolves to the ORIGINAL trap (dfar=0xf0000000, pc in Crash_testTrap), NOT the SYS/BIOS Error_raise/print tail -- the stated pass condition. Two runs each sealed exactly one clean, self-consistent record (no overwrite). The g_captured latch (PanicBuffer.cpp:197) is in place; the adversarial nested-post-hook-fault case was not separately induced, but the observed reports demonstrate the sealed record is preserved, not clobbered by the reboot tail."
 verify = { kind = "manual", ref = "on hardware, a trap whose post-hook Error_raise tail itself faults within the ~30ms WDT window must NOT overwrite the sealed record; the flushed report resolves to the original trap (dfar=0xF0000000), not kernel print/error machinery" }
@@ -784,7 +856,8 @@ links = { depends_on = [] }
 id = "crashdiag-fix-flightrec-insert-order"
 title = "Flight recorder records unit insert AFTER the risky work, missing the #1 trigger (H3)"
 status = "done"
-stamped = "2026-07-10T10:48:48-05:00"
+created = "2026-07-10T10:48:48-05:00"
+modified = "2026-07-10T10:48:48-05:00"
 area = "infra"
 attested = "2026-07-10: record('insert') moved to the top of loadUnit before UnitFactory.instantiate; added 'insert-ok' after success. Verified in emu: test 44 asserts both events appear and 'insert' precedes 'insert-ok', proving the trigger is recorded BEFORE the risky work. Commit f6c5c5b."
 verify = { kind = "manual", ref = "a crash during UnitFactory.instantiate or the unit's first process() produces a report whose Flight Recorder names the insert that triggered it" }
@@ -795,7 +868,8 @@ links = { depends_on = [] }
 id = "crashdiag-fix-package-symbolication"
 title = "Offline symbolication of package PCs is broken by design — the headline use case (H1)"
 status = "done"
-stamped = "2026-07-10T10:48:48-05:00"
+created = "2026-07-10T10:48:48-05:00"
+modified = "2026-07-10T10:48:48-05:00"
 area = "infra"
 attested = "2026-07-10: symbolize_crash.py replicates the loader's ET_REL section-packing (4-byte align, text-space-only, section-header order per ElfFile.cpp) and resolves package PCs via the section symtab. Verified without hardware: a real arm-none-eabi ET_REL fixture resolves beta_fn correctly where the OLD code gave confidently-wrong gamma_fn; --selftest green (section-walk + symtab-as-truth). Also handles the addr2line ET_REL DWARF-ambiguity by corroborating against symtab. Commit f6c5c5b."
 verify = { kind = "manual", ref = "take a real captured PC inside a loaded package, run symbolize_crash.py, and confirm it resolves to the correct file:line (cross-checked against nm/objdump of the .so)" }
@@ -806,7 +880,8 @@ links = { depends_on = ["infra-crash-diag-format"] }
 id = "crashdiag-fix-fwversion-capture-time"
 title = "Firmware Version stamped at flush time, not capture time (M2)"
 status = "done"
-stamped = "2026-07-11T22:40:10-05:00"
+created = "2026-07-11T22:40:10-05:00"
+modified = "2026-07-11T22:40:10-05:00"
 area = "infra"
 attested = "2026-07-11 bench: the .46 build prints 'Firmware Version: 0.7.0-stolmine.9.5.2.46' from the panic record's capture-time fwVersion field (filled in the hook via strncpy(FIRMWARE_VERSION), printed by the flushing binary FROM THE RECORD, not its own FIRMWARE_VERSION). front/crash.log carries distinct .16 and .46 schema-2 blocks, each stamped with its own capture-time version, proving records do not adopt the flushing binary's version. Direct reflash-A/B (capture on .16, flush on .46) not separately isolated, but the mechanism is confirmed end to end."
 verify = { kind = "manual", ref = "capture a crash, install a different firmware (warm reboot preserves the record), boot; the flushed report shows the version that was running at CRASH time, not the new one" }
@@ -817,7 +892,8 @@ links = { depends_on = [] }
 id = "crashdiag-fix-flush-error-handling"
 title = "Flush ignores FatFS write errors, then destroys the only copy (M4)"
 status = "todo"
-stamped = "2026-07-10T10:17:40-05:00"
+created = "2026-07-10T10:17:40-05:00"
+modified = "2026-07-10T10:17:40-05:00"
 area = "infra"
 verify = { kind = "manual", ref = "with a full/failing card, confirm a failed crash.log write does NOT clear the panic-buffer magic (report retries next boot) rather than being lost" }
 note = "Fable review 2026-07-10 (MEDIUM). PanicBuffer.cpp:343-347/516/541: panicPut discards f_write's FRESULT and bw, f_close unchecked, then PanicBuffer_clear() runs unconditionally → a full/failing card yields a truncated/empty block and the record is gone forever. Fix: accumulate a success flag across panicPut/f_close, clear the magic only on a fully-written block (the no-card retry-next-boot machinery already exists). Cheap, protects the one copy."
@@ -827,7 +903,8 @@ links = { depends_on = [] }
 id = "crashdiag-fix-kernel-fallback-bound"
 title = "'kernel + offset' fallback swallows unknown package addresses (M1)"
 status = "done"
-stamped = "2026-07-11T22:40:10-05:00"
+created = "2026-07-11T22:40:10-05:00"
+modified = "2026-07-11T22:40:10-05:00"
 area = "infra"
 attested = "2026-07-11 bench (fw 9.5.2.46): module map printed 'kernel text=80000000..804f191c' (bounded to the real __kernel_text_start__/__kernel_text_end__ extent); pc=0x801fe2b8 resolved to 'kernel + 0x801fe2b8' while lr=0x81a59624 (ABOVE the kernel text end) resolved to '?' rather than a false 'kernel + ...'. Exactly the verify condition: an address outside the bounded kernel text is not falsely attributed to the kernel."
 verify = { kind = "manual", ref = "a PC in a package missing from the module map (>48 loaded, path truncated, mid-dlopen) resolves to '?' not a confident 'kernel + 0x9xxxxxxx'" }
@@ -838,7 +915,8 @@ links = { depends_on = [] }
 id = "crashdiag-fix-emu-symbolication-base"
 title = "Emu symbolication base off by p_vaddr (M3)"
 status = "done"
-stamped = "2026-07-10T10:48:48-05:00"
+created = "2026-07-10T10:48:48-05:00"
+modified = "2026-07-10T10:48:48-05:00"
 area = "emu"
 attested = "2026-07-10: arch/linux/hal/dynload.cpp now reports base=dlpi_addr (was dlpi_addr+p_vaddr), textSize=p_vaddr+memsz so the single text_lo..hi field is both range and correct addr2line base. Verified against /proc/self/maps: reported base equals load base for libc/libm/libgcc_s (3/3). Emu suite green. Commit f6c5c5b."
 verify = { kind = "manual", ref = "symbolize a synthetic/emu report and confirm file:line matches the true source location (base = dlpi_addr, not dlpi_addr+p_vaddr)" }
@@ -849,7 +927,8 @@ links = { depends_on = [] }
 id = "crashdiag-review-nits"
 title = "Crash-diag review LOW/NIT cleanup batch"
 status = "done"
-stamped = "2026-07-10T10:48:48-05:00"
+created = "2026-07-10T10:48:48-05:00"
+modified = "2026-07-10T10:48:48-05:00"
 area = "infra"
 attested = "2026-07-10: Addressed: static_assert(sizeof(PanicRecord)<=0x4000) (passes ~0x2228), PanicModuleEntry.path 64->128, CRC non-standard-poly comment, panicKindString enum comment, FlightRecorder is now a static-init file-scope global (L1, removes the abort-context lazy-guard), enableCrashDiagnostics text 'requires reboot'->'arms immediately'. Both arches build clean. L4 (silent crash.pending write failure -> no boot notice) consciously WAIVED: cosmetic, and the report still lands in crash.log. Commit f6c5c5b."
 verify = { kind = "manual", ref = "each LOW/NIT from the 2026-07-10 Fable review is addressed or consciously waived with a reason" }
@@ -860,7 +939,8 @@ links = { depends_on = [] }
 id = "ui-model-facility"
 title = "Deterministic UI model for agent-driven 301 operation (umbrella)"
 status = "done"
-stamped = "2026-07-10T16:52:44-05:00"
+created = "2026-07-10T16:52:44-05:00"
+modified = "2026-07-10T16:52:44-05:00"
 area = "emu"
 attested = "2026-07-10: Facility complete: an agent can plan and execute a novel target UI state from the model with the headless emu confirming arrival, no trial-and-error. Children all done: ui-model-{gesture-catalog, introspect, manifest, planner}. Proven live via tools/ui_plan.py --run on the link+insert+focus+control_at goal (the Network-on-M1 scenario generalized to a hermetic core unit). Commit bc6f6a2."
 verify = { kind = "manual", ref = "an agent can, from the UI model, plan and execute a novel target state (e.g. stereo-link 1+2, insert Network, glitch graphic on M1) and the headless emu confirms arrival — no trial-and-error probing" }
@@ -871,7 +951,8 @@ links = { depends_on = [] }
 id = "ui-model-introspect"
 title = "Runtime emu.uiState() — context/focus/controls/slots/affordances as structured data"
 status = "done"
-stamped = "2026-07-10T16:27:10-05:00"
+created = "2026-07-10T16:27:10-05:00"
+modified = "2026-07-10T16:27:10-05:00"
 area = "emu"
 anchor = true
 attested = "2026-07-10: xroot/emu/UIState.lua (pure Lua, app.EMULATION-guarded, no C++/ABI change) exposes emu.uiState()/describe() via the lua command: context/stack/focus-chain/controls-with-M1-M6-slots/37-token affordance set/modals as deterministic sorted JSON. Slot resolution mirrors SpottedStrip:mainPressed geometry; affordances reflect obj[event] along the sendUp chain + context (read-only). Verified: tests 50-uistate-boot + 51-uistate-insert green (main3->EmptyControl at boot, glitch/header slot after insert), cross-run byte-identical JSON. Commit a4a90a4."
@@ -883,7 +964,8 @@ links = { depends_on = ["ui-model-gesture-catalog"] }
 id = "ui-model-manifest"
 title = "Static UI behavior manifest extracted from xroot (extract-and-diff BDG)"
 status = "done"
-stamped = "2026-07-10T16:27:10-05:00"
+created = "2026-07-10T16:27:10-05:00"
+modified = "2026-07-10T16:27:10-05:00"
 area = "infra"
 attested = "2026-07-10: tools/extract_ui_model.py extracts a deterministic sorted testing-assets/emu/ui-model.manifest: 107 classes / 444 handlers / 71 units, 95% slot resolution, static transition targets where inline (else 'dynamic'). scripts/dev ui-model is the BDG gate (regenerate+diff, STOL_UPDATE_UI_MODEL=1 to accept). Verified: 2nd run byte-identical no-op; injecting a bogus handler trips the gate with a unified diff; commit-path advisory non-blocking. Anchor tag lives in tools/ (unscanned) so no anchor=true. Commit a4a90a4."
 verify = { kind = "manual", ref = "tools/extract_ui_model.py emits a deterministic testing-assets/emu/ui-model.manifest listing per-class gesture handlers + static targets + per-unit M1-M6 slot maps; regenerating is a no-op diff; a hand-edit to a handler changes the manifest (gate catches drift)" }
@@ -894,7 +976,8 @@ links = { depends_on = ["ui-model-gesture-catalog"] }
 id = "ui-model-gesture-catalog"
 title = "Gesture vocabulary + M1-M6 slot-map operator reference (code-derived)"
 status = "done"
-stamped = "2026-07-10T16:27:10-05:00"
+created = "2026-07-10T16:27:10-05:00"
+modified = "2026-07-10T16:27:10-05:00"
 area = "docs"
 attested = "2026-07-10: docs/UI_OPERATION.md: the 34-name notify vocabulary, logical-gesture->control-protocol mapping, view-list->M1-M6 slot convention, and canonical gestures (link chord, open/close picker, focus/expand, admin/scope/sequencer entry) each verified by driving the headless emu. Generated block kept in sync with the manifest via the dev ui-model gate. Commit a4a90a4."
 verify = { kind = "manual", ref = "docs/UI_OPERATION.md documents the complete notify gesture vocabulary, the logical-gesture -> control-protocol mapping, the view-list -> M1-M6 slot convention, and the canonical gestures (link chord, open/close picker, focus/expand unit, enter admin/scope/sequencer); each canonical gesture is verified against the headless emu" }
@@ -905,7 +988,8 @@ links = { depends_on = [] }
 id = "ui-model-planner"
 title = "Goal -> gesture-sequence path planner, verified by driving the emu"
 status = "done"
-stamped = "2026-07-10T16:52:44-05:00"
+created = "2026-07-10T16:52:44-05:00"
+modified = "2026-07-10T16:52:44-05:00"
 area = "emu"
 attested = "2026-07-10: tools/ui_plan.py: goal (link/insert/focus/control_at/context) -> gesture sequence via BFS over ui-map.toml + manifest slot-maps + docs/UI_OPERATION.md gestures, offline with live uiState() fallback for runtime-dependent steps (which MAIN column holds EmptyControl, dense-picker row of a channel-count-filtered unit). Verified: --selftest 15 checks green (offline plan correctness); --run drives the emu and confirms a NOVEL goal end-to-end (link 1+2 + insert Test Osc + focus + control_at M1/M2), all 6 steps PASS live; hermetic test 53-ui-plan-core-insert green. Emits map-growth suggestions (e.g. MAIN4 opens picker on a stereo chain) without auto-editing the map. Commit bc6f6a2."
 verify = { kind = "manual", ref = "tools/ui_plan.py takes a goal (link 1+2, insert Network, glitch on M1), produces a control-protocol sequence via ui-map.toml + the manifest/uiState, and a tests/emu integration executes it and confirms arrival with uiState asserts + a trace-golden" }
@@ -916,7 +1000,8 @@ links = { depends_on = ["ui-model-introspect", "ui-model-manifest"] }
 id = "ui-planner-domain-facility"
 title = "UI planning domain — deterministic goal-routing over the 301 UI (umbrella)"
 status = "done"
-stamped = "2026-07-10T20:46:09-05:00"
+created = "2026-07-10T20:46:09-05:00"
+modified = "2026-07-10T20:46:09-05:00"
 area = "emu"
 attested = "2026-07-10: COMPLETE 2026-07-10: agents route to arbitrary fluent goals over the 301 UI deterministically, no ML. All children done: state-schema (ui_fluents.py), operators (ui-operators.toml, 20 ops), crawler (ui_crawl.py, resolves the 6 dynamic ops, deterministic map), solver (ui_solve.py, A* over the merged library), goal-corpus (11 goal/plan/trace goldens + coverage). Proof: the sequencer C3 goal — which a human hand-derived from code earlier — is now planned AND executed via real gestures from the declarative goal alone (ui_solve --run / goals/seq-cv1-c3). Commit 81359f6."
 verify = { kind = "manual", ref = "an agent gives an arbitrary fluent goal (e.g. sequencer cv1 first-6-steps at C3, or link 1+2 + insert Network + glitch on M1) and the solver routes to it over the operator library, executes headless, and confirms arrival — no per-goal code, no looking anything up" }
@@ -927,7 +1012,8 @@ links = { depends_on = ["ui-model-facility"] }
 id = "ui-planner-state-schema"
 title = "Fluent state vocabulary + uiState->fluents projection"
 status = "done"
-stamped = "2026-07-10T18:07:25-05:00"
+created = "2026-07-10T18:07:25-05:00"
+modified = "2026-07-10T18:07:25-05:00"
 area = "emu"
 attested = "2026-07-10: docs/UI_STATE_SCHEMA.md defines the fluent vocabulary (context/focused_class/focused_unit/unit_in_chain/linked/slot_control/column_cursor/cell/modal, + adjacent/2 as a precondition-only domain predicate); tools/ui_fluents.py projects a uiState+lua-readback bundle to a canonical sorted fluent set with parse_goal + satisfies (cell tolerance 1e-6). Verified: --selftest 37 checks green (boot + C3 states, goal satisfaction incl. the sequencer cv1-first-6-at-C3 goal); test 54-fluents-projection green. Uses raw ui-map node names. Commit 2d9f567."
 verify = { kind = "manual", ref = "docs/UI_STATE_SCHEMA.md defines the typed fluents (context/stack/focus/focused-unit/per-slot control/link-state/chain-contents/sequencer cursor+cells/modals); a uiState->fluents normalizer produces a canonical fluent set for a known state (e.g. the C3 sequencer state) that a goal can partially match" }
@@ -938,7 +1024,8 @@ links = { depends_on = ["ui-model-introspect"] }
 id = "ui-planner-operators"
 title = "Typed operator library (precondition->effect + gesture template), BDG-diffed"
 status = "done"
-stamped = "2026-07-10T18:07:25-05:00"
+created = "2026-07-10T18:07:25-05:00"
+modified = "2026-07-10T18:07:25-05:00"
 area = "infra"
 attested = "2026-07-10: tools/extract_operators.py lifts 20 typed operators (12 map-nav, 4 ui_plan, 4 manifest; 14 static / 6 needs_crawl) into testing-assets/emu/ui-operators.toml (precondition->effect fluents + gesture template). scripts/dev ui-operators is the BDG gate (deterministic no-op regen; drift caught). Verified by DRIVING operators live: nav_home_to_admin, link(1,2), select_column(tr), set_cell(0,tr,0,1.0) all assert their effect fluents. Reconciled with the schema sibling: raw ui-map node names (unit_picker_dense not picker) so nav effects chain into preconditions; adjacent/2 shared. Commit 2d9f567."
 verify = { kind = "manual", ref = "testing-assets/emu/ui-operators.toml lists operators (id, params, precondition fluents, effect fluents, gesture template) lifted from ui-map.toml edges + manifest handler->targets + ui_plan goal-types; regenerating the static-derivable subset is a no-op diff; a UI change shows as an operator delta" }
@@ -949,7 +1036,8 @@ links = { depends_on = ["ui-planner-state-schema"] }
 id = "ui-planner-crawler"
 title = "Empirical UI crawler resolves dynamic operators + discovers preconditions (perfect oracle)"
 status = "done"
-stamped = "2026-07-10T19:52:16-05:00"
+created = "2026-07-10T19:52:16-05:00"
+modified = "2026-07-10T19:52:16-05:00"
 area = "emu"
 attested = "2026-07-10: tools/ui_crawl.py: bounded BFS with replay-from-boot, uiState/ui_fluents as the perfect oracle, affordance-pruning + a destructive-gesture denylist. Resolves all 6 needs_crawl operators (open_picker M3-mono/M4-linked, insert row-nav, focus_unit, set_cell L1-edit skeleton, expand/collapse unit-specific remap) with driven proofs; testing-assets/emu/ui-crawl.map = 24 states / 173 transitions, honest [skipped] coverage (denylist 18, no-affordance 80, state_cap 35). scripts/dev ui-crawl is a SLOW manual/CI gate (out of the commit path). DETERMINISM: initial map failed the re-crawl no-op gate (state aliasing — the goal-fluent key omitted physical STORAGE/MODE toggle positions, making mode/storage gestures nondeterministic at a shared hash); fixed by folding a synthetic _toggle(bits) key-fluent into the crawl state (solver ignores it); re-crawl now byte-identical (GATE_EXIT=0). tests 56-crawl-{open-picker,set-cell,expand-collapse} green. Commit 4245143."
 verify = { kind = "manual", ref = "the crawler drives candidate gestures from reachable states, observes actual transitions via uiState()/trace, and records empirical operators (pre-fluents -> gesture -> post-fluents); re-crawling an unchanged build is a no-op diff; it converts >=1 previously-'dynamic' manifest target into a verified operator and discovers a precondition (e.g. open-picker column M3 mono vs M4 after stereo link)" }
@@ -960,7 +1048,8 @@ links = { depends_on = ["ui-planner-operators"] }
 id = "ui-planner-solver"
 title = "Classical planner: arbitrary fluent goal -> gesture sequence, verified by driving"
 status = "done"
-stamped = "2026-07-10T20:24:14-05:00"
+created = "2026-07-10T20:24:14-05:00"
+modified = "2026-07-10T20:24:14-05:00"
 area = "infra"
 attested = "2026-07-10: tools/ui_solve.py: forward A* over the merged operator library (20 static from ui-operators.toml + the 6 crawler-resolved gestures from ui-crawl.map [[resolved]]). Grounds operators from goal target fluents, applicability with ~negation + adjacent-topology + domain guards (link needs empty chains; MAIN3 picker edge barred once linked), heuristic = unsatisfied-goal-fluent count, deterministic tie-breaks; live-resolves parametric gestures at --run (EmptyControl column, picker row/side, set_cell nav+nudges). set_cell uses REAL gestures: cv1 C3=3.0V = 3 coarse octave nudges (dial->coarse, turn 9), closed-loop verified by l1Value. VERIFIED INDEPENDENTLY: --selftest 24 checks; --run of the C3 goal {context(sequencer),column_cursor(cv1),cell(0,cv1,0..5,3.0)} plans from the goal alone and executes via real gestures, all 6 cells at 3.0, satisfies(goal); link+insert goal --run PASS; full suite 22/22 incl 57-ui-solve-{c3-sequencer,link-insert}. Supersedes ui_plan.py's fixed goal menu. Commit e3c9224."
 verify = { kind = "manual", ref = "tools/ui_solve.py takes a partial-fluent goal + current state and returns a gesture sequence via A* over the operator library (heuristic = unsatisfied goal-fluent count); --run drives the headless emu and confirms arrival via fluent asserts + a trace-golden; supersedes ui_plan.py's hardcoded goal-types" }
@@ -971,7 +1060,8 @@ links = { depends_on = ["ui-planner-crawler"] }
 id = "ui-planner-goal-corpus"
 title = "Worked-example goal corpus (goal/plan/trace goldens) + coverage metric"
 status = "done"
-stamped = "2026-07-10T20:46:09-05:00"
+created = "2026-07-10T20:46:09-05:00"
+modified = "2026-07-10T20:46:09-05:00"
 area = "emu"
 attested = "2026-07-10: testing-assets/emu/goals/ = 11 (goal, plan, trace) triples — worked examples AND regression goldens: seq-cv1-c3 (6 cells at C3 via real gestures), seq-cv2-fifth, link-insert-core, link-pair-23, nav-{admin,scope,sequencer,hold,quicksave,sample-pool}, open-picker. tools/ui_goals.py: --check-plans (offline plan-golden diff), --run (drives emu per goal, satisfies + frame-stripped trace diff), --coverage. scripts/dev goal-corpus = fast offline gate (plans + coverage byte-diff); --run half in tests/emu 58-goals-*. COVERAGE (testing-assets/emu/goal-coverage.txt): operators 12/20, goal-fluent types 6/9; 8 uncovered operators documented (expand/collapse prose-effect unmodeled, focus_unit subsumed by insert's auto-focus, 4x nav_*_to_home never routed-to since home is the start, nav_sample_pool_to_admin dominated). Verified: --check-plans 11/11 + no-op + drift-caught; --run all 11 green (satisfies + trace); full suite 25/25. Commit 81359f6."
 verify = { kind = "manual", ref = "testing-assets/emu/goals/ holds (goal, plan, trace-golden) triples that regenerate + diff (seeded with the hand-proven ones: Network-glitch-on-M1, sequencer cv1 first-6-at-C3, admin/scope/sequencer entry, picker open/close); a coverage metric reports which fluents/operators have >=1 verified example goal" }
@@ -982,7 +1072,8 @@ links = { depends_on = ["ui-planner-solver"] }
 id = "emu-admin-golden-fragile"
 title = "10-admin-nav pixel golden is env-fragile (font-dependent render across builds)"
 status = "done"
-stamped = "2026-07-10T21:36:38-05:00"
+created = "2026-07-10T21:36:38-05:00"
+modified = "2026-07-10T21:36:38-05:00"
 area = "emu"
 attested = "2026-07-10: Dropped the !golden admin pixel assertion from tests/emu/10-admin-nav.test and removed testing-assets/emu/goldens/10-admin-nav/; the test now verifies admin nav via its two state assertions (Chain.Root -> Menu/Admin), which are build-environment-robust. Verified passing on a fresh `make emu` rebuild. Reinforces: prefer state/trace tiers over pixel goldens for navigation. Commit follows."
 verify = { kind = "manual", ref = "tests/emu/10-admin-nav passes on a FRESH clean build (make clean emu), not only on an incrementally-built binary; either the render is made deterministic (pinned font) or the pixel golden is replaced by the already-present state/trace assertions" }
@@ -993,7 +1084,8 @@ links = { depends_on = [] }
 id = "ui-planner-cov-facility"
 title = "UI planning-domain coverage expansion — close the 8 uncovered operators + 3 fluent types (umbrella)"
 status = "done"
-stamped = "2026-07-11T19:00:54-05:00"
+created = "2026-07-11T19:00:54-05:00"
+modified = "2026-07-11T19:00:54-05:00"
 area = "emu"
 attested = "2026-07-11: COMPLETE 2026-07-11: UI planning-domain coverage expanded to FULL meaningful coverage via the four root-cause mechanisms. cov-starts (non-boot starts, 5 return/indirect nav ops), cov-views (concrete expand/collapse slot_control effects), cov-modals (durable build_selection modal; markingMode/favoritesEditMode/editingL1 documented exclusions), cov-focus (insert_after operator -> multi-unit chains -> focus_unit). Final: 22/22 operators covered, 8/8 meaningful fluent-types (focused_class excluded as derived-redundant). Every operator either exercised by a worked-example goal or documented-excluded; nothing faked. Commit d1f42b3."
 verify = { kind = "manual", ref = "goal-coverage.txt reaches operators 20/20 (or every operator has a documented reason it cannot be a goal target) and fluent-types 9/9 for durable fluents, with intrinsically-transient modals (editingL1) explicitly excluded from the denominator rather than counted as gaps" }
@@ -1004,7 +1096,8 @@ links = { depends_on = ["ui-planner-domain-facility"] }
 id = "ui-planner-cov-starts"
 title = "Non-boot start states close the 5 return/indirect nav operators (cause A)"
 status = "done"
-stamped = "2026-07-11T12:58:57-05:00"
+created = "2026-07-11T12:58:57-05:00"
+modified = "2026-07-11T12:58:57-05:00"
 area = "emu"
 attested = "2026-07-11: tools/ui_goals.py gained an optional `# start: context(<node>)` goal directive; --run auto-routes home->start (solver-planned, tracing off so only the goal's plan+trace count) then plans the goal FROM the start. 5 new goals (home-from-{admin,scope,quicksave,picker}, admin-via-sample-pool) cover the return/indirect nav ops nav_{admin,scope,quicksave,unit_picker_dense}_to_home + nav_sample_pool_to_admin. Backward-compatible (start-less goals byte-identical). Verified in the merged tree: --check-plans + --run all 18 goals green, coverage 12/20->17/20 (A's contribution), tests 59-cov-starts-*. Commit 8eb90a9."
 verify = { kind = "manual", ref = "goal files support a `# start: context(<node>)` directive; ui_goals.py --run auto-routes home->start (solver-planned) before planning the goal; new corpus goals home-from-{admin,scope,quicksave,picker} and admin-via-sample-pool plan+run green and cover nav_admin_to_home, nav_scope_to_home, nav_quicksave_to_home, nav_unit_picker_dense_to_home, nav_sample_pool_to_admin" }
@@ -1015,7 +1108,8 @@ links = { depends_on = ["ui-planner-cov-facility"] }
 id = "ui-planner-cov-views"
 title = "Concrete expand/collapse slot_control effects make them plannable (cause B)"
 status = "done"
-stamped = "2026-07-11T12:58:57-05:00"
+created = "2026-07-11T12:58:57-05:00"
+modified = "2026-07-11T12:58:57-05:00"
 area = "infra"
 attested = "2026-07-11: expand/collapse effects made concrete + plannable: extract_operators.py emits an eff_from='manifest.views.{expanded,collapsed}' marker; ui_solve.py grounds the per-unit slot_control(Mi,ctrl) add/remove set at plan time. HONEST PIVOT: the manifest's per-unit views were insufficient (collapsed lists empty; slots = intrinsic catalog, not the chain-embedded on-screen layout), so the authoritative source is the crawl-map [[resolved]] live-captured view proof. Goals collapse-unit-header (insert->collapse, asserts collapsed slot map) + expand-unit-controls cover collapse+expand + the slot_control fluent type. Backward-compat proven (solver selftest + all prior plans byte-identical). Verified merged: 19/20 ops + 7/9 fluent types, ui-operators + goal-corpus gates no-drift, suite 29/29. Commit 8eb90a9."
 verify = { kind = "manual", ref = "extract_operators.py emits expand(u)/collapse(u) effects as concrete slot_control(Mi,ctrl) fluents from ui-model.manifest units[u].views.expanded/.collapsed; the solver grounds them per-unit; a goal fixing slot_control(M2,<ctrl>) for a focused core unit plans via expand and --run asserts the slot map; covers expand, collapse, and the slot_control fluent type" }
@@ -1026,7 +1120,8 @@ links = { depends_on = ["ui-planner-cov-facility"] }
 id = "ui-planner-cov-focus"
 title = "Multi-unit focus goal + focused_class derived effect (cause C)"
 status = "done"
-stamped = "2026-07-11T19:00:54-05:00"
+created = "2026-07-11T19:00:54-05:00"
+modified = "2026-07-11T19:00:54-05:00"
 area = "emu"
 attested = "2026-07-11: Closed by a NEW insert_after operator (the goal-only approach was proven impossible). insert_after (pre context(home)+focused_unit(u) -> eff context(unit_picker_dense)) opens the dense picker on a NON-empty chain via the focused unit's Chain.InsertControl (xroot/Unit/Section.lua:13) -- scroll the chain cursor LEFT to the insert spot (getSelectedSpotIndex==0) then ENTER -- the only picker-open once loadUnit drops the empty-insert slot. This makes MULTI-unit chains reachable, closing focus_unit: goal two-units-focus-first (start unit A focused, add B, re-assert focused_unit(A)) forces insert_after,insert(B),focus_unit(A); focus_unit proven to fire as a REAL re-focus (Mix->Test Osc, detail 'ok' not skipped), not gamed. Solver guards nav_home_to_unit_picker_dense off non-empty chains. focused_class made a documented derived-redundant EXCLUSION. Coverage: 22/22 operators, 8/8 MEANINGFUL fluent types. Determinism: crawl map diff confined to the insert_after [[resolved]] block, BFS graph byte-identical to the verified baseline + agent GATE_EXIT=0 (my own re-runs were env-killed, not drift). Verified: extractor no-op, ui-operators+goal-corpus gates no-drift, solver selftest byte-identical, all 21 goals --run green, suite 32/32. Commit d1f42b3."
 verify = { kind = "manual", ref = "a corpus goal {unit_in_chain(A),unit_in_chain(B),focused_unit(A)} plans insert(A)->insert(B)->focus_unit(A) and runs green (exercises focus_unit as a distinct op); nav + focus/insert operators emit focused_class(<class>) as a derived effect verified live; covers focus_unit and the focused_class fluent type" }
@@ -1037,7 +1132,8 @@ links = { depends_on = ["ui-planner-cov-facility"] }
 id = "ui-planner-cov-modals"
 title = "Durable-modal operators cover the modal fluent type (cause D)"
 status = "done"
-stamped = "2026-07-11T17:11:19-05:00"
+created = "2026-07-11T17:11:19-05:00"
+modified = "2026-07-11T17:11:19-05:00"
 area = "emu"
 attested = "2026-07-11: New operator build_selection (sequencer nav-mode SHIFT+encoder -> modal(selectionActive), a clean absent->present durable boundary) covers the modal fluent type: 7/9 -> 8/9. Modeled via extract_operators.py modal_operators() + ui_crawl.py shift_encoder resolver + ui_solve.py grounding; re-crawl determinism gate GATE_EXIT=0. REJECTED (documented permanent exclusions, not faked): markingMode (self.markingMode='idle' reads Lua-truthy at every sequencer state -> no fluent boundary, un-exercisable by its own goal), favoritesEditMode (no-op in the dense fixture picker; classic picker has no ui-map nav edge). editingL1 also stays excluded (transient). Verified: solver selftest byte-identical, all 19 goals --run green, suite 30/30. Commit follows."
 verify = { kind = "manual", ref = "new operators enter_favorites_edit / enter_mark_mode / build_selection (precondition->effect+gesture, crawler-resolved) each set a durable modal fluent; a corpus goal per operator plans + runs green; covers the modal fluent type for durable modals, with modal(editingL1) documented as an intentional transient exclusion (not counted in the denominator)" }
@@ -1048,7 +1144,8 @@ links = { depends_on = ["ui-planner-cov-facility"] }
 id = "crashdiag-fix-partial-register-capture"
 title = "Exc-hook captures only a subset of registers (sp=pc, psr/r1/r8-r11 = ffffffff) on am335x data abort"
 status = "todo"
-stamped = "2026-07-11T20:30:05-05:00"
+created = "2026-07-11T20:30:05-05:00"
+modified = "2026-07-11T20:30:05-05:00"
 area = "infra"
 verify = { kind = "manual", ref = "on a hardware data-abort capture, sp is a real stack address (not == pc), psr is a valid CPSR (not 0xffffffff), and r1/r8-r11 hold real values — or, if SYS/BIOS's ExcContext genuinely does not populate them on a Cortex-A8 abort, that is confirmed by reading the module source and documented, with the fuller register set captured from the raw abort frame if feasible" }
 note = "BENCH FINDING 2026-07-11 (first real hardware capture, fw 9.5.2.16, empty CRASH_TEST). The capture WORKS: panic buffer survived the warm reboot (the make-or-break DRAM-retention assumption HELD), dfar=0xf0000000 exact, r2=0xf0000000/r3=0xdeadbeef (the injected fault), Kind=data-abort, Thread=app, module map + pc->kernel resolution + persist-to-crash.log all correct. BUT sp reads == pc (0x801fe2b8), psr=0xffffffff (invalid CPSR), and r1/r8/r9/r10/r11=0xffffffff while r0/r2/r3/r4/r5/r6/r7/r12 are plausible. The hook (PanicBuffer.cpp:224-243) reads the RIGHT ctx-> fields, so either SYS/BIOS's Exception_ExcContext does not fully populate the banked/secondary regs for an A8 data abort (a documentable limitation) or there's a BIOS-header/version field-offset mismatch. The DIAGNOSTIC-ESSENTIAL set (pc/lr/dfar/faulting values/thread/module map) is intact, so symbolication is unaffected; this is a capture-quality follow-up. Investigate ti/sysbios/family/arm/exc Exception.c/asm for which regs it snapshots; consider grabbing the raw abort stack frame for the full set. RECONFIRMED 2026-07-11 on fw 9.5.2.46 (identical pattern: sp==pc=0x801fe2b8, psr=0xffffffff, r1/r8/r9/r10/r11=0xffffffff, while r0/r2-r7/r12/dfar/dfsr/pc/lr are correct). ROOT CAUSE localized to UPSTREAM of our hook: our hook (PanicBuffer.cpp:224-243) reads the exact Exception_ExcContext fields that SYS/BIOS builds, and vendor Exception.c:253-261 excDumpContext prints those SAME fields -- so SYS/BIOS's own enableDecode UART dump would show the identical sp==pc/psr=0xffffffff. Traced the bios 6.46.05.55 Cortex-A8 data-abort frame (Exception_asm_gnu.asm:99-133 -> Exception.c:110-130): the excStack index->field mapping is internally consistent (psr=excStack[0], sp=excStack[1], r0..r12=excStack[8..20]), so the corrupted set {psr, sp, r1, r8-r11} does not follow a clean off-by-one, pointing at a vendor abort-frame/banked-register capture quirk (or genuine machine state for the rN) rather than our code. Diagnostic-essential set is intact and symbolization is unaffected; capture-quality follow-up only. Next: compare against a live enableDecode UART dump to confirm parity, then either document as a BIOS 6.46 A8 limitation or capture the raw abort stack window ourselves."

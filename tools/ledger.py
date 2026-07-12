@@ -130,10 +130,12 @@ def validate(items):
             errors.append(f"{iid}: touches must be a list of glob strings")
         # optional machine timestamp (pipeline-timestamps): written by the gate,
         # never required; if present it must be a string.
-        stamped = it.get("stamped")
-        if stamped is not None and not isinstance(stamped, str):
-            errors.append(f"{iid}: stamped must be a string (machine-written; "
-                          f"see scripts/dev now)")
+        # machine timestamps: written by the gate (created once, modified on any
+        # content change), never hand-written; if present each must be a string.
+        for _ts in ("created", "modified"):
+            v = it.get(_ts)
+            if v is not None and not isinstance(v, str):
+                errors.append(f"{iid}: {_ts} must be a string (machine-written; see scripts/dev now)")
 
     tags = collect_tags()
     tests = collect_testcases()
@@ -278,8 +280,8 @@ def render_text(items):
             vtxt = f"{v.get('kind')}: {v.get('ref')}" if v.get("kind") != "manual" else "manual"
             if it.get("attested"):
                 vtxt += " *(attested)*"
-            if it.get("stamped"):  # machine stamp: date of the last status change
-                vtxt += f" · {str(it['stamped'])[:10]}"
+            if it.get("modified"):  # machine stamp: date of the last content change
+                vtxt += f" · {str(it['modified'])[:10]}"
             mark = STATUS_MARK.get(it["status"], "?")
             lines.append(f"| {mark} | `{it['id']}` | {it['title']} | {vtxt} |")
         lines.append("")
@@ -378,12 +380,9 @@ def cmd_append(args):
         return 1
 
     # Append verbatim (preserve the author's formatting) with a blank-line gap,
-    # then regenerate the TODO so the ledger and its doc stay coherent. Each
-    # appended item is stamped with machine time (pipeline-timestamps).
+    # then regenerate the TODO so the ledger and its doc stay coherent. The
+    # commit-time `stamp` step writes created/modified on the new items.
     frag_text = frag_path.read_text().strip("\n")
-    frag_text, _ = _stamp_items_in_text(
-        frag_text + "\n", {it.get("id") for it in frag_items}, _now_iso())
-    frag_text = frag_text.strip("\n")
     ledger_text = LEDGER.read_text().rstrip("\n")
     LEDGER.write_text(ledger_text + "\n\n" + frag_text + "\n")
     items = load_items()
@@ -684,10 +683,10 @@ def cmd_fence(_args):
 # Humans (and agents) guess dates; the machine knows. `now` is the ONE blessed
 # way to learn the current date/time (never write a date from memory — ask
 # `scripts/dev now`), and `stamp` writes machine truth into the ledger at commit
-# time: every [[item]] that is NEW or whose *status* changed vs HEAD gets a
-# `stamped = "<now>"` field. Status transitions only — note/attested edits never
-# restamp (no churn). Existing items without the field are simply unstamped
-# (stamps go forward only; historical drift is not rewritten).
+# time: a NEW [[item]] gets `created` + `modified`; an item whose CONTENT changed
+# vs HEAD (any field but the timestamps) gets its `modified` bumped. So `modified`
+# cannot lie — you cannot edit an item's body without the gate re-stamping it. The
+# legacy single `stamped` field is migrated to `created`+`modified` on first touch.
 
 def _now_iso():
     """ISO-8601 local date-time with UTC offset, second precision."""
@@ -699,37 +698,56 @@ def cmd_now(_args):
     return 0
 
 
-STAMPED_LINE_RE = re.compile(r'(?m)^stamped\s*=\s*"[^"]*"[ \t]*\n')
 STATUS_LINE_RE = re.compile(r"(?m)^status\s*=.*\n")
+_FIELD_RE = {}
 
 
-def _stamp_block(block, now):
-    """Write/refresh the `stamped` line in one [[item]] block's text."""
-    line = f'stamped = "{now}"\n'
-    if STAMPED_LINE_RE.search(block):
-        return STAMPED_LINE_RE.sub(line, block, count=1)
+def _field_re(name):
+    if name not in _FIELD_RE:
+        _FIELD_RE[name] = re.compile(rf'(?m)^{name}\s*=\s*"[^"]*"[ \t]*\n')
+    return _FIELD_RE[name]
+
+
+def _set_field(block, name, value):
+    """Insert or replace `name = "value"` in one [[item]] block (under status)."""
+    line = f'{name} = "{value}"\n'
+    rx = _field_re(name)
+    if rx.search(block):
+        return rx.sub(line, block, count=1)
     m = STATUS_LINE_RE.search(block)
-    if m:  # insert right under status — the field the stamp dates
+    if m:
         return block[: m.end()] + line + block[m.end():]
     return block.rstrip("\n") + "\n" + line
 
 
-def _stamp_items_in_text(text, targets, now):
-    """Stamp every [[item]] block in `text` whose id is in `targets`.
-    Returns (new_text, stamped_ids); all other bytes are preserved verbatim."""
+def _drop_field(block, name):
+    return _field_re(name).sub("", block, count=1)
+
+
+def _apply_stamps(text, updates, drops=()):
+    """updates: {iid: {field: value}} to set; drops: field names to remove on any
+    touched item. Only the named fields change; all other bytes preserved verbatim."""
     marks = [m.start() for m in re.finditer(r"(?m)^\[\[item\]\][ \t]*\n", text)]
     if not marks:
         return text, []
-    out, stamped = [text[: marks[0]]], []
+    out, touched = [text[: marks[0]]], []
     for s, e in zip(marks, marks[1:] + [len(text)]):
         chunk = text[s:e]
         m = re.search(r'(?m)^id\s*=\s*"([^"]+)"', chunk)
         iid = m.group(1) if m else None
-        if iid in targets:
-            chunk = _stamp_block(chunk, now)
-            stamped.append(iid)
+        if iid in updates:
+            for name, val in updates[iid].items():
+                chunk = _set_field(chunk, name, val)
+            for name in drops:
+                chunk = _drop_field(chunk, name)
+            touched.append(iid)
         out.append(chunk)
-    return "".join(out), stamped
+    return "".join(out), touched
+
+
+def _content(it):
+    """Item content excluding the machine-written timestamps."""
+    return {k: v for k, v in it.items() if k not in ("created", "modified", "stamped")}
 
 
 def cmd_stamp(_args):
@@ -738,23 +756,38 @@ def cmd_stamp(_args):
         old = tomllib.loads(r.stdout).get("item", []) if r.returncode == 0 else []
     except Exception:
         old = []
-    old_status = {it.get("id"): it.get("status") for it in old}
+    old_by_id = {it.get("id"): it for it in old}
     text = LEDGER.read_text()
     try:
         new_items = tomllib.loads(text).get("item", [])
     except Exception as e:
         print(f"{RED}FAIL{RST} ledger not parseable: {e}")
         return 1
-    targets = {it["id"] for it in new_items if it.get("id")
-               and (it["id"] not in old_status or old_status[it["id"]] != it.get("status"))}
-    if not targets:
-        return 0  # no new item, no status transition — zero churn
     now = _now_iso()
-    new_text, stamped = _stamp_items_in_text(text, targets, now)
-    if not stamped:
+    updates = {}
+    for it in new_items:
+        iid = it.get("id")
+        if not iid:
+            continue
+        oldit = old_by_id.get(iid)
+        if oldit is None:
+            updates[iid] = {"created": now, "modified": now}          # new item
+        elif _content(oldit) != _content(it):
+            u = {"modified": now}                                     # content changed
+            if not it.get("created"):
+                u["created"] = it.get("modified") or it.get("stamped") or now
+            updates[iid] = u
+        elif not it.get("created"):
+            base = it.get("modified") or it.get("stamped") or now     # migrate legacy item
+            updates[iid] = {"created": base, "modified": base}
+    if not updates:
+        return 0  # zero churn
+    # Retire the legacy `stamped` field on any item we touch.
+    new_text, touched = _apply_stamps(text, updates, drops=("stamped",))
+    if not touched:
         return 0
     LEDGER.write_text(new_text)
-    print(f"stamped {len(stamped)} item(s) @ {now}: {', '.join(sorted(stamped))}")
+    print(f"stamped {len(touched)} item(s) @ {now}: {', '.join(sorted(touched))}")
     return 0
 
 
