@@ -82,6 +82,8 @@ end
 --   stackWindowLines array of preformatted Stack Window lines (hang kind), or nil
 --   stackBannerLines array of top-of-report banner lines (blown/near-full), or nil
 --   stackLines    array of preformatted "--- Stacks ---" section lines, or nil
+--   heapBannerLines array of top-of-report heap near-ceiling banner lines, or nil
+--   heapLines     array of preformatted "--- Heap ---" section lines, or nil
 --   luaMessage    Lua error message, or nil
 --   luaTrace      Lua traceback, or nil
 function M.write(fields)
@@ -103,6 +105,13 @@ function M.write(fields)
   -- after Kind), matching the C flush, so a blown / near-full stack is unmissable.
   if fields.stackBannerLines and #fields.stackBannerLines > 0 then
     for _, line in ipairs(fields.stackBannerLines) do
+      f:write(line, "\n")
+    end
+  end
+  -- [stol:crashdiag-heap-stats] Heap near-ceiling banner near the TOP, matching
+  -- the C flush, so the footprint prime suspect is unmissable.
+  if fields.heapBannerLines and #fields.heapBannerLines > 0 then
+    for _, line in ipairs(fields.heapBannerLines) do
       f:write(line, "\n")
     end
   end
@@ -152,6 +161,16 @@ function M.write(fields)
   if fields.stackLines and #fields.stackLines > 0 then
     f:write("--- Stacks ---\n")
     for _, line in ipairs(fields.stackLines) do
+      f:write(line, "\n")
+    end
+  end
+
+  -- [stol:crashdiag-heap-stats] Heap section (heap pressure + last-alloc-fail),
+  -- present in every capture on hardware. The C flush emits this after the Stacks
+  -- section and before Event Guard; mirror that order here.
+  if fields.heapLines and #fields.heapLines > 0 then
+    f:write("--- Heap ---\n")
+    for _, line in ipairs(fields.heapLines) do
       f:write(line, "\n")
     end
   end
@@ -418,6 +437,44 @@ local function injectSyntheticGuard()
   return ok
 end
 
+-- [stol:crashdiag-heap-stats] Synthetic report carrying a --- Heap --- section
+-- with the arena high-water near the ceiling (95%) plus a recorded last-alloc-
+-- fail, modelling the confirmed Anamnesis footprint root cause: the heap grows to
+-- the ceiling and a large allocation fails. The per-alloc numbers only exist on
+-- am335x hardware; this exercises the banner + Heap format + viewer downstream of
+-- the panic buffer. Kind stays data-abort: on the frozen case the heap exhausts
+-- and THEN a wild write traps, so a heap-pressure report is a data-abort with a
+-- Heap section, which is exactly what this canned block models.
+local function injectSyntheticHeap()
+  local registerLines = {
+    " pc=803a1000 lr=803a0f00 sp=4fff0100 psr=60000013",
+    " dfsr=00000805 ifsr=00000000 dfar=80538000 ifar=00000000",
+    " r0=00040000 r1=00000000 r2=00000003 r3=00000004",
+    " r4=00000005 r5=00000006 r6=00000007 r7=00000008",
+    " r8=00000009 r9=0000000a r10=0000000b r11=0000000c r12=0000000d"
+  }
+  local heapBannerLines = {
+    " *** HEAP NEAR-CEILING (95%) ***"
+  }
+  -- ceiling ~8 MiB, arena high-water at 95%, a 256 KiB alloc failed (pc in a
+  -- package on real hardware; a synthetic address here just proves the render).
+  local heapLines = {
+    " ceiling=8388608 arena-highwater=7969177 (95%) allocs=142000",
+    " last-alloc-fail: size=262144 pc=803a1000 (count=3)"
+  }
+  local ok = M.write {
+    kind = "data-abort",
+    thread = "MAIN",
+    registerLines = registerLines,
+    pc = "803a1000",
+    lr = "803a0f00",
+    heapBannerLines = heapBannerLines,
+    heapLines = heapLines
+  }
+  M.setPending("data-abort in MAIN (heap near-ceiling 95%)")
+  return ok
+end
+
 -- [stol:infra-crash-diag-emu-inject]
 function M.injectSynthetic(kind)
   if not app.EMULATION then
@@ -433,6 +490,9 @@ function M.injectSynthetic(kind)
   end
   if kind == "event-guard-breach" then
     return injectSyntheticGuard()
+  end
+  if kind == "heap" then
+    return injectSyntheticHeap()
   end
   local registerLines = {
     " pc=40012abc lr=40012a00 sp=4fff0100 psr=60000013",

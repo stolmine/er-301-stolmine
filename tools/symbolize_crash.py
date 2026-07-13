@@ -148,6 +148,47 @@ def parse_event_guard(text):
     return None
 
 
+# [stol:crashdiag-heap-stats] The --- Heap --- section data lines:
+#   " ceiling=<n> arena-highwater=<n> (<pct>%) allocs=<n>"
+#   " last-alloc-fail: size=<n> pc=<hex> (count=<n>)"   (only when a NULL was seen)
+HEAP_PRESSURE_RE = re.compile(
+    r"ceiling=(\d+)\s+arena-highwater=(\d+)\s+\((\d+)%\)\s+allocs=(\d+)")
+HEAP_FAIL_RE = re.compile(
+    r"last-alloc-fail:\s+size=(\d+)\s+pc=([0-9a-fA-F]+)\s+\(count=(\d+)\)")
+
+
+def parse_heap(text):
+    """Return the --- Heap --- section detail dict, or None if absent.
+
+    {ceiling, highwater, pct, allocs} always; adds {fail_size, fail_pc,
+    fail_count} when a last-alloc-fail line is present (crashdiag-heap-stats).
+    Present in every schema-2 capture from am335x hardware.
+    """
+    section = None
+    out = None
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if stripped.startswith("--- ") and stripped.endswith(" ---"):
+            section = stripped.strip("- ").strip()
+            continue
+        if section == "Heap":
+            m = HEAP_PRESSURE_RE.search(raw)
+            if m:
+                out = {
+                    "ceiling": int(m.group(1)),
+                    "highwater": int(m.group(2)),
+                    "pct": int(m.group(3)),
+                    "allocs": int(m.group(4)),
+                }
+                continue
+            mf = HEAP_FAIL_RE.search(raw)
+            if mf and out is not None:
+                out["fail_size"] = int(mf.group(1))
+                out["fail_pc"] = int(mf.group(2), 16)
+                out["fail_count"] = int(mf.group(3))
+    return out
+
+
 def parse_report(text):
     """Return (modules, addresses, stack, stacks).
 
@@ -608,7 +649,33 @@ def _enrich(res, build_dir, addr2line):
 def symbolize(report_text, build_dir, addr2line):
     modules, addresses, stack, stacks = parse_report(report_text)
     guard = parse_event_guard(report_text)
+    heap = parse_heap(report_text)
     out_lines = []
+
+    # [stol:crashdiag-heap-stats] Lead with heap pressure when the arena is at/near
+    # the ceiling (>=90%): the confirmed Anamnesis root cause is heap exhaustion /
+    # footprint, so a near-ceiling arena is the prime signal, ahead of the register
+    # and backtrace dump (which only show the downstream detection site). If a NULL
+    # allocation was recorded, resolve its caller pc against the module map so the
+    # failing allocation is named directly (size + module+offset, symbolizable into
+    # e.g. libanamnesis.so).
+    if heap is not None and heap["ceiling"] and heap["pct"] >= 90:
+        out_lines.append("*** HEAP NEAR-CEILING (%d%%): arena footprint is the "
+                         "likely root cause (heap exhaustion) ***" % heap["pct"])
+        out_lines.append("  ceiling=%d arena-highwater=%d (%d%%) allocs=%d" % (
+            heap["ceiling"], heap["highwater"], heap["pct"], heap["allocs"]))
+        if "fail_pc" in heap:
+            res = resolve(heap["fail_pc"], modules)
+            if res.unresolved:
+                where = "?%s" % (" (%s)" % res.note if res.note else "")
+            else:
+                where = "%s + 0x%x" % (res.path, res.offset)
+                if build_dir:
+                    where += _enrich(res, build_dir, addr2line)
+            out_lines.append("  last-alloc-fail: size=%d pc=%08x -> %s (count=%d)"
+                             % (heap["fail_size"], heap["fail_pc"], where,
+                                heap["fail_count"]))
+        out_lines.append("")
 
     # [stol:crashdiag-object-guard-event] Lead with an audio-Event guard breach:
     # it is a DIRECT report of the corruption (the pendQ clobbered) caught before
@@ -796,6 +863,32 @@ Thread: audio
 --- Event Guard ---
  pendQ=80538380 next=00000062 prev=80538380 reason=05
  reason: next-badptr next-link
+--- Recent Log ---
+---CRASH REPORT END
+"""
+
+
+# [stol:crashdiag-heap-stats] Report carrying a --- Heap --- section with the
+# arena high-water at 95% of the ceiling and a recorded last-alloc-fail whose
+# caller pc lands in the kernel range (so it resolves). The tool must lead with
+# the HEAP NEAR-CEILING prime suspect and name the failing allocation.
+SELFTEST_HEAP_REPORT = """\
+---CRASH REPORT BEGIN
+Schema: 2
+Kind: data-abort
+ *** HEAP NEAR-CEILING (95%) ***
+Thread: MAIN
+--- Registers ---
+ pc=80050000 lr=80040000 sp=4fff0100 psr=60000013
+--- Module Map ---
+ kernel                   text=80000000..80100000
+ core.so                  text=00001000..00002000  data=00002000..00003000
+--- Stacks ---
+ MAIN            base=4fff0000 size=8192 used=4000 (48%) canary=ok
+ isr             base=4001f000 size=4096 used=800 (19%) canary=ok
+--- Heap ---
+ ceiling=8388608 arena-highwater=7969177 (95%) allocs=142000
+ last-alloc-fail: size=262144 pc=80050000 (count=3)
 --- Recent Log ---
 ---CRASH REPORT END
 """
@@ -1214,6 +1307,30 @@ def selftest():
         print("PASS: symbolize() leads with the guard breach + decoded reason")
     else:
         print("FAIL: guard symbolize output:\n%s" % gout)
+        ok = False
+
+    print("\n== heap pressure (--- Heap --- prime suspect) ==")
+    heap = parse_heap(SELFTEST_HEAP_REPORT)
+    if (heap and heap["ceiling"] == 8388608 and heap["highwater"] == 7969177 and
+            heap["pct"] == 95 and heap["allocs"] == 142000 and
+            heap.get("fail_size") == 262144 and heap.get("fail_pc") == 0x80050000
+            and heap.get("fail_count") == 3):
+        print("PASS: parsed Heap ceiling/highwater/pct/allocs + last-alloc-fail")
+    else:
+        print("FAIL: heap parse -> %r" % heap)
+        ok = False
+
+    hpout, _, _ = symbolize(SELFTEST_HEAP_REPORT, None, DEFAULT_ADDR2LINE)
+    # The heap prime-suspect block must lead (before the "Modules:" divider that
+    # precedes the register pc/lr resolution) and resolve the failing allocation's
+    # caller pc against the module map.
+    if ("HEAP NEAR-CEILING" in hpout and
+            "HEAP NEAR-CEILING" in hpout.split("Modules:")[0] and
+            "last-alloc-fail: size=262144" in hpout and
+            "kernel + 0x80050000" in hpout):
+        print("PASS: symbolize() leads with heap near-ceiling + resolves fail pc")
+    else:
+        print("FAIL: heap symbolize output:\n%s" % hpout)
         ok = False
 
     print("\n== ET_REL section-walk (pure-Python, synthetic ELF) ==")

@@ -81,7 +81,10 @@ extern "C"
   //       stackCount/anyStackBlown). [stol:crashdiag-stack-highwater]
   //   v7: added audio-Event pend-queue guard breach detail (guardAddr/guardNext/
   //       guardPrev/guardReason). [stol:crashdiag-object-guard-event]
-#define PANIC_VERSION 7u
+  //   v8: added heap pressure + last-alloc-fail (heapCeiling/heapArenaHighWater/
+  //       heapAllocCount + heapLastFailSize/heapLastFailPc/heapLastFailArena/
+  //       heapFailCount). [stol:crashdiag-heap-stats]
+#define PANIC_VERSION 8u
 #define PANIC_MAX_MODULES 48
 #define PANIC_MAX_FR_EVENTS 32
 #define PANIC_FR_LABEL_LEN 48
@@ -220,6 +223,24 @@ extern "C"
     uint32_t guardNext;
     uint32_t guardPrev;
     uint32_t guardReason;
+
+    // [stol:crashdiag-heap-stats] Heap pressure (heap analog of the per-task
+    // stacks above). Filled by panicFillHeap() from the plain globals the Heap_*
+    // wrappers maintain (arch/am335x/hal/heap.c) -- a globals-only READ, so the
+    // fault/Swi capture never calls sbrk / mallinfo / walks the free list.
+    // Present in EVERY capture (trap / hang / guard). heapCeiling is the static
+    // arena size; heapArenaHighWater the peak sbrk(0)-arena_start footprint;
+    // heapAllocCount a running alloc count. The heapLastFail* group is the LAST
+    // allocation failure (record-only; a NULL never reboots): size requested, the
+    // caller pc (symbolizable), the arena high-water then, and a running fail
+    // count. heapFailCount == 0 => no failure recorded (the fail line is omitted).
+    uint32_t heapCeiling;
+    uint32_t heapArenaHighWater;
+    uint32_t heapAllocCount;
+    uint32_t heapLastFailSize;
+    uint32_t heapLastFailPc;
+    uint32_t heapLastFailArena;
+    uint32_t heapFailCount;
   } PanicRecord;
 
   // [stol:crashdiag-review-nits] The reserved .panicbuf region is 16 KiB (see
@@ -476,6 +497,32 @@ extern "C"
   }
 
   // ---------------------------------------------------------------------------
+  // [stol:crashdiag-heap-stats] Heap pressure into the record — globals-only.
+  //
+  // The Heap_* wrappers (arch/am335x/hal/heap.c, task context) do ALL the work
+  // (sbrk query, high-water, fail record) into plain volatile globals; here we
+  // only COPY those globals into the record. That keeps the capture abort-safe:
+  // no sbrk, no mallinfo, no free-list walk in the fault/Swi context (the free
+  // list is exactly what a heap-exhaustion bug corrupts). Shared by all three
+  // capture paths (trap / hang / guard). On the emu these symbols are undefined,
+  // but this file is am335x-only so that is never linked there.
+  // ---------------------------------------------------------------------------
+
+  // Arena high-water is "near the ceiling" (drives the banner) at/above this pct.
+#define PANIC_HEAP_NEARFULL_PCT 90u
+
+  static void panicFillHeap(PanicRecord *rec)
+  {
+    rec->heapCeiling = g_heapCeiling;
+    rec->heapArenaHighWater = g_heapArenaHighWater;
+    rec->heapAllocCount = g_heapAllocCount;
+    rec->heapLastFailSize = g_heapLastFailSize;
+    rec->heapLastFailPc = g_heapLastFailPc;
+    rec->heapLastFailArena = g_heapLastFailArena;
+    rec->heapFailCount = g_heapFailCount;
+  }
+
+  // ---------------------------------------------------------------------------
   // The exception hook — runs in a FAULT CONTEXT.
   //
   // Discipline honored here (planning/crash-diagnostics-plan.md section 5):
@@ -583,6 +630,10 @@ extern "C"
     // Same self-contained scan for both paths (see the routine's header); sets
     // rec->anyStackBlown for the flush banner.
     panicEnumerateStacks(rec);
+
+    // [stol:crashdiag-heap-stats] Heap pressure + last-alloc-fail, copied from the
+    // Heap_* wrapper globals (globals-only READ = abort-safe; no sbrk here).
+    panicFillHeap(rec);
 
     // Flight-recorder ring (fixed struct, no heap — safe to read here).
     {
@@ -751,6 +802,10 @@ extern "C"
     // Same self-contained scan for both paths (see the routine's header); sets
     // rec->anyStackBlown for the flush banner.
     panicEnumerateStacks(rec);
+
+    // [stol:crashdiag-heap-stats] Heap pressure + last-alloc-fail, copied from the
+    // Heap_* wrapper globals (globals-only READ = abort-safe; no sbrk here).
+    panicFillHeap(rec);
 
     // Flight-recorder ring (fixed struct, no heap — safe to read here).
     {
@@ -944,6 +999,11 @@ extern "C"
     // the guard report carries the same corruption fingerprint the trap did.
     panicEnumerateStacks(rec);
 
+    // [stol:crashdiag-heap-stats] Heap pressure + last-alloc-fail (globals-only
+    // READ). The confirmed Anamnesis root cause is heap exhaustion, so a guard
+    // breach report should also show the arena at/near the ceiling.
+    panicFillHeap(rec);
+
     {
       od::FlightRecorder &fr = od::flightRecorder();
       int n = fr.count();
@@ -1109,6 +1169,16 @@ extern "C"
     return e->size ? (unsigned)((e->used * 100u) / e->size) : 0u;
   }
 
+  // [stol:crashdiag-heap-stats] Percent of the heap ceiling the arena high-water
+  // has reached (0 if the ceiling is unknown, e.g. no alloc happened while armed).
+  static unsigned panicHeapPct(const PanicRecord *rec)
+  {
+    return rec->heapCeiling
+               ? (unsigned)(((uint64_t)rec->heapArenaHighWater * 100u) /
+                            rec->heapCeiling)
+               : 0u;
+  }
+
   // [stol:crashdiag-stack-highwater] Top-of-report banner(s): a broken canary is
   // an outright overflow (BLOWN), an intact-but->=90%-used stack is NEAR-FULL.
   // BLOWN entries lead so the prime suspect is unmissable. Iterates the task
@@ -1204,6 +1274,17 @@ extern "C"
     if (rec->faultType == PANIC_FAULT_GUARD)
     {
       ok &= panicPut(&f, " *** EVENT GUARD BREACH (audio pendQ corrupted) ***\n");
+    }
+    // [stol:crashdiag-heap-stats] Prime-suspect banner near the TOP (right after
+    // Kind) when the arena high-water is within PANIC_HEAP_NEARFULL_PCT of the
+    // ceiling -- the confirmed Anamnesis footprint signal, unmissable at a glance.
+    if (rec->heapCeiling &&
+        (uint64_t)rec->heapArenaHighWater * 100u >=
+            (uint64_t)PANIC_HEAP_NEARFULL_PCT * rec->heapCeiling)
+    {
+      snprintf(line, sizeof(line), " *** HEAP NEAR-CEILING (%u%%) ***\n",
+               panicHeapPct(rec));
+      ok &= panicPut(&f, line);
     }
     snprintf(line, sizeof(line), "Time Since Boot: %0.3fs\n", (double)rec->wallclock);
     ok &= panicPut(&f,line);
@@ -1323,6 +1404,28 @@ extern "C"
                " %-15s base=%08x size=%u used=%u (%u%%) canary=%s\n",
                e->name, (unsigned)e->base, (unsigned)e->size, (unsigned)e->used,
                panicStackPct(e), e->canaryOk ? "ok" : "BLOWN");
+      ok &= panicPut(&f, line);
+    }
+
+    // [stol:crashdiag-heap-stats] Heap pressure (heap analog of --- Stacks ---).
+    // Present in EVERY capture: ceiling (static arena size), arena-highwater (peak
+    // sbrk footprint) + its pct of the ceiling, and a running alloc count. When a
+    // NULL allocation was recorded (heapFailCount > 0) a second line names the LAST
+    // failure -- requested size + caller pc (symbolizable via the module map) +
+    // count. All values are copied from the Heap_* wrapper globals at capture time
+    // (globals-only, abort-safe). Format contract: docs/CRASH_REPORT_FORMAT.md.
+    ok &= panicPut(&f, "--- Heap ---\n");
+    snprintf(line, sizeof(line),
+             " ceiling=%u arena-highwater=%u (%u%%) allocs=%u\n",
+             (unsigned)rec->heapCeiling, (unsigned)rec->heapArenaHighWater,
+             panicHeapPct(rec), (unsigned)rec->heapAllocCount);
+    ok &= panicPut(&f, line);
+    if (rec->heapFailCount > 0)
+    {
+      snprintf(line, sizeof(line),
+               " last-alloc-fail: size=%u pc=%08x (count=%u)\n",
+               (unsigned)rec->heapLastFailSize, (unsigned)rec->heapLastFailPc,
+               (unsigned)rec->heapFailCount);
       ok &= panicPut(&f, line);
     }
 

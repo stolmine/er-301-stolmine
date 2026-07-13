@@ -181,6 +181,40 @@ extern "C"
   // the crash-test build; unreferenced (and undefined) otherwise.
   extern volatile bool g_crashTestHang;
 
+  // ---- Heap pressure [stol:crashdiag-heap-stats] -----------------------------
+  //
+  // Heap analog of the P0 stack high-water: put heap pressure into every crash
+  // report so a footprint / exhaustion bug (the confirmed Anamnesis root cause)
+  // is visible at a glance. The am335x Heap_* wrappers (arch/am335x/hal/heap.c)
+  // maintain these plain globals on each allocation; the capture path only READS
+  // them (globals-only == abort-safe, the P0 lesson: no sbrk, no mallinfo, no
+  // free-list walk in the fault/Swi context). The wrapper updates are gated on
+  // g_hangArmed (a plain bool load) so a disarmed build pays nothing at steady
+  // state.
+  //
+  // NOTE (deviation from the P3 plan's sbrk formula, detail in
+  // arch/am335x/hal/heap.c): this newlib malloc is NOT sbrk-backed (sbrk does not
+  // link -- no `end` symbol) and __unused_memory is od::BigHeap's region, so
+  // g_heapArenaHighWater is measured as the PEAK live (in-use) bytes of the newlib
+  // heap via malloc_usable_size() accounting in the wrappers, not sbrk(0)-base.
+  // g_heapCeiling stays Heap_getUnusedMemorySize() per the plan.
+  //
+  // am335x-only: the newlib arena + sbrk exist only there, so these are DEFINED
+  // in arch/am335x/hal/heap.c and READ only by arch/am335x/hal/crash/
+  // PanicBuffer.cpp. The emu neither defines nor reads them (its presentation
+  // half is driven by the CrashReport.lua synthetic injector), so declaring the
+  // externs here does not burden the emu link.
+  //
+  // Tier 1 (heap pressure, updated on each SUCCESSFUL allocation):
+  extern volatile uint32_t g_heapCeiling;        // Heap_getUnusedMemorySize()
+  extern volatile uint32_t g_heapArenaHighWater; // peak live newlib bytes (see note)
+  extern volatile uint32_t g_heapAllocCount;     // running successful-alloc count
+  // Tier 2 (last allocation FAILURE, record-only; no reboot on a benign NULL):
+  extern volatile uint32_t g_heapLastFailSize;  // requested bytes of the last fail
+  extern volatile uint32_t g_heapLastFailPc;    // caller pc (__builtin_return_address)
+  extern volatile uint32_t g_heapLastFailArena; // arena high-water at the fail
+  extern volatile uint32_t g_heapFailCount;     // running alloc-fail count
+
 #ifdef __cplusplus
 }
 #endif

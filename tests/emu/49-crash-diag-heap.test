@@ -1,0 +1,53 @@
+# [stol:crashdiag-heap-stats] Inject a synthetic report carrying a --- Heap ---
+# section (arena high-water near the ceiling, 95%, plus a recorded last-alloc-
+# fail) and confirm the format + viewer render it end-to-end without hardware:
+# the Heap section, the top-of-report HEAP NEAR-CEILING banner, the last-alloc-
+# fail line, the on-boot notice, and the admin viewer detail scroll. The real
+# per-alloc high-water CAPTURE is am335x-hardware-only (the numbers only exist on
+# the target); this exercises everything downstream of the panic buffer, so
+# C flush / Lua injector / symbolizer agree.
+
+frames 20
+!assert app.EMULATION == true
+
+# Inject drops a schema-v2 data-abort report WITH a Heap section + a pending marker.
+lua require('CrashReport').injectSynthetic('heap')
+!assert require('CrashReport').hasPending() == true
+
+# The parser recovers exactly one report; it is a data-abort (heap exhausts, then traps).
+!assert #require('CrashReport').parseReports() == 1
+!assert require('CrashReport').parseReports()[1].kind == 'data-abort'
+
+# The block carries a --- Heap --- section header.
+!assert (function() for _,l in ipairs(require('CrashReport').parseReports()[1].lines) do if l:find('%-%-%- Heap %-%-%-') then return true end end return false end)()
+
+# ...a ceiling/arena-highwater pressure line at 95%.
+!assert (function() for _,l in ipairs(require('CrashReport').parseReports()[1].lines) do if l:find('ceiling=') and l:find('%(95%%%)') then return true end end return false end)()
+
+# ...a last-alloc-fail line naming the requested size + caller pc.
+!assert (function() for _,l in ipairs(require('CrashReport').parseReports()[1].lines) do if l:find('last%-alloc%-fail:') and l:find('size=262144') then return true end end return false end)()
+
+# ...and the prominent top-of-report HEAP NEAR-CEILING banner (unmissable prime suspect).
+!assert (function() for _,l in ipairs(require('CrashReport').parseReports()[1].lines) do if l:find('%*%*%* HEAP NEAR%-CEILING %(95%%%) %*%*%*') then return true end end return false end)()
+
+# On-boot notice fires off the pending marker.
+lua require('CrashReport').checkPendingOnBoot()
+frames 20
+!assert require('Application').getVisibleContext():top():getClassName() == 'MainMessage'
+press ENTER
+frames 20
+!assert require('CrashReport').hasPending() == false
+
+# The admin viewer lists it and renders the detail scroll (incl. the Heap section).
+lua require('CrashReportViewer'):show()
+frames 20
+!assert require('Application').getVisibleContext():top():getClassName() == 'CrashReportViewer'
+!assert require('CrashReportViewer'):size() == 1
+!assert require('CrashReportViewer').reportColumn:get(0):find('data%-abort') ~= nil
+
+press SUB1
+frames 20
+!assert require('Application').getVisibleContext():top():getClassName() == 'CrashReportDetail'
+!assert require('Application').getVisibleContext():top():size() > 5
+
+quit

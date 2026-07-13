@@ -30,6 +30,7 @@ Kind: data-abort | prefetch-abort | undef | lua | hang-watchdog | event-guard-br
  *** STACK <name> BLOWN ***          (0+ banner lines, only if a stack is blown/near-full)
  *** STACK <name> NEAR-FULL (<pct>%) ***
  *** EVENT GUARD BREACH (audio pendQ corrupted) ***   (only if kind=event-guard-breach)
+ *** HEAP NEAR-CEILING (<pct>%) ***   (only if arena high-water >= 90% of ceiling)
 Time Since Boot: <s>s
 Firmware Version: <v>
 Boot Count: <n>
@@ -48,6 +49,9 @@ Thread: audio | ui | <name>          (from ExcContext threadType/Handle on hw)
 --- Stacks ---                       (per-task + ISR stack high-water; trap AND hang)
  <name>          base=<hex> size=<n> used=<n> (<pct>%) canary=<ok|BLOWN>
  isr             base=<hex> size=<n> used=<n> (<pct>%) canary=<ok|BLOWN>
+--- Heap ---                         (heap pressure; present in every capture on hw)
+ ceiling=<n> arena-highwater=<n> (<pct>%) allocs=<n>
+ last-alloc-fail: size=<n> pc=<hex> (count=<n>)   (only if an alloc has failed)
 --- Event Guard ---                  (kind=event-guard-breach only; corrupted audio pendQ)
  pendQ=<hex> next=<hex> prev=<hex> reason=<hex>
  reason: next-badptr prev-badptr next-link prev-link   (only the failed rules)
@@ -106,6 +110,30 @@ Recent Log Messages:
   numbers exist only on am335x hardware; the emu injector
   (`injectSynthetic("stacks")`) emits a canned blown-MAIN block so the
   format/viewer/symbolizer are testable without a trap.
+- **Heap.** Heap pressure, present in **every** capture (`crashdiag-heap-stats`),
+  the heap analog of `--- Stacks ---`. The am335x `Heap_*` wrappers
+  (`arch/am335x/hal/heap.c`) wrap newlib `malloc` over the `__unused_memory_start__
+  ..__unused_memory_end__` arena and maintain plain globals on each allocation;
+  the capture only READS them (globals-only == abort-safe: no `sbrk`, no
+  `mallinfo`, no free-list walk in the fault/Swi context, the free list being
+  exactly what a heap-exhaustion bug corrupts). `ceiling` is the static arena
+  size; `arena-highwater` is the peak `sbrk(0) - arena_start` footprint (newlib
+  rarely returns the break, so this is a monotonic exhaustion proxy) and `(<pct>%)`
+  is `arena-highwater/ceiling`; `allocs` is a running successful-alloc count. When
+  the arena high-water reaches **>= 90%** of the ceiling a prominent
+  ` *** HEAP NEAR-CEILING (<pct>%) ***` banner is emitted near the **top** of the
+  block (right after `Kind:`), and `tools/symbolize_crash.py` leads its output with
+  it. The confirmed Anamnesis root cause is heap exhaustion / over-footprint, so a
+  near-ceiling arena is the prime signal. The optional ` last-alloc-fail:` line
+  appears only when an allocation has returned NULL (`heapFailCount > 0`): it names
+  the last failure's requested `size`, the caller `pc` (`__builtin_return_address`,
+  symbolizable via the Module Map into e.g. `libanamnesis.so`), and a running
+  `count`. A NULL return is recorded **only**, never rebooted, so a benign NULL the
+  caller handles does not disturb the device. The updates are gated on the shared
+  armed flag (`g_hangArmed`, a plain bool load) so a disarmed build is unaffected.
+  The per-alloc numbers exist only on am335x hardware; the emu injector
+  (`injectSynthetic("heap")`) emits a canned near-ceiling block so the
+  format/viewer/symbolizer are testable without hardware.
 - **Event Guard.** `kind=event-guard-breach` only (`crashdiag-object-guard-event`).
   The audio Event's pend queue is a SYS/BIOS doubly-linked-list sentinel; the
   audio ISR validates its invariant (`next`/`prev` mapped + 4-aligned, and each
@@ -182,6 +210,7 @@ require("CrashReport").injectSynthetic("data-abort")     -- app.EMULATION only
 require("CrashReport").injectSynthetic("hang-watchdog")  -- adds a Stack Window
 require("CrashReport").injectSynthetic("stacks")         -- adds a --- Stacks --- section + BLOWN banner
 require("CrashReport").injectSynthetic("event-guard-breach") -- adds an --- Event Guard --- section + banner
+require("CrashReport").injectSynthetic("heap")           -- adds a --- Heap --- section + NEAR-CEILING banner
 ```
 
 This writes a canned schema-v2 report (canned registers + the **real** emu module
