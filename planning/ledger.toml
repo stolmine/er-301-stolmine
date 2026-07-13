@@ -1253,3 +1253,15 @@ area = "infra"
 verify = { kind = "manual", ref = "a crash report's '--- Recent Log ---' section carries the last N C-side log lines (not '(not captured C-side)'), read allocation-free/bounded from the capture context" }
 note = "planning/crash-diag-harness-sharpening.md C2. The C-side LogThread ring (arch/am335x/hal/log.cpp, a LockFreeQueue) is not drained into the panic buffer today. Copy the last N lines into a new PanicRecord field (bump PANIC_VERSION) and emit under the existing '--- Recent Log ---' header. Read the ring allocation-free + bounded from the fault/Swi context. Adds human-readable context around the trigger."
 links = { depends_on = [] }
+
+
+[[item]]
+id = "crashdiag-heap-stats"
+title = "Heap pressure + allocation-failure in the crash report (P3, the heap analog of P0)"
+status = "todo"
+modified = "2026-07-13T12:24:21-05:00"
+created = "2026-07-13T12:24:21-05:00"
+area = "infra"
+verify = { kind = "manual", ref = "a crash/guard report carries a '--- Heap ---' section (ceiling / arena-highwater / pct / alloc count) with a '*** HEAP NEAR-CEILING ***' banner when the newlib arena is >=90% of the ceiling; inserting the frozen Anamnesis (a footprint/heap-exhaustion bug) shows the arena at/near the ceiling, naming the root class; and (tier 2) a NULL allocation seals an 'alloc-fail' report with the requested size + caller pc" }
+note = "planning/crash-diag-harness-sharpening.md P3. Anamnesis root cause = heap exhaustion / footprint (habitat 2026-07-13: designed for more RAM than am335x has). Allocator = newlib malloc via arch/am335x/hal/heap.c Heap_* over __unused_memory_start__..end__ (NOT the SYS/BIOS heap; Memory_getStats measures a different heap + walks a free list). ABORT-SAFETY (P0 lesson): NEVER walk the free list / call mallinfo|Memory_getStats from the fault/Swi capture (that list is what exhaustion corrupts + it locks); track in the Heap_* wrappers into plain globals, capture just READS them. TIER 1: g_heapCeiling (Heap_getUnusedMemorySize), g_heapArenaHighWater (max sbrk(0)-start over allocs = peak footprint toward the ceiling), g_heapAllocCount -> PanicRecord (bump PANIC_VERSION) -> '--- Heap ---' flush + NEAR-CEILING banner + symbolizer lead + injectSynthetic('heap') + tests/emu/49. TIER 2: on a NULL malloc/memalign return, record size + __builtin_return_address(0) + arena, and (armed) seal a PANIC_FAULT_ALLOC_FAIL 'alloc-fail' record from the task context + reboot -> names the failing allocation directly. If exhaustion manifests as OVERLAPPING (non-NULL bad ptr) allocations, Tier 2 will not fire but Tier 1's banner still shows the pressure. SUPERSEDES P2 tier2 (the watchpoint chases a symptom + is DBGEN-gated; P3 names the class + is feasible now). Hardware-only capture; format/viewer/symbolizer emu-testable via the injector."
+links = { depends_on = ["infra-crash-diag-panic-buffer"] }

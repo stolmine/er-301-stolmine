@@ -363,3 +363,73 @@ compiled into any normal build.
    check did not run before the corrupting post reached `Event_post` — investigate
    ISR ordering; the guard is called at the top of every EDMA/error ISR so this
    should not happen.)
+
+---
+
+## P3 — Heap pressure + allocation-failure reporting  [added 2026-07-13]
+
+**Why:** the Anamnesis root cause turned out to be **heap exhaustion / footprint**
+(habitat 2026-07-13: it is designed for more RAM than the am335x has; it grows the
+heap until the allocator hands out overlapping/garbage memory, and its own writes
+then land on the live audio `Event` + a Task_Object at `~0x80538xxx`). The harness
+reports STACK usage (P0) but NOT heap usage, so it could not see the actual failure
+class at a glance. P3 is the heap analog of P0: put heap pressure in every crash
+report, and catch a failing allocation at the source. It generalizes to any
+over-footprint unit and would have printed "heap at the ceiling" outright.
+
+**The allocator (verified):** `arch/am335x/hal/heap.c` `Heap_memalign/malloc/calloc
+/realloc/free` wrap **newlib `malloc`** over the linker `__unused_memory_start__..
+__unused_memory_end__` region (NOT the SYS/BIOS default heap; `Memory_getStats`
+measures a different heap and walks a free list). DSP unit buffers
+(`Heap_memalign`, `BufferPool`, `AlignmentAllocator`) all route through here.
+
+**Abort-safety (the P0 lesson, again):** do NOT walk the heap free list or call
+`mallinfo`/`Memory_getStats` from the fault/Swi capture context -- the list is
+exactly what a heap-exhaustion bug corrupts, and those calls take the malloc lock.
+Instead track everything in the `Heap_*` wrappers into plain globals and have the
+capture just READ them (like the P0 stacks / the heartbeat pattern).
+
+### Tier 1 (MVP): heap pressure in every report
+Instrument the `Heap_*` wrappers to maintain, as plain globals (cheap, always-safe
+to read at capture):
+- `g_heapCeiling` = `Heap_getUnusedMemorySize()` (static arena size).
+- `g_heapArenaHighWater` = max over allocs of `sbrk(0) - __unused_memory_start__`
+  (how far the newlib arena has grown toward the ceiling; a monotonic proxy for
+  peak footprint -- newlib rarely returns the break, so this is the exhaustion
+  signal). Update on each `Heap_memalign/malloc/calloc/realloc`.
+- `g_heapAllocCount` (running alloc count, cheap leak/activity signal).
+Add `uint32_t heapCeiling/heapArenaHighWater/heapAllocCount` to `PanicRecord`
+(bump `PANIC_VERSION`), fill from the globals in BOTH the trap hook and the hang
+capture, flush a `--- Heap ---` section:
+` ceiling=<n> arena-highwater=<n> (<pct>%) allocs=<n>` plus a top-of-report
+` *** HEAP NEAR-CEILING (<pct>%) ***` banner when the arena high-water is within a
+threshold (propose >=90%) of the ceiling. Symbolizer leads with it when near-full.
+Gate on the armed flag for the update cost (a couple of instructions per alloc when
+off is acceptable, but prefer gating to keep off-parity). Emu: `injectSynthetic
+("heap")` + a `tests/emu/49` format test.
+
+### Tier 2 (high value): allocation-failure hook
+In the `Heap_*` wrappers, when the underlying `malloc/memalign/calloc/realloc`
+returns `NULL` (allocation failed = the allocator is out of room), record it: the
+requested `size`, the caller `pc` (`__builtin_return_address(0)`), and the current
+arena high-water, into globals; if diagnostics are armed, SEAL a `PANIC_FAULT_ALLOC
+_FAIL` ("alloc-fail") record (reusing the trap/hang capture spine from a normal task
+context, like the hang path) and warm-reboot so the failing allocation is named
+directly (`size` + caller in libanamnesis) rather than surfacing as a later wild
+write. NOTE: if the exhaustion manifests as OVERLAPPING allocations (a non-NULL bad
+pointer) rather than a clean NULL, Tier 2 will not fire but Tier 1's near-ceiling
+banner still shows the pressure -- so Tier 1 is the guaranteed signal, Tier 2 the
+precise one.
+
+### Verify
+- Emu: synthetic `--- Heap ---` block + banner render + symbolizer lead (tests/emu/49).
+- Hardware (frozen Anamnesis): the insert's crash/guard report should now carry a
+  `--- Heap ---` section with `arena-highwater` at/near the `ceiling` and a
+  ` *** HEAP NEAR-CEILING ***` banner -- naming the footprint root cause directly.
+  If Tier 2 fires, an `alloc-fail` report with the requested size + a caller pc in
+  `libanamnesis.so`.
+
+### Priority note
+Given the confirmed footprint root cause, P3 supersedes P2 Tier 2 (the A8 watchpoint
+for the exact wild-write pc): the watchpoint chases a symptom and is DBGEN-gated,
+while P3 names the actual failure class and is feasible today.
