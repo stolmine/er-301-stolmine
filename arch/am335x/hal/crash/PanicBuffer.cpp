@@ -698,7 +698,10 @@ extern "C"
   // audio task's OWN stack are read, all bounded.
   // ---------------------------------------------------------------------------
 
-  void PanicBuffer_captureHang(void)
+  // [stol:crashdiag-ui-heartbeat] Parameterized by target task so the UI hang can
+  // snapshot the MAIN/app task, not just audio. The thin wrappers below preserve
+  // the bench-validated audio path (PanicBuffer_captureHang == this, t=g_audioTask).
+  static void panicCaptureHangTask(Task_Handle t)
   {
     if (g_captured || g_inHook)
     {
@@ -719,7 +722,7 @@ extern "C"
 
     // Best-effort task state. A hang hands us no ExcContext, so pc/psr/registers
     // stay zero and the raw stack window (below) carries the backtrace load.
-    Task_Handle t = (Task_Handle)g_audioTask;
+    // [stol:crashdiag-ui-heartbeat] t is the target task (param), not hard-wired.
     if (t)
     {
       rec->threadType = (uint32_t)BIOS_ThreadType_Task;
@@ -840,6 +843,20 @@ extern "C"
     {
       reboot(); // WDT warm reset; DDR keeps its charge so the buffer survives.
     }
+  }
+
+  // [stol:crashdiag-ui-heartbeat] Audio-task shorthand (the bench-validated hang
+  // path; behavior byte-identical to the pre-refactor PanicBuffer_captureHang).
+  void PanicBuffer_captureHang(void)
+  {
+    panicCaptureHangTask((Task_Handle)g_audioTask);
+  }
+
+  // [stol:crashdiag-ui-heartbeat] Capture a hang on an ARBITRARY task (the UI hang
+  // snapshots the main/app task, published by the monitor as g_uiTask).
+  void PanicBuffer_captureHangTask(void *taskHandle)
+  {
+    panicCaptureHangTask((Task_Handle)taskHandle);
   }
 
   // ---------------------------------------------------------------------------
@@ -1610,6 +1627,8 @@ extern "C"
   // here at boot, read by the audio task (arch/am335x/hal/audio.c), which spins
   // forever on its next frame so the Clock monitor catches a deliberate hang.
   volatile bool g_crashTestHang = false;
+  // [stol:crashdiag-ui-heartbeat] g_uiCrashTest (the 'U' livelock flag) is DEFINED
+  // in HangWatchdog.cpp; checkTestTrigger below only sets it (declared in crash.h).
 #endif
 
   void PanicBuffer_checkTestTrigger(void)
@@ -1646,13 +1665,17 @@ extern "C"
         UINT br = 0;
         if (f_read(&tf, &c, 1, &br) == FR_OK && br == 1)
         {
-          if (c == 'u' || c == 'U')
+          if (c == 'u')
           {
             kind = 1; // undefined instruction
           }
           else if (c == 'h' || c == 'H')
           {
-            kind = 2; // hang-watchdog livelock
+            kind = 2; // hang-watchdog livelock (audio)
+          }
+          else if (c == 'U') // [stol:crashdiag-ui-heartbeat]
+          {
+            kind = 3; // UI/main-thread hang livelock
           }
         }
         f_close(&tf);
@@ -1679,6 +1702,19 @@ extern "C"
       Crash_setAutoReboot(true);
       g_crashTestHang = true;
       logInfo("Crash test: hang livelock armed; audio task will spin next frame.");
+      return;
+    }
+    if (kind == 3)
+    {
+      // [stol:crashdiag-ui-heartbeat] UI hang test: arm the facility AND the
+      // separate UI-hang opt-in + auto-reboot, raise the UI livelock flag, and
+      // RETURN so boot continues. The main task spins in Crash_uiHeartbeat on its
+      // next busy edge and the monitor's UI heartbeat check snapshots + reboots.
+      Crash_arm(true);
+      Crash_uiHangArm(true);
+      Crash_setAutoReboot(true);
+      g_uiCrashTest = true;
+      logInfo("Crash test: UI hang livelock armed; main task will spin.");
       return;
     }
 #endif

@@ -143,6 +143,19 @@ local defaults = {
       app.flightRecorderArm(value and true or false)
     end
   },
+  -- [stol:crashdiag-ui-heartbeat] Separate opt-in for UI/main-thread hang detection
+  -- (option c). OFF by default: a legit long main-thread op (preset load, package
+  -- install, graph recompile) can trip it, so it is enabled only while actively
+  -- hunting a suspected UI/constructor hang. Requires crash diagnostics to also be
+  -- on (the monitor Clock runs only then).
+  enableUiHangDetection = {
+    category = "General",
+    description = "Detect UI-thread hangs? (advanced; may reboot on long ops)",
+    value = false,
+    onSet = function(value)
+      app.uiHangArm(value and true or false)
+    end
+  },
   unitControlReadoutSource = {
     category = "Units",
     description = "Displayed value for unit control readouts.",

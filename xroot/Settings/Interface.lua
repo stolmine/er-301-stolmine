@@ -38,6 +38,11 @@ menuItems[#menuItems + 1] = {
   "addVariable",
   "enableCrashDiagnostics"
 }
+-- [stol:crashdiag-ui-heartbeat] Advanced UI-hang detection opt-in (option c).
+menuItems[#menuItems + 1] = {
+  "addVariable",
+  "enableUiHangDetection"
+}
 if app.TESTING then
   menuItems[#menuItems + 1] = {
     "addVariable",

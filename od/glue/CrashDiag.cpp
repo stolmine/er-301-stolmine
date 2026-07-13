@@ -23,6 +23,22 @@ extern "C" __attribute__((weak)) void Crash_hangArm(bool on)
   (void)on;
 }
 
+// [stol:crashdiag-ui-heartbeat] Weak no-op default for the UI heartbeat, mirroring
+// the Crash_hangArm weak default above. The am335x HangWatchdog provides the strong
+// override; the emu (no hang capture) links this no-op so app.uiHeartbeat is inert.
+extern "C" __attribute__((weak)) void Crash_uiHeartbeat(bool busy)
+{
+  (void)busy;
+}
+
+// [stol:crashdiag-ui-heartbeat] Weak no-op default for the UI-hang opt-in (option
+// c). The am335x HangWatchdog provides the strong override; the emu links this
+// no-op so app.uiHangArm is inert.
+extern "C" __attribute__((weak)) void Crash_uiHangArm(bool on)
+{
+  (void)on;
+}
+
 namespace
 {
   // app.getModuleMap() -> one line per module:
@@ -97,6 +113,24 @@ namespace
     return 0;
   }
 
+  // [stol:crashdiag-ui-heartbeat] app.uiHeartbeat(busy): the Lua main loop marks
+  // itself busy (processing a handler/draw/trigger) or idle (about to block in
+  // waitForEvent). Feeds the UI half of the am335x hang monitor; no-op on the emu.
+  int l_uiHeartbeat(lua_State *L)
+  {
+    Crash_uiHeartbeat(lua_toboolean(L, 1) != 0);
+    return 0;
+  }
+
+  // [stol:crashdiag-ui-heartbeat] app.uiHangArm(on): the separate UI-hang opt-in
+  // (option c), driven by the enableUiHangDetection setting. Off by default; the
+  // general "Enable crash diagnostics?" toggle does NOT set it.
+  int l_uiHangArm(lua_State *L)
+  {
+    Crash_uiHangArm(lua_toboolean(L, 1) != 0);
+    return 0;
+  }
+
   int l_flightRecorderCount(lua_State *L)
   {
     lua_pushinteger(L, od::flightRecorder().count());
@@ -138,6 +172,9 @@ namespace
       {"flightRecorderArm", l_flightRecorderArm},
       {"flightRecorderArmed", l_flightRecorderArmed},
       {"flightRecord", l_flightRecord},
+      // [stol:crashdiag-ui-heartbeat] UI heartbeat producer for the hang monitor.
+      {"uiHeartbeat", l_uiHeartbeat},
+      {"uiHangArm", l_uiHangArm},
       {"flightRecorderCount", l_flightRecorderCount},
       {"flightRecorderText", l_flightRecorderText},
       {"flightRecorderClear", l_flightRecorderClear},

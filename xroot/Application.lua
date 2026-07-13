@@ -2,6 +2,11 @@
 local app = app
 local startEventTimer = app.UIThread.startEventTimer
 local stopEventTimer = app.UIThread.stopEventTimer
+-- [stol:crashdiag-ui-heartbeat] UI heartbeat for the crash-diagnostics hang
+-- monitor: busy=true while the main task processes a batch, false while it blocks
+-- idle in waitForEvent. A single predicted branch (disarmed) in the C glue, and a
+-- no-op on the emu. Cached like the other hot-loop lookups.
+local uiHeartbeat = app.uiHeartbeat
 local waitForEvent = app.Events_wait
 local pullEvent = app.Events_pull
 local updateDisplay = app.UIThread.updateDisplay
@@ -563,8 +568,15 @@ local function loop()
   local eventQuit = app.EVENT_QUIT
   local quit = false
   while not quit do
+    -- [stol:crashdiag-ui-heartbeat] About to block idle: clear busy so a stalled
+    -- heartbeat during the legitimate waitForEvent block is NOT read as a hang.
+    uiHeartbeat(false)
     waitForEvent()
     startEventTimer()
+    -- [stol:crashdiag-ui-heartbeat] Processing begins: mark busy + bump the frame
+    -- counter. From here until the next uiHeartbeat(false) a stalled counter (no
+    -- batch completion for ~250ms) is a real UI hang the monitor will capture.
+    uiHeartbeat(true)
     -- process spontaneous events
     while true do
       local e = pullEvent()

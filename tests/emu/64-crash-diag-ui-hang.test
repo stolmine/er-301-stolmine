@@ -1,0 +1,51 @@
+# [stol:crashdiag-ui-heartbeat] UI/main-thread hang: format half. The real UI hang
+# CAPTURE is am335x-hardware-only (hangs, like traps, do not reproduce in the emu);
+# this proves everything DOWNSTREAM of the panic buffer renders a Thread=main hang
+# end-to-end. It also guards against a regression in the existing (audio) hang path.
+#
+# The record is synthesized inline via the public CrashReport.write (no dependency
+# on a new injector variant), so it stays clear of the sibling P3 injector edits.
+
+frames 20
+!assert app.EMULATION == true
+
+# A UI hang is a hang-watchdog record whose Thread is the main (app) task. Same
+# schema-v2 shape the C flush emits on hardware when PanicBuffer_captureHangTask
+# targets the main task: pc=0 (no ExcContext), a Stack Window, Hang State spin.
+lua require('CrashReport').write { kind = 'hang-watchdog', thread = 'main', pc = '00000000', lr = '00000000', hangState = 'running (spin)', registerLines = { ' pc=00000000 lr=00000000 sp=4fff0100 psr=00000000', ' dfsr=00000000 ifsr=00000000 dfar=00000000 ifar=00000000', ' r0=00000000 r1=00000000 r2=00000000 r3=00000000', ' r4=00000000 r5=00000000 r6=00000000 r7=00000000', ' r8=00000000 r9=00000000 r10=00000000 r11=00000000 r12=00000000' }, stackWindowLines = { ' sp=4fff0100 bytes=32', ' 4fff0100: 80012abc 00000000 4fff0140 80013344', ' 4fff0110: 00000000 40012a00 4fff0180 80014400' } }
+lua require('CrashReport').setPending('hang-watchdog in main (ui spin)')
+
+# The parser recovers the report and its kind.
+!assert require('CrashReport').hasPending() == true
+!assert #require('CrashReport').parseReports() == 1
+!assert require('CrashReport').parseReports()[1].kind == 'hang-watchdog'
+
+# It is attributed to the MAIN/UI task (Thread: main), which is the whole point of
+# the UI heartbeat: a spin off the audio path is now named, not silent.
+!assert (function() for _,l in ipairs(require('CrashReport').parseReports()[1].lines) do if l:find('^Thread: main') then return true end end return false end)()
+
+# ...and carries the hang-only sections (Stack Window + Hang State spin).
+!assert (function() for _,l in ipairs(require('CrashReport').parseReports()[1].lines) do if l:find('Stack Window') then return true end end return false end)()
+!assert (function() for _,l in ipairs(require('CrashReport').parseReports()[1].lines) do if l:find('Hang State: running') then return true end end return false end)()
+
+# On-boot notice fires off the pending marker.
+lua require('CrashReport').checkPendingOnBoot()
+frames 20
+!assert require('Application').getVisibleContext():top():getClassName() == 'MainMessage'
+press ENTER
+frames 20
+!assert require('CrashReport').hasPending() == false
+
+# The admin viewer lists it and renders the detail scroll.
+lua require('CrashReportViewer'):show()
+frames 20
+!assert require('Application').getVisibleContext():top():getClassName() == 'CrashReportViewer'
+!assert require('CrashReportViewer'):size() == 1
+!assert require('CrashReportViewer').reportColumn:get(0):find('hang%-watchdog') ~= nil
+
+press SUB1
+frames 20
+!assert require('Application').getVisibleContext():top():getClassName() == 'CrashReportDetail'
+!assert require('Application').getVisibleContext():top():size() > 5
+
+quit

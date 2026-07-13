@@ -126,7 +126,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `crashdiag-insert-lifecycle-markers` | Flight recorder marks unit construct-complete / first-process (P1c) | manual · 2026-07-12 |
 |   | `crashdiag-object-guard-event` | Guard/canary the audio Event object to catch heap corruption near the write (P2) | manual · 2026-07-12 |
 |   | `crashdiag-resolve-lr` | Crash report resolves or explicitly flags lr against the module map (C1) | manual · 2026-07-12 |
-|   | `crashdiag-ui-heartbeat` | Hang monitor covers the UI/main thread, not just audio (P1a) | manual · 2026-07-12 |
+|   | `crashdiag-ui-heartbeat` | Hang monitor covers the UI/main thread, not just audio (P1a) | manual · 2026-07-13 |
 |   | `infra-crash-diagnostics-debug-mode` | Dev-enabled debug mode captures C-side crash diagnostics (umbrella) | manual · 2026-07-09 |
 |   | `infra-v0616-port` | Port the TXo I2C master mod to the v0.6.16 stable firmware base | manual · 2026-07-09 |
 | ✓ | `crashdiag-fix-flightrec-insert-order` | Flight recorder records unit insert AFTER the risky work, missing the #1 trigger (H3) | manual *(attested)* · 2026-07-10 |

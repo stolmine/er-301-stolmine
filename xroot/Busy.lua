@@ -35,6 +35,11 @@ local function status(...)
       app.logInfo(msg)
     end
     Overlay.startMainMessage(msg)
+    -- [stol:crashdiag-ui-heartbeat] Pump the UI heartbeat so a long-but-PROGRESSING
+    -- main-thread op (which calls status() as it advances) is not mistaken for a
+    -- UI hang. A genuinely stuck op never reaches here. No-op unless UI-hang
+    -- detection is opted in.
+    app.uiHeartbeat(true)
   end
 end
 

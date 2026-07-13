@@ -151,6 +151,41 @@ extern "C"
   // free, bounded, snapshots the audio task's own stack only.
   void PanicBuffer_captureHang(void);
 
+  // ---- UI/main-thread heartbeat + hang coverage [stol:crashdiag-ui-heartbeat] --
+  //
+  // The hang monitor above watches ONLY the audio heartbeat, so a spin on the MAIN
+  // (app) task -- a hung gesture handler, an infinite draw, a stuck unit
+  // constructor on insert -- produces NO report. These seams extend the SAME
+  // Swi-context monitor with a second, busy-gated heartbeat for the main task. The
+  // idle-block nuance: the Lua main loop legitimately blocks in waitForEvent when
+  // idle, so a stalled counter is a hang ONLY while g_uiBusy is set.
+  //
+  // UI-hang detection is a SEPARATE opt-in (g_uiHangArmed, the enableUiHangDetection
+  // setting -> app.uiHangArm -> Crash_uiHangArm): a legit long main-thread op
+  // (preset load, package install, graph recompile) can exceed the stall threshold,
+  // so this is enabled only while actively hunting a suspected UI hang. The general
+  // "Enable crash diagnostics?" arm never turns it on -> zero UI-reboot risk in
+  // normal use.
+  extern volatile uint32_t g_uiFrames;   // bumped on each busy=true edge when armed
+  extern volatile bool g_uiBusy;         // true while the main task runs a handler/draw
+  extern void *g_uiTask;                 // Task_Handle of the main/app task (set at arm)
+  extern volatile bool g_uiHangArmed;    // the separate UI-hang opt-in (default off)
+  extern volatile bool g_uiCrashTest;    // BUILDOPT_CRASH_TEST 'U' livelock flag
+
+  // Producer, called from the Lua main loop (xroot/Application.lua) + Busy pump
+  // (xroot/Busy.lua) via app.uiHeartbeat(busy). Gated on g_uiHangArmed = zero cost
+  // when UI detection is off. Weak no-op default in od/glue/CrashDiag.cpp (emu).
+  void Crash_uiHeartbeat(bool busy);
+
+  // The separate UI-hang opt-in (default off). Set via the enableUiHangDetection
+  // setting; runs on the main task so it also resolves g_uiTask.
+  void Crash_uiHangArm(bool on);
+
+  // Capture a HANG record targeting an ARBITRARY task (the UI hang snapshots the
+  // main/app task). PanicBuffer_captureHang() is the audio-task shorthand; both
+  // share the one-shot trap/hang capture spine.
+  void PanicBuffer_captureHangTask(void *taskHandle);
+
   // ---- Audio-Event pend-queue guard [stol:crashdiag-object-guard-event] ------
   //
   // Closes the attribution gap of the Anamnesis insert data-abort: the corruption
