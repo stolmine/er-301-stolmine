@@ -5,7 +5,7 @@ ER-301-STOLMINE TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**105 items** — 78 done, 25 todo, 2 blocked. *Rendered 2026-07-14.*
+**107 items** — 78 done, 27 todo, 2 blocked. *Rendered 2026-07-14.*
 
 ## Sequencer
 
@@ -32,6 +32,7 @@ check`): a `done` item must have a real test or its named artifact.*
 
 | | id | item | verify |
 |---|---|---|---|
+|   | `cpu-metering-ui` | More visible / granular CPU metering in the UI | manual · 2026-07-14 |
 |   | `crashdiag-ui-flightrecorder-seams` | On-device flight recorder captures UI seam events (P1b) | manual · 2026-07-12 |
 |   | `mix-input-native-cv` | Native CV/modulation on the channel mix input slider (SHIFT gesture) | manual · 2026-07-13 |
 |   | `ui-audio-editor-selection-ops` | Audio editor: selection-scoped destructive operations (idea) | manual · 2026-07-09 |
@@ -60,6 +61,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |---|---|---|---|
 |   | `dsp-multi-output-followups` | Multi-output framework follow-ups (preset rewriter, picker glyph, topology surfacing, LUT audit) | manual · 2026-07-09 |
 |   | `dsp-stolmine-core-package` | Stolmine Core package: multi-output core units, default install with vanilla Core bundled | manual · 2026-07-09 |
+|   | `onboard-sample-analysis-browsing` | Onboard sample-content analysis for browsing (waveform/transient/pitch/loudness) | manual · 2026-07-14 |
 | ✗ | `dsp-stereo-mix-quicksave-drop` | Stereo Mix output drops to silence after quicksave load | manual *(attested)* · 2026-07-09 |
 | ✓ | `dsp-multi-output-framework` | Multi-output unit framework: units expose sub-outs picked from LocalChooser, vanilla-safe | manual *(attested)* · 2026-07-09 |
 | ✓ | `dsp-parallel-dsp` | Parallel DSP via BUILDOPT_PARALLEL_DSP WorkerPool | manual *(attested)* · 2026-07-09 |

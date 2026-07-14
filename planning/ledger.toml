@@ -1278,3 +1278,26 @@ area = "ui"
 verify = { kind = "manual", ref = "SHIFT on the channel mix INPUT LEVEL fader opens native CV/modulation assignment (mirroring a unit control's SHIFT-to-modulate affordance) so a CV source drives the input level WITHOUT the user hand-building a VCA sub-chain; the assigned modulation is VISIBLE + editable from the top-level channel/mix screen (alongside input-source designation + solo/mute), not buried a layer down" }
 note = "FEATURE REQUEST relayed 2026-07-13 (user [UMOU]; owner will implement). Today, CV-controlling a channel's mix input level means inserting a VCA + a CV source to drive it, and that modulation is INVISIBLE from the uppermost (channel/mix) layer -- a hassle and easy to lose track of. Ask: give the mix input slider the SAME native modulation affordance many units already expose via SHIFT (shift-on-control -> CV/bias assignment). The channel sub-display already shows input-source designation + solo/mute, so it is a natural home for the CV-control readout too. LIVES IN: xroot/Channels/init.lua (the channel/mix view with solo/mute/source + the input level fader) + the underlying od channel-output mixer DSP (the input level would gain a modulation inlet summed/scaled into it). Mirror an existing unit control's shift-modulation menu for consistency. CAVEAT: this is a FEATURE, and the am335x line is feature-complete / patch-only (project_am335x_feature_complete), so it targets the CM4/rpidev line or a future feature release, not an am335x patch. Owner said: 'definitely possible and it makes sense.'"
 links = { depends_on = [] }
+
+
+[[item]]
+id = "onboard-sample-analysis-browsing"
+title = "Onboard sample-content analysis for browsing (waveform/transient/pitch/loudness)"
+status = "todo"
+modified = "2026-07-14T18:10:28-05:00"
+created = "2026-07-14T18:10:28-05:00"
+area = "dsp"
+verify = { kind = "manual", ref = "browsing samples (file chooser / sample pool) surfaces computed content analysis to aid selection: at minimum a waveform / peak thumbnail, and optionally transient/onset, pitch or BPM estimate, and loudness; the analysis is budgeted (lazy on-focus and/or a background pass) so it NEVER disturbs the real-time audio deadline" }
+note = "FEATURE IDEA relayed 2026-07-14. No existing todo covers analyzing sample CONTENT to aid browsing/selection (distinct from ui-dense-unit-picker-residue, which previews UNITS, and audio-editor selection-scoped-ops, which edits). DESIGN FORKS to settle: (1) WHEN to analyze -- lazy on-focus in the chooser (cheap, only what you look at) vs a background pass over the whole pool (fuller, needs a worker + cache); (2) WHAT to compute, cheapest-first -- a waveform/peak thumbnail (near-free), then transient/onset, then pitch/BPM, then loudness/RMS, and possibly auto-tags/classification; (3) COST CEILING -- this is real-time-audio hardware, so any analysis must be budgeted or fully backgrounded and results cached to the card so it is computed once. Payoff: pick samples by their content at a glance. Likely a CM4/rpidev-line feature (am335x is feature-complete; a background analysis worker also fits the multi-core Pi class better)."
+links = { depends_on = [] }
+
+[[item]]
+id = "cpu-metering-ui"
+title = "More visible / granular CPU metering in the UI"
+status = "todo"
+modified = "2026-07-14T18:10:28-05:00"
+created = "2026-07-14T18:10:28-05:00"
+area = "ui"
+verify = { kind = "manual", ref = "CPU load is visible from the main UI without diving into Admin > CPU Load (e.g. an always-available readout on the main or sub display), and ideally PER-CHAIN (which chain/unit is expensive) so a user can see headroom + attribute cost at a glance; the existing detailed LoadView remains" }
+note = "FEATURE IDEA relayed 2026-07-14. CPU metering already EXISTS but is buried: Admin > CPU Load (xroot/LoadView.lua). Request: surface it more accessibly in the everyday UI (an always-available load readout on the main/sub display), and ideally add PER-CHAIN / per-unit granularity so you can see WHICH chain is expensive, not just the total. Extra relevant in the parallel-DSP era (project_parallel_dsp_shipped): on the multi-core Pi class, per-thread / per-chain cost is what tells you whether a patch will parallelize or is critical-path-bound, so a per-chain meter doubles as a parallelism/headroom guide. Design: keep LoadView as the detailed view; add a compact always-visible meter + optional per-chain breakdown. UI feature; likely CM4/rpidev-line (am335x feature-complete)."
+links = { depends_on = [] }
