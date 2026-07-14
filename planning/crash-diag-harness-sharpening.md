@@ -14,6 +14,44 @@ The two gaps:
    leading suspect is a stack overflow in the viz DRAW path, which runs on the MAIN
    (UI) task. We are blind to the UI/display thread's stack, liveness, and activity.
 
+## CURRENT STATE (2026-07-14) -- resume here
+
+The base facility (`infra-crash-diagnostics-debug-mode`) is DONE + bench-validated:
+traps, audio hangs (+ live spin-pc), per-task stacks, the arm toggle. On top of it,
+the sharpening items below. Bench firmware ladder (each is a clean single-version
+build; Anamnesis pkg 0.2.0.83 is the FROZEN fixture): `.53` spin-pc -> `.56` UI arm
+toggle -> `.58` P0 stacks (abort-safe) -> `.60` P2 guard -> `.62` P3 heap -> **`.63`
+P1a UI-hang (the current omnibus: stacks + guard + heap + opt-in UI-hang)**.
+
+- **P0 `crashdiag-stack-highwater`** -- DONE, bench-validated (`.58`). Disproved the
+  stack-overflow hypothesis; surfaced the corrupted Task_Object. Abort-safety lesson:
+  DDR-range-check every read (the `.57` build HUNG walking corrupted structures).
+- **P2 `crashdiag-object-guard-event`** -- tier 1 DONE, emu-verified, BENCH-PENDING
+  (`.60`+). pendQ-invariant guard catches the corruption at the first Event_post.
+  Tier 2 (the writing pc via an A8 watchpoint) NOT shipped -- DBGEN-gated, needs a
+  bench probe; deprioritized (superseded by P3).
+- **P3 `crashdiag-heap-stats`** -- DONE, emu-verified, BENCH-PENDING (`.62`+). Names
+  the Anamnesis footprint root cause directly (arena vs the 20 MB kernel_heap
+  ceiling + last-alloc-fail). Supersedes P2 tier 2.
+- **P1a `crashdiag-ui-heartbeat`** -- DONE, emu-verified, BENCH-PENDING (`.63`).
+  OPTION C: UI-hang detection is a SEPARATE opt-in (`enableUiHangDetection`), ~3s
+  threshold + a Busy.status pump, so it never reboots on a legit long op.
+- **P1b `crashdiag-ui-flightrecorder-seams`** -- PLANNED, not started (§P1b).
+- **P1c `crashdiag-insert-lifecycle-markers`** -- PLANNED, not started (§P1c).
+- **C1 `crashdiag-resolve-lr`** -- PLANNED, not started (cheap; §C1).
+- **C2 `crashdiag-flush-log-ring`** -- PLANNED, not started (cheap; §C2).
+- Open refinements (own items): `crashdiag-fix-partial-register-capture` (the
+  `sp==pc`/`psr` A8 trap-frame gap -- gates any stack UNWIND) and
+  `crashdiag-fix-flush-error-handling` (M4, needs a full/failing-card bench).
+
+**Next-step guidance:** (a) bench `.63` on the frozen Anamnesis insert to validate
+P2/P3/P1a capture at once (expect the `--- Heap ---` NEAR-CEILING banner + the pendQ
+guard breach); (b) then the cheap C1/C2 (both touch PanicBuffer.cpp + the symbolizer,
+so do them SERIALLY); (c) P1b/P1c add UI activity context to the flight recorder.
+`crashdiag-fix-partial-register-capture` is the highest-leverage refinement (unlocks
+call-chain unwind for every report). All CAPTURE is am335x-hardware-only; the
+format/viewer/symbolizer halves are emu-testable via `injectSynthetic`.
+
 ## Standing test fixture: Anamnesis insert (frozen)
 
 Anamnesis (`er-301-habitat: mods/anamnesis`, pkg 0.2.0.83) will be held UNCHANGED

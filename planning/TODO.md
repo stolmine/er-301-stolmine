@@ -5,7 +5,7 @@ ER-301-STOLMINE TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**105 items** — 77 done, 26 todo, 2 blocked. *Rendered 2026-07-13.*
+**105 items** — 78 done, 25 todo, 2 blocked. *Rendered 2026-07-14.*
 
 ## Sequencer
 
@@ -128,7 +128,6 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `crashdiag-object-guard-event` | Guard/canary the audio Event object to catch heap corruption near the write (P2) | manual · 2026-07-12 |
 |   | `crashdiag-resolve-lr` | Crash report resolves or explicitly flags lr against the module map (C1) | manual · 2026-07-12 |
 |   | `crashdiag-ui-heartbeat` | Hang monitor covers the UI/main thread, not just audio (P1a) | manual · 2026-07-13 |
-|   | `infra-crash-diagnostics-debug-mode` | Dev-enabled debug mode captures C-side crash diagnostics (umbrella) | manual · 2026-07-09 |
 |   | `infra-v0616-port` | Port the TXo I2C master mod to the v0.6.16 stable firmware base | manual · 2026-07-09 |
 | ✓ | `crashdiag-fix-flightrec-insert-order` | Flight recorder records unit insert AFTER the risky work, missing the #1 trigger (H3) | manual *(attested)* · 2026-07-10 |
 | ✓ | `crashdiag-fix-fwversion-capture-time` | Firmware Version stamped at flush time, not capture time (M2) | manual *(attested)* · 2026-07-11 |
@@ -144,6 +143,7 @@ check`): a `done` item must have a real test or its named artifact.*
 | ✓ | `infra-crash-diag-hang-watchdog` | Audio-thread heartbeat + WDT catches hangs, not just traps (hardware, later) | manual *(attested)* · 2026-07-12 |
 | ✓ | `infra-crash-diag-module-map` | Module map: enumerate kernel + loaded package text/data bases | manual *(attested)* · 2026-07-10 |
 | ✓ | `infra-crash-diag-panic-buffer` | Warm-reboot-surviving panic buffer flushed to crash.log on next boot (hardware) | manual *(attested)* · 2026-07-11 |
+| ✓ | `infra-crash-diagnostics-debug-mode` | Dev-enabled debug mode captures C-side crash diagnostics (umbrella) | manual *(attested)* · 2026-07-14 |
 | ✓ | `infra-ledger-regime` | Ledger + BDG regime stood up (gate, render, hooks, blessed entrypoint) | manual *(attested)* · 2026-07-09 |
 | ✓ | `infra-package-diagnostics` | Detailed package load diagnostics for .pkg archive + .so ELF failures | manual *(attested)* · 2026-07-09 |
 | ✓ | `infra-swig-vanilla-compat` | SWIG pinned to 4.2.1 + runtime version bridge so vanilla community packages load | manual *(attested)* · 2026-07-09 |
