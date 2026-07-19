@@ -5,7 +5,7 @@ ER-301-STOLMINE TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**110 items** — 78 done, 30 todo, 2 blocked. *Rendered 2026-07-16.*
+**111 items** — 78 done, 31 todo, 2 blocked. *Rendered 2026-07-19.*
 
 ## Sequencer
 
@@ -32,6 +32,7 @@ check`): a `done` item must have a real test or its named artifact.*
 
 | | id | item | verify |
 |---|---|---|---|
+|   | `control-bookmarks-chain-nav` | Bookmark top-level controls into a list for fast hopping through a chain | manual · 2026-07-19 |
 |   | `control-shift-subdisplay-indicator` | Detect controls with an extra SHIFT sub-display and surface a discoverability indicator | manual · 2026-07-16 |
 |   | `cpu-metering-ui` | More visible / granular CPU metering in the UI | manual · 2026-07-14 |
 |   | `crashdiag-ui-flightrecorder-seams` | On-device flight recorder captures UI seam events (P1b) | manual · 2026-07-12 |
