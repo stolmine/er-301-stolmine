@@ -64,7 +64,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |---|---|---|---|
 |   | `dsp-multi-output-followups` | Multi-output framework follow-ups (preset rewriter, picker glyph, topology surfacing, LUT audit) | manual · 2026-07-09 |
 |   | `dsp-stolmine-core-package` | Stolmine Core package: multi-output core units, default install with vanilla Core bundled | manual · 2026-07-09 |
-|   | `onboard-sample-analysis-browsing` | Onboard sample-content analysis for browsing (waveform/transient/pitch/loudness) | manual · 2026-07-14 |
+|   | `onboard-sample-analysis-browsing` | Onboard sample-content analysis for browsing (waveform/transient/pitch/loudness) | manual · 2026-07-20 |
 |   | `polyphony-poly-container` | Polyphony via a 'polyphonize' poly container (transparent voice cloning, MIDI-driven) | manual · 2026-07-15 |
 | ✗ | `dsp-stereo-mix-quicksave-drop` | Stereo Mix output drops to silence after quicksave load | manual *(attested)* · 2026-07-09 |
 | ✓ | `dsp-multi-output-framework` | Multi-output unit framework: units expose sub-outs picked from LocalChooser, vanilla-safe | manual *(attested)* · 2026-07-09 |
