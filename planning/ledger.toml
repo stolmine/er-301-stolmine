@@ -10,7 +10,11 @@
 # Fields:
 #   id      stable kebab slug, unique, immutable (code references it as [stol:<id>])
 #   title   one line
-#   status  todo | wip | done | blocked
+#   status  todo | wip | done | blocked | archived
+#           archived = parked out of the active docket, NOT fixed and NOT a live
+#           blocker (cannot-reproduce, wontfix, obsolete). Renders last in its area
+#           with a ⊘ mark and counts separately; the item's `note` states why and,
+#           for a cannot-repro bug, the reopen trigger. Flip back to todo to revive.
 #   area    ui | sequencer | scenes | i2c | dsp | emu | docs | infra
 #   rev     integer, bump when the item's intent changes (default 1)
 #   verify  { kind = "test"|"screenshot"|"manual", ref = "<test-case name | png | note>" }
@@ -372,13 +376,13 @@ links = { depends_on = ["emu-control-channel"] }
 [[item]]
 id = "dsp-stereo-mix-quicksave-drop"
 title = "Stereo Mix output drops to silence after quicksave load"
-status = "blocked"
+status = "archived"
 created = "2026-07-09T20:28:42-05:00"
-modified = "2026-07-09T20:28:42-05:00"
+modified = "2026-07-22T10:38:45-05:00"
 area = "dsp"
 verify = { kind = "manual", ref = "load the user's plumbutter-loaded quicksave (stereo linked channel, Stereo Mix with both inputs occupied, Mono Mix passthrough downstream); confirm/deny that the Stereo Mix output scopes silent while its subchain inputs read signal" }
 attested = "2026-06-15 (TODO.md 'Bug Report: Stereo Mix Output Drops on Quicksave Load', commits 0f1265f + 55f771a filing the report and 70edea1 'cannot repro, gathering more info'): user-reported, reproduces on both stolmine AND vanilla v0.7.0 so it is upstream, not a stolmine regression. The wedged state serialize/deserialize round-trips faithfully (quicksave reload preserves the break); deleting and rebuilding the units by hand fixes it on both firmwares. Bram cannot reproduce locally; blocked pending the broken quicksave file + exact unit versions from the reporter."
-note = "Suspected onLoadGraph vs serialize/deserialize mismatch on the Stereo Mix unit or its subchain. Needs the reporter's quicksave to reproduce. Report upstream to odevices once reproduced."
+note = "Suspected onLoadGraph vs serialize/deserialize mismatch on the Stereo Mix unit or its subchain. Needs the reporter's quicksave to reproduce. Report upstream to odevices once reproduced. ARCHIVED 2026-07-22 as NOT REPRODUCIBLE (Bram cannot repro locally; upstream on vanilla too, so not a stolmine regression). REOPEN TRIGGER: the reporter's broken quicksave file + exact unit versions arrive, or it reproduces locally -> flip status back to todo."
 
 # Consolidation fragment for er-301-stolmine ledger.
 #
@@ -624,12 +628,12 @@ note = "From docs/planning/hold-mode-scenes-todos.md 'Open' section. Serialize/d
 [[item]]
 id = "i2c-sccv-insert-crash"
 title = "Crash when inserting sc.cv at the end of a chain (habitats + TXo + Teletype)"
-status = "blocked"
+status = "archived"
 created = "2026-07-09T20:40:20-05:00"
-modified = "2026-07-09T20:40:20-05:00"
+modified = "2026-07-22T10:38:45-05:00"
 area = "i2c"
 verify = { kind = "manual", ref = "on the latest firmware, build a chain with mutable units from the habitats package and TXo + Teletype enabled; insert an sc.cv unit at the end of the chain; confirm/deny the crash and capture a crashdump" }
-note = "From docs/planning/todo-archive.md section 'Crash Report: sc.cv insert at end of chain'. BLOCKED pending a device crashdump + exact unit list/order from the reporter (same blocking shape as dsp-stereo-mix-quicksave-drop). To collect: crashdump, exact unit list + order, whether link/unlink state matters, whether removing TXo or Teletype changes reproducibility. Cannot reproduce/diagnose without the crashdump."
+note = "From docs/planning/todo-archive.md section 'Crash Report: sc.cv insert at end of chain'. ARCHIVED 2026-07-22 as NOT REPRODUCIBLE (cannot repro/diagnose without a device crashdump; same shape as dsp-stereo-mix-quicksave-drop). REOPEN TRIGGER: a crashdump + exact unit list/order from the reporter arrives, or it reproduces locally -> flip status back to todo. To collect on reopen: crashdump, exact unit list + order, whether link/unlink state matters, whether removing TXo or Teletype changes reproducibility."
 
 [[item]]
 id = "docs-porting-guide-301"

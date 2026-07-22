@@ -43,7 +43,7 @@ SRC_DIRS = [ROOT / "od", ROOT / "xroot", ROOT / "emu", ROOT / "hal", ROOT / "mod
 # real harness lands (see collect_testcases + the note in the portability spec).
 TEST_DIRS = [ROOT / "tests"]
 
-STATUSES = {"todo", "wip", "done", "blocked"}
+STATUSES = {"todo", "wip", "done", "blocked", "archived"}
 AREAS = {"ui", "sequencer", "scenes", "i2c", "dsp", "emu", "docs", "infra"}
 TAG_RE = re.compile(r"\[stol:([a-z0-9][a-z0-9-]*)\]")
 TESTCASE_RE = re.compile(r'TEST_CASE\("([^"]*)"\)')
@@ -223,7 +223,7 @@ def cmd_status(_args):
     for it in items:
         by_status.setdefault(it.get("status"), []).append(it)
     counts = " ".join(f"{s}:{len(by_status.get(s, []))}"
-                      for s in ("done", "wip", "todo", "blocked") if by_status.get(s))
+                      for s in ("done", "wip", "todo", "blocked", "archived") if by_status.get(s))
     print(f"{BOLD}ledger{RST} {counts}  ({len(items)} items)")
     wip = by_status.get("wip", [])
     if wip:
@@ -247,7 +247,7 @@ AREA_TITLES = {
     "i2c": "I2C / external control", "dsp": "DSP units", "emu": "Emulator",
     "docs": "Documentation", "infra": "Infrastructure",
 }
-STATUS_MARK = {"done": "✓", "wip": "~", "todo": " ", "blocked": "✗"}
+STATUS_MARK = {"done": "✓", "wip": "~", "todo": " ", "blocked": "✗", "archived": "⊘"}
 
 
 def render_text(items):
@@ -263,7 +263,7 @@ def render_text(items):
     c = {}
     for it in items:
         c[it["status"]] = c.get(it["status"], 0) + 1
-    summary = ", ".join(f"{c.get(s,0)} {s}" for s in ("done", "wip", "todo", "blocked") if c.get(s))
+    summary = ", ".join(f"{c.get(s,0)} {s}" for s in ("done", "wip", "todo", "blocked", "archived") if c.get(s))
     lines.append(f"**{len(items)} items** — {summary}. *Rendered {_now_iso()[:10]}.*")
     lines.append("")
     for area in ["sequencer", "scenes", "ui", "dsp", "i2c", "emu", "docs", "infra"]:
@@ -274,7 +274,7 @@ def render_text(items):
         lines.append("")
         lines.append("| | id | item | verify |")
         lines.append("|---|---|---|---|")
-        order = {"wip": 0, "todo": 1, "blocked": 2, "done": 3}
+        order = {"wip": 0, "todo": 1, "blocked": 2, "done": 3, "archived": 4}
         for it in sorted(group, key=lambda i: (order.get(i["status"], 9), i["id"])):
             v = it.get("verify") or {}
             vtxt = f"{v.get('kind')}: {v.get('ref')}" if v.get("kind") != "manual" else "manual"

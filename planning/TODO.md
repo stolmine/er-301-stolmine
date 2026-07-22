@@ -5,7 +5,7 @@ ER-301-STOLMINE TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**112 items** — 78 done, 32 todo, 2 blocked. *Rendered 2026-07-20.*
+**112 items** — 78 done, 32 todo, 2 archived. *Rendered 2026-07-22.*
 
 ## Sequencer
 
@@ -67,18 +67,18 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `onboard-sample-analysis-browsing` | Onboard sample-content analysis for browsing (waveform/transient/pitch/loudness) | manual · 2026-07-20 |
 |   | `polyphony-poly-container` | Polyphony via a 'polyphonize' poly container (transparent voice cloning, MIDI-driven) | manual · 2026-07-15 |
 |   | `sample-auto-classification` | Auto-classify samples (loop/one-shot, drum hits, instrument type) for browsing/tagging | manual · 2026-07-20 |
-| ✗ | `dsp-stereo-mix-quicksave-drop` | Stereo Mix output drops to silence after quicksave load | manual *(attested)* · 2026-07-09 |
 | ✓ | `dsp-multi-output-framework` | Multi-output unit framework: units expose sub-outs picked from LocalChooser, vanilla-safe | manual *(attested)* · 2026-07-09 |
 | ✓ | `dsp-parallel-dsp` | Parallel DSP via BUILDOPT_PARALLEL_DSP WorkerPool | manual *(attested)* · 2026-07-09 |
+| ⊘ | `dsp-stereo-mix-quicksave-drop` | Stereo Mix output drops to silence after quicksave load | manual *(attested)* · 2026-07-22 |
 
 ## I2C / external control
 
 | | id | item | verify |
 |---|---|---|---|
-| ✗ | `i2c-sccv-insert-crash` | Crash when inserting sc.cv at the end of a chain (habitats + TXo + Teletype) | manual · 2026-07-09 |
 | ✓ | `i2c-teletype-coexist` | Teletype slave RX coexists with TXo master TX on the shared I2C2 peripheral | manual *(attested)* · 2026-07-09 |
 | ✓ | `i2c-txo-master` | TXo I2C master output: interrupt-driven CV/gate TX with gain + V/Oct mode | manual *(attested)* · 2026-07-09 |
 | ✓ | `i2c-txo-passthrough-toggle` | TXo TR/CV units expose a top-level passthrough toggle (I2C-pure send vs audio passthrough) | manual *(attested)* · 2026-07-09 |
+| ⊘ | `i2c-sccv-insert-crash` | Crash when inserting sc.cv at the end of a chain (habitats + TXo + Teletype) | manual · 2026-07-22 |
 
 ## Emulator
 
