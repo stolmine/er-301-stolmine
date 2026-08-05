@@ -257,8 +257,21 @@ do_release() {
 do_claims() { python3 tools/ledger.py claims "$@"; }
 
 do_commit() {
+  # The subject is a BARE positional, not a flag. Habit made this a live footgun:
+  # `scripts/dev commit -m "subject"` put the literal string "-m" in $1 and dropped
+  # the real message on the floor, silently — 30 commits landed with the subject
+  # "-m" before anyone noticed (reconstructed from their diffs on 2026-08-05).
+  # Tolerate a leading -m/--message, refuse any other flag, never commit a message
+  # that looks like one.
+  case "${1:-}" in
+    -m|--message) shift ;;
+    -*) die "commit takes a bare subject, not a flag: scripts/dev commit \"subject\"" ;;
+  esac
   local msg="${1:-}"
   [ -n "$msg" ] || die "commit needs a message: scripts/dev commit \"subject\""
+  case "$msg" in
+    -*) die "refusing a message that starts with '-' (got: '$msg') — quote the subject" ;;
+  esac
   local branch; branch="$(git rev-parse --abbrev-ref HEAD)"
   # This repo commits directly to develop by convention — no default-branch
   # refusal. Only a detached HEAD is refused (a commit there would be lost).
