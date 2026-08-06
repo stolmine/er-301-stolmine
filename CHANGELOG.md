@@ -3,6 +3,130 @@
 * NEW: A new feature. Relevant to users and developers.
 * SYS: A system-level change.  Usually only relevant to developers.
 
+# v0.7.0-stolmine.9.6.0
+* NEW: Crash diagnostics. `Admin > Crash Reports` lists and displays
+  past reports, and a notice screen appears on boot when a report is
+  waiting. Two toggles in `Admin > Settings > General`, both OFF by
+  default: `Enable crash diagnostics?` arms trap capture, the hang
+  monitor and the flight recorder; `Enable UI hang detection?` is a
+  separate opt-in because a legitimately long main-thread operation
+  (preset load, package install, graph recompile) can trip it.
+  Recording is zero-cost while disarmed.
+* NEW: Reports capture the fault kind, pc / lr / registers, the
+  faulting thread, and a module map bounded by the loaded packages,
+  so an address in a package symbolizes instead of reading as
+  "kernel + offset".
+* NEW: Hang capture, not just traps. An audio-thread heartbeat backed
+  by the am335x watchdog catches freezes, which the exception hook
+  alone never sees, and the report names the spinning PC rather than
+  the scheduler frame that happens to be on top of the stack.
+* NEW: Per-task and ISR stack high-water marks with canaries, plus
+  heap pressure and allocation-failure counters, both carried in the
+  report. Between them a crash can usually be attributed to a blown
+  stack or a stray heap write without a bisect.
+* NEW: Flight recorder ring captures recent events leading up to a
+  fault, flushed into the report.
+* SYS: `tools/symbolize_crash.py` resolves a captured report against
+  the matching build, including package addresses.
+* SYS: Headless emulator harness plus a deterministic UI model:
+  `emu.uiState()` introspection, a static UI manifest gate, a typed
+  operator library, an empirical UI crawler, and an A* goal solver
+  that turns a target state into real gestures. Documented for
+  contributors in `docs/AGENT_EMU_GUIDE.md`.
+* SYS: 38 new emulator regression tests.
+* SYS: Planning ledger regime. `planning/ledger.toml` is the source of
+  truth and `planning/TODO.md` is generated from it; `scripts/dev`
+  is the blessed entry point for build / test / commit / push and
+  runs the gate on every commit.
+* FIX: `scripts/dev commit` no longer accepts a flag as the commit
+  subject. `scripts/dev commit -m "subject"` previously placed the
+  literal string `-m` in the message and discarded the real text.
+  Thirty commits landed that way before it was noticed; their
+  messages were reconstructed from their diffs.
+
+  Note: this release is developer-facing apart from the crash
+  diagnostics feature. There are no DSP or sequencer changes.
+
+# v0.7.0-stolmine.9.5.2
+* FIX: Sequencer L1 cell editor > CANCEL reverts the focused cell to
+  its value before editing began, rather than keeping the edit. This
+  matches the revert-on-CANCEL behavior of the bulk-edit and mark
+  modals. UP remains the commit gesture; ENTER's commit-and-advance
+  and column / layer switches still commit, so multi-row edits behave
+  as before, with each advance committing the row left behind.
+
+# v0.7.0-stolmine.9.5.1
+* FIX: Sequencer external clock honors the stL (step-length) column.
+  External clock previously advanced every column one row per
+  surviving pulse, so sequences with mixed stL played as if every row
+  had the same length. Each slot now maintains an atomic external-tick
+  counter and advances only when the count satisfies the current row's
+  stL. The per-slot divider still composes naturally with stL
+  (divider=2 + stL=1 is equivalent to divider=1 + stL=2).
+* FIX: The first pulse after start fires unconditionally, so row 0
+  loads its S&H values immediately regardless of stL[0].
+* FIX: The accumulator gates against the current row's stL (the row
+  emitting and visible) rather than the playhead's, so transitions
+  match the highlighted row.
+* FIX: stL minimum is 1 tick everywhere, enforced engine-side across
+  setL1, every L2 arithmetic action and mute, and mirrored in Lua for
+  encoder edits and paste.
+* SYS: Internal clock mode is unaffected. Quicksaves from 9.5.0 load
+  forward; any sub-tick stL values they hold snap to 1 tick on the
+  next write.
+
+# v0.7.0-stolmine.9.5.0
+Closing feature release of the AM335x line. From here, forward
+firmware development moves to the next-generation hardware platform.
+* NEW: Sequencer external clock and reset. Comparator-backed engine,
+  a 6-ply ClockView SpottedStrip under Admin, adaptive BPM readout in
+  GridView, a settings-driven internal / external toggle, and
+  quicksave persistence (schema v3).
+* FIX: Sequencer modal mutual exclusion. Mark, BPM latch, selection,
+  edit and layer modes now enforce a single encoder owner at every
+  entry point via a shared commit-other-modals helper, resolving eight
+  long-standing collisions found by a full modal sweep.
+* FIX: Modal sweep follow-ups. Selection same-column M-tap navigates
+  to the selection end; layer toggle drops the L1 edit; a chevron
+  caret marks BPM latch; bulk edit respects the coarse / fine encoder
+  state.
+* NEW: Terminal L1 cell edit. The L1 editor is a terminal modal with
+  bare S-keys rebound to dupe / step / rand, and mark, BPM-latch and
+  layer-toggle entry are blocked while editing. Encoder coarse / fine
+  LEDs reflect the active modal's step mode.
+* FIX: Scene mode CV (M2 / M3 A/B select) uses pure GainBias
+  semantics matching Offset, Adder and the builtin units
+  (`out = bias + gain * cvIn`). Unipolar positive CV rides at or above
+  bias; bipolar CV swings around bias symmetrically.
+* NEW: Scene mode defaults on for fresh installs.
+
+# v0.7.0-stolmine.9.4.0
+* NEW: Hold-mode scenes v1.1 with CV-selectable A/B. A new
+  `SceneIndexArbiter` object owns scene selection, so switching is
+  autonomous on the audio thread rather than driven by a UI-polled
+  rebuild. Scene index uses normalized [0,1] Bias / CV semantics and
+  Gain is scenes-per-volt, adjacent to a V/Oct mapping.
+* NEW: `SceneSelectorControl` with Performance-view M2 / M3 selection,
+  a live A/B crossfade (tri-state VEE to bipolar linear), and live
+  arbiter feedback in the scene graphics.
+* NEW: Reset Scene Mode, in the admin menu behind a confirmation
+  preference. Link / unlink wipes scenes, rebuilds the Performance
+  view and resets the range trackers.
+* FIX: Scene authoring edit leaks. The subchain input source, the
+  GainBias gain readout, and M1 insert / paste on MonitorControl are
+  all gated while authoring a scene.
+* FIX: Scene selection is preserved across bank size changes, the
+  arbiter state machine relatches on deserialize, and bank drift is
+  detected with a post-engage kickstart.
+* FIX: Scene CV branch and M1 bias / gain persist across save and
+  load. Scene save snaps audio parameters to base before the unit
+  walk and uses removeTask / addTask rather than lock / unlock.
+* ENHANCE: Performance view refactored onto SpottedStrip with
+  per-scene controls, 0.20 lerp scroll easing, restored carets, and a
+  scene chip that grows leftward while the right margin stays put.
+* ENHANCE: Settings menu splits Unit Picker and Scenes into their own
+  categories rather than a catch-all Units section.
+
 # v0.7.0-stolmine.9.3.0
 * NEW: Dense unit picker as an alternative to the classic Mondrian view.
   Selectable from `Admin > Settings > Units > Unit picker style:`
