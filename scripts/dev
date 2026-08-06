@@ -295,7 +295,12 @@ do_push() {
   do_check
   local branch; branch="$(git rev-parse --abbrev-ref HEAD)"
   log "push $branch"
-  git push -u origin "$branch"
+  # --follow-tags carries ANNOTATED tags reachable from what we are pushing, which
+  # is what a release cut needs: the gate blocks raw `git push`, so without this
+  # there was no sanctioned way to publish a release tag at all and the tag had to
+  # be pushed by hand outside the gate. Lightweight tags are still not pushed, so
+  # this only ever publishes tags made deliberately (release tags are annotated).
+  git push --follow-tags -u origin "$branch"
 }
 
 # Parallel infra: the merge queue. Serial integration is the correctness backbone;
