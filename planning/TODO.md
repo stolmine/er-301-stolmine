@@ -5,7 +5,7 @@ ER-301-STOLMINE TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**112 items** — 78 done, 32 todo, 2 archived. *Rendered 2026-08-05.*
+**113 items** — 78 done, 33 todo, 2 archived. *Rendered 2026-08-05.*
 
 ## Sequencer
 
@@ -43,6 +43,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `ui-core-keyword-type-revamp` | Core package keyword + type revamp: sampling glyph + keyword audit | manual · 2026-07-09 |
 |   | `ui-dense-picker-residuals` | Dense picker residual sub-features: I/O-fan sort, admin hidden-units restore list, sub-display preview pane | manual · 2026-07-09 |
 |   | `ui-encoder-capture-saturation` | Encoder capture under UI saturation: instrument then de-couple input from render | manual · 2026-07-09 |
+|   | `ui-picker-partial-library-load` | Unit picker shows a partial unit list after a degraded card read at boot, with no recovery path | manual · 2026-08-05 |
 |   | `ui-screensaver-polish` | Screensaver polish: forest full-screen coverage + rain splash particles | screenshot: run the forest screensaver and confirm full-screen coverage; run the rain screensaver and confirm splash particles on impact · 2026-07-09 |
 | ✓ | `crashdiag-ui-arm-toggle` | Expose the crash-diagnostics arm toggle in the normal System Settings menu | manual *(attested)* · 2026-07-12 |
 | ✓ | `infra-crash-diag-debug-mode-ui` | Debug-mode admin toggle + on-boot crash screen + past-report viewer | screenshot: with an injected report present, boot shows a 'crash captured' screen; the admin diagnostics viewer lists and displays past reports; captured as a tests/emu golden/trace *(attested)* · 2026-07-10 |
