@@ -147,6 +147,36 @@ Targets are **ancestors only**: the units containing the origin, and the units
 containing those, to the topmost unit in the chain. The origin's own unit is
 excluded. Any depth.
 
+### What happens to the origin control (asked and settled 2026-08-13)
+
+The origin is **not destroyed, but it is hollowed**. Be clear about which:
+
+- **Preserved:** the control object, its name, its display attributes (units,
+  map, precision), its position on the strip, its identity in presets and
+  quicksaves. It remains usable as an offset on top of the macro, i.e. a
+  per-instance trim.
+- **Moved out of it:** its bias value, its gain value, and its whole modulation
+  branch. It reads `0` afterwards, not `440 Hz`.
+
+**A pure copy is not possible**, and this is forced by the signal graph rather
+than chosen. The origin has exactly one modulation input (`Chain:setInputSource`
+holds one source and releases the previous, `Chain/init.lua:188`). For the macro
+to drive the origin at all it must occupy that input; once it does, the origin's
+existing modulation has nowhere to live except on the macro, and the origin's bias
+must go to 0 or the patch reads `B + macroOut ≈ 2B`. Every design in which the
+macro drives the origin arrives here.
+
+**The alternative that was considered and rejected:** macro bias 0 / gain `G`,
+origin keeps bias `B` and gain 1, macro acts as an offset starting at zero. That
+preserves the origin's value and its scene deltas (its bias is untouched, so most
+of §6 evaporates), and the modulation still has to move up regardless. It was
+rejected because the macro would then read `0` rather than the true value, and a
+top-level control that reads in the parameter's own units is the main thing this
+feature exists to provide. Confirmed 2026-08-13: **keep the current plan.**
+
+There is no arrangement giving both, because the two controls sum and only one of
+them can hold the value.
+
 ## 4. Phase 1 — attribute forwarding  [START HERE]
 
 `ControlBranch/GainBias:init` constructs its view with only `button`,
