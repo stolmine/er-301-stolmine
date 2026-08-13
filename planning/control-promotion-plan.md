@@ -6,12 +6,11 @@ its modulation.*
 
 ## CURRENT STATE (2026-08-13) — resume here
 
-**Status: partially implemented. Promotion is NOT yet usable end to end.**
-Picking `promote` today opens the ancestor picker, creates the inert macro on the
-chosen unit, then immediately **rolls it back** and flashes "transplant not
-implemented yet". That is deliberate: with the commit path missing, rolling back
-is what stops a half-promoted patch escaping. Suite was 46/46 green at the last
-commit.
+**Status: implemented end to end, bench-pending.** Every step of the build order
+below has landed and is covered by emu tests (50/52 suite green; the two failures
+are untracked WIP package smoke tests needing packages that are not in the
+sandbox). It has **not** been exercised on hardware or through the real gesture
+on a real patch — only programmatically from the test harness.
 
 ### Landed
 
@@ -19,36 +18,52 @@ commit.
 |---|---|---|---|
 | Phase 1 | `scaling` joins the GainBias customization path | `GainBias.lua` (`customKeys`, `customize`, `getCustomizableValue`, `setFaderScaling` now records `self.faderScaling` because `od::Fader` has no getter) | `tests/emu/67` |
 | Step 2 | discriminator + menu gating, all four preconditions in one choke point | `xroot/Unit/Promote.lua` (`isPromotableControl`, `ancestorsOf`, `check`) + the `promote` entry in `Unit/ViewControl/init.lua` | `tests/emu/68` |
-| Step 3a | ancestor picker | `xroot/Unit/PromoteTargetView.lua` | none yet (UI) |
+| Step 3a | ancestor picker | `xroot/Unit/PromoteTargetView.lua` | none (UI) |
 | Step 3b | inert macro create + rollback | `Promote.createInertMacro` / `Promote.rollback` | `tests/emu/69` |
+| Step 4 | placement — macro held under the cursor, encoder walks it along the strip | `xroot/Unit/PromotePlacement.lua` + `UnitSection:moveControlFollowingCursor` | `tests/emu/70`, `75` |
+| Step 5 | transplant | `Promote.commit` | `tests/emu/71`, `72`, `74` |
+| Step 6 | three-part scene clear | `clearSceneState` in `Promote.lua` | `tests/emu/73` |
 | fix | `removeControlBranch` leaked a running branch and a stale `unit.branches` entry | `Unit/Section.lua` | covered by `69`'s create/cancel loop |
 
-Commits: `eb37399` (Phase 1), `4c86577` (steps 2 + 3a/3b + the fix).
+Commits: `eb37399` (Phase 1), `4c86577` (steps 2 + 3a/3b + the fix), `f835461`
+(placement), `b51290f` (transplant + scene clear).
 
-### Resume here — remaining work, in order
+### What is left
 
-1. **Placement.** After `createInertMacro`, hold the macro under the cursor:
-   encoder drives `moveControl` (`Section.lua:160`), ENTER commits, CANCEL calls
-   `Promote.rollback`. `Unit.Editor` is a *separate screen* (entered at
-   `Unit/Section.lua:59`) built from `ItemHeader` proxies, so its screen is not
-   reusable in place — only its `moveControl` call is.
-2. **Transplant**, §5. Replace the rollback-and-flash in `Promote.begin`'s
-   callback with the real commit. **This is the riskiest step in the whole plan**
-   (post-queue drain order, non-polymorphic dispatch, audio-frame interleaving —
-   all three at once). Start fresh on it rather than tacking it onto a long
-   session.
-3. **Scene clear**, §6, three-part.
-4. Plan tests 9-11 (cancel leaves the patch byte-identical; quicksave round-trip
-   with a promoted macro; scene delta cleared and still absent after a quicksave).
+1. **Bench validation.** The success criterion in §10 is *audible* transparency,
+   and no test here can assert that. Promote a dialed-in control on a real patch
+   and confirm the sound does not change; repeat promote/delete for resource
+   lifecycle; check a promoted control in a patch that also uses scenes.
+2. **Plan tests 5 (subclass rejection against real habitat), 6 (picker offers
+   exactly the ancestors) and 8 (key uniqueness across the whole tree)** are the
+   three from §9 with no direct coverage. 5 is partly covered by `68` against
+   core classes only; `66` shows the habitat harness exists if it is wanted.
+3. The v2 items deliberately deferred: clamp forwarding (§4), Pitch support
+   (§2), `canMove` honoured by placement (§8).
 
-### Deviation from this plan, already made
+### Deviations from this plan, already made
 
-`createInertMacro` snapshots the origin's display attributes under `pcall` per
-key. A blanket copy threw on Test Osc's `freq`, whose `freqGain` map has no
+**`createInertMacro` snapshots display attributes under `pcall` per key.** A
+blanket copy threw on Test Osc's `freq`, whose `freqGain` map has no
 `superCoarseStep`. So **"matching in every respect" is best-effort per
 attribute**, not unconditional as §3 and §4 imply — an attribute that cannot be
 read is one the macro does not inherit. Cosmetic shortfall, not a correctness
 problem, but the plan overstated it.
+
+**Placement needed a cursor-following rebuild that the plan did not anticipate.**
+`moveControl` posts an *unfocused* `rebuildView`, which regenerates every spot
+handle while the cursor still holds the old one, so `enableSelection` falls back
+to `selectLast` and the cursor jumps to the end of the chain mid-gesture.
+`UnitSection:moveControlFollowingCursor` posts a *focused* rebuild under the same
+trigger key, which replaces the unfocused one rather than adding a second.
+`Promote.rollback` uses the same mechanism to park the cursor on the target
+unit's header, since cancelling deletes the control the cursor was sitting on.
+
+**§9 test 10's "byte-identical" needs one qualification.** `tests/emu/75`
+compares the target unit's full serialized form across a create/cancel cycle, but
+must skip `Internal Phase` — an oscillator's free-running phase accumulator,
+which advances every frame whether or not anything is promoted. Runtime state
+that happens to be serialized, not patch structure.
 
 ---
 
