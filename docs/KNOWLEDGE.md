@@ -23,6 +23,13 @@ Hardware synth developer working on ER-301 eurorack firmware (stolmine fork). De
 - **Before ANY am335x build, consult this section first.** This has wasted significant time repeatedly.
 
 ### Hardware deploy
+**`make firmware` prints the exact copy commands when it finishes**, with the
+version already filled in and a note on whether a card is mounted. Use that
+rather than retyping a version by hand — several differently-versioned zips
+accumulate in `release/am335x/` and it is easy to flash the wrong one. Override
+the mount point with `make firmware SD_ROOT=/run/media/you/ER-301`.
+
+For reference, what it prints:
 1. SD card mounts at `/mnt` (device `/dev/sdd1`, vfat)
 2. Copy firmware zip to **front card**: `sudo cp release/am335x/er-301-v<version>.zip /mnt/ER-301/firmware/`
 3. NOT `~/.od/rear/` — that's for emulator only
