@@ -90,6 +90,17 @@ function PromoteTargetView:enterReleased()
   return true
 end
 
+-- The sub display draws "Promote here" over button 1, so button 1 has to do it.
+function PromoteTargetView:subReleased(i, shifted)
+  if shifted then
+    return false
+  end
+  if i == 1 then
+    return self:enterReleased()
+  end
+  return true
+end
+
 function PromoteTargetView:cancelReleased(shifted)
   if not shifted then
     self:hide()

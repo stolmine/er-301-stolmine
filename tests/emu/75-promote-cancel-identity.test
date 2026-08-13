@@ -1,17 +1,17 @@
 # [stol:promote-control-to-top-level] Plan test 10: CANCEL leaves the patch
 # byte-identical.
 #
-# The whole gesture is built around one guarantee -- nothing irreversible happens
-# until ENTER -- and that guarantee is worth exactly as much as this test. The
-# macro is created REAL (a control branch, registered, placed in a view, started)
-# and merely inert, because no ghost-control class exists and a GainBias
-# hard-errors without a branch. So "no trace" is a claim about cleanup, not about
-# having never touched anything.
+# The gesture is built around one guarantee -- nothing irreversible happens until
+# ENTER -- and since the placement screen went from moving the REAL control on
+# the unit's strip to moving a proxy panel on its own screen, that guarantee is
+# structural rather than maintained: the macro does not exist until commit, so
+# cancelling has nothing to undo. This test holds both halves to it, the screen
+# AND the rollback path that still runs when a commit refuses.
 #
-# Counting controls and branches, as test 69 does, is too weak to back it: a
-# leftover entry in a view's control list, a stale customization, or a renamed
-# control all keep the counts right. This compares the unit's full serialized
-# form before and after, which is the same form the patch is saved in.
+# Counting controls and branches, as test 69 does, is too weak: a leftover entry
+# in a view's control list, a stale customization, or a renamed control all keep
+# the counts right. This compares the unit's full serialized form before and
+# after, which is the same form the patch is saved in.
 
 frames 20
 lua local F=require('Unit.Factory'); local t=F.getUnitsByLibrary('builtins'); for _,u in ipairs(t) do if (u.title or u.moduleName)=='Custom Effect' then require('Channels').getChain(1):loadUnit(u) end end
@@ -38,15 +38,15 @@ frames 60
 lua (function() _G.__before=_G.__dump(_G.__unit():serialize()) return #_G.__before end)()
 !assert #_G.__before > 100
 
-# Create the inert macro, place it, walk it around, then CANCEL.
-lua (function() local P=require('Unit.Promote') local m,n=P.createInertMacro(_G.__origin(),_G.__unit()) _G.__name=n _G.__macro=m require('Unit.PromotePlacement').begin{unit=_G.__unit(),control=m.control,onCancel=function() P.rollback(_G.__unit(),n) end} return 'ok' end)()
+# Open the placement screen, walk the held panel around, then CANCEL.
+lua (function() local P=require('Unit.Promote') _G.__name=P.proposeName(_G.__origin(),_G.__unit()) local V=require('Unit.PromotePlaceView') _G.__placed=nil _G.__v=V(_G.__unit(),_G.__name,function(p) _G.__placed=p end) _G.__v:show() return 'ok' end)()
 frames 20
-lua (function() local c=_G.__macro.control for i=1,4 do c:encoder(-4,false) end return 'ok' end)()
+lua (function() for i=1,4 do _G.__v:encoder(-4,false) end return 'ok' end)()
 frames 20
-lua (function() _G.__macro.control:cancelReleased(false) return 'ok' end)()
+lua (function() _G.__v:cancelReleased(false) return 'ok' end)()
 frames 60
 
-!assert require('Unit.PromotePlacement').isActive() == false
+!assert _G.__placed == nil
 !assert _G.__unit().controls[_G.__name] == nil
 
 # The origin never moved: still its own value, still its own modulation.
@@ -59,9 +59,11 @@ frames 60
 lua (function() _G.__after=_G.__dump(_G.__unit():serialize()) return #_G.__after end)()
 !assert _G.__after == _G.__before
 
-# And a create/cancel LOOP still leaves it identical -- the case where the two
-# removeControlBranch leaks used to accumulate.
-lua (function() local P=require('Unit.Promote') for i=1,3 do local m,n=P.createInertMacro(_G.__origin(),_G.__unit()) require('Unit.PromotePlacement').begin{unit=_G.__unit(),control=m.control,onCancel=function() P.rollback(_G.__unit(),n) end} m.control:cancelReleased(false) end return 'ok' end)()
+# The other half: a create/rollback LOOP, which is the path a REFUSED commit
+# takes. The macro really is built here, so this exercises cleanup rather than
+# abstention -- and it is where the two removeControlBranch leaks used to
+# accumulate.
+lua (function() local P=require('Unit.Promote') for i=1,3 do local m,n=P.createInertMacro(_G.__origin(),_G.__unit(),1) P.rollback(_G.__unit(),n) end return 'ok' end)()
 frames 60
 !assert _G.__dump(_G.__unit():serialize()) == _G.__before
 

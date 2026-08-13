@@ -1,89 +1,78 @@
 # [stol:promote-control-to-top-level] Step 4 of the plan: placement.
 #
-# The macro is created inert and then held under the cursor while the encoder
-# walks it along the target unit's strip. What this proves:
-#   * the encoder actually reorders the control (via moveControl), and clamps at
-#     both ends instead of walking off the strip
-#   * the cursor FOLLOWS the macro across the rebuild -- the whole reason
-#     moveControlFollowingCursor exists, since the plain posted rebuild
-#     regenerates every spot handle and drops the cursor to selectLast
-#   * CANCEL during placement restores the target unit exactly, so the cancel
-#     boundary still holds now that there is a second window in the gesture
+# Placement is a PROXY screen -- name-and-type panels in the shape of Unit.Editor's
+# "Edit Controls" list -- not the target unit's own strip. The macro does not
+# exist while the user is choosing where it goes. That is the whole design after
+# the bench report of 2026-08-13: an in-place version made it look as though the
+# promotion had already happened, let the user focus the not-yet-real fader, and
+# made the control appear to vanish when they turned the encoder.
 #
-# Placement is driven here by calling the control's handlers directly rather than
-# by sending button events: the emu's buttons go to the visible window's focus
-# map, and this test is asserting the placement state machine, not the routing.
+# What this proves:
+#   * the held panel walks the row and clamps at both ends
+#   * the section index it lands on maps to the right slot among the target's
+#     movable controls, at the front, in the middle and at the end
+#   * leaving without ENTER creates nothing at all
+#
+# The screen is driven by calling its methods directly rather than by sending
+# button events: the assertion is about the placement state machine, not routing.
 
 frames 20
 lua local F=require('Unit.Factory'); local t=F.getUnitsByLibrary('builtins'); for _,u in ipairs(t) do if (u.title or u.moduleName)=='Custom Effect' then require('Channels').getChain(1):loadUnit(u) end end
 frames 60
 lua (function() local c=require('Channels').getChain(1):getUnit(1) local F=require('Unit.Factory') for _,u in ipairs(F.getUnitsByLibrary('builtins')) do if (u.title or u.moduleName)=='Test Osc' then c.patch:loadUnit(u) end end return 'ok' end)()
 frames 60
+lua (function() _G.__unit=function() return require('Channels').getChain(1):getUnit(1) end _G.__origin=function() return require('Channels').getChain(1):getUnit(1).patch:getUnit(1).controls.freq end _G.__count=function() return #_G.__unit():getView('expanded').controls-2 end _G.__pos=function(n) local v=_G.__unit():getView('expanded') for i,c in ipairs(v.controls) do if c.id==n then return i-2 end end return -1 end return 'ok' end)()
 
-# Helpers. __pos is the macro's 1-based position among the MOVABLE controls
-# (insert and header excluded), which is the indexing moveControl uses.
-lua (function() _G.__unit=function() return require('Channels').getChain(1):getUnit(1) end _G.__origin=function() return require('Channels').getChain(1):getUnit(1).patch:getUnit(1).controls.freq end _G.__pos=function() local v=_G.__unit():getView('expanded') for i,c in ipairs(v.controls) do if c.id==_G.__name then return i-2 end end return -1 end _G.__count=function() return #_G.__unit():getView('expanded').controls-2 end return 'ok' end)()
-
-# A filler control so the strip has somewhere to move TO. Without it the target
-# has one movable control and every encoder step is a legitimate no-op, which
-# would make the clamp assertions below vacuously true.
-lua (function() local u=_G.__unit() u:addControlBranch('GainBias','filler') u:placeControl('filler','expanded') return 'ok' end)()
+# Two filler controls so the row has a front, a middle and an end.
+lua (function() local u=_G.__unit() u:addControlBranch('GainBias','fillerA') u:placeControl('fillerA','expanded') u:addControlBranch('GainBias','fillerB') u:placeControl('fillerB','expanded') return 'ok' end)()
 frames 20
 lua (function() local n=0 for _ in pairs(_G.__unit().controls) do n=n+1 end local b=0 for _ in pairs(_G.__unit().branches) do b=b+1 end _G.__base={n,b,_G.__count()} return n..','..b..','.._G.__count() end)()
 !assert _G.__base[3] >= 2
 
-# Create the inert macro and enter placement.
-lua (function() local P=require('Unit.Promote') local m,name=P.createInertMacro(_G.__origin(),_G.__unit()) _G.__name=name _G.__macro=m _G.__committed=false _G.__cancelled=false local ok=require('Unit.PromotePlacement').begin{unit=_G.__unit(),control=m.control,onCommit=function() _G.__committed=true end,onCancel=function() _G.__cancelled=true P.rollback(_G.__unit(),_G.__name) end} return tostring(ok) end)()
+# ---- the held panel starts at the end, and clamps there --------------------
+lua (function() local V=require('Unit.PromotePlaceView') local P=require('Unit.Promote') _G.__name=P.proposeName(_G.__origin(),_G.__unit()) _G.__placed=nil _G.__v=V(_G.__unit(),_G.__name,function(p) _G.__placed=p end) _G.__v:show() return _G.__name end)()
 frames 20
-!assert require('Unit.PromotePlacement').isActive() == true
 
-# It was appended, so it starts at the end of the strip.
-!assert _G.__pos() == _G.__count()
-!assert _G.__count() == _G.__base[3] + 1
+# Sections are: header, one per existing control, the held panel, end-of-unit.
+!assert _G.__v:getSectionCount() == _G.__base[3] + 3
+!assert _G.__v:getSelectedSectionPosition() == _G.__v:getSectionCount() - 1
 
-# The cursor is on the macro: placement rebuilt the view with it as the focus
-# control, because placeControl alone only posts an unfocused rebuild.
-!assert (function() local s,v,h=require('Channels').getChain(1):getSelection() return s==_G.__unit() and s:getControlFromSpotHandle(v,h)==_G.__macro.control end)()
-
-# One encoder detent left (negative = left, matching the Editor's move gesture).
-# The threshold is 3 (Env.EncoderThreshold.Default), so a delta of 4 is exactly
-# one step.
-lua (function() local c=_G.__macro.control c:encoder(-4,false) return 'ok' end)()
+# Right is already the end: it must not walk onto the end-of-unit marker.
+lua (function() for i=1,6 do _G.__v:encoder(4,false) end return 'ok' end)()
 frames 20
-!assert _G.__pos() == _G.__count() - 1
+!assert _G.__v:getSelectedSectionPosition() == _G.__v:getSectionCount() - 1
 
-# ...and the cursor came with it. This is the assertion that fails if
-# moveControlFollowingCursor is reverted to a plain moveControl.
-!assert (function() local s,v,h=require('Channels').getChain(1):getSelection() return s==_G.__unit() and s:getControlFromSpotHandle(v,h)==_G.__macro.control end)()
-
-# Walk it to the front and then keep going: it must clamp at 1, not fall off.
-lua (function() local c=_G.__macro.control for i=1,10 do c:encoder(-4,false) end return 'ok' end)()
+# ---- walk it to the front, and clamp there ---------------------------------
+lua (function() for i=1,40 do _G.__v:encoder(-4,false) end return 'ok' end)()
 frames 20
-!assert _G.__pos() == 1
+!assert _G.__v:getSelectedSectionPosition() == 2
 
-# Same at the other end.
-lua (function() local c=_G.__macro.control for i=1,10 do c:encoder(4,false) end return 'ok' end)()
-frames 20
-!assert _G.__pos() == _G.__count()
-
-# Neither callback has fired yet -- placement is still open.
-!assert _G.__committed == false
-!assert _G.__cancelled == false
-
-# CANCEL: placement ends, the rollback callback runs, and the target unit is
-# back to its pre-promotion counts.
-lua (function() _G.__macro.control:cancelReleased(false) return 'ok' end)()
-frames 20
-!assert require('Unit.PromotePlacement').isActive() == false
-!assert _G.__cancelled == true
-!assert _G.__committed == false
+# Nothing has been created by any of that: no macro, no branch, counts unchanged.
 !assert _G.__unit().controls[_G.__name] == nil
 !assert _G.__unit().controlBranches[_G.__name] == nil
-!assert (function() local n=0 for _ in pairs(_G.__unit().controls) do n=n+1 end local b=0 for _ in pairs(_G.__unit().branches) do b=b+1 end return n==_G.__base[1] and b==_G.__base[2] end)()
+!assert _G.__placed == nil
 
-# The per-instance handler overrides are gone with it, so the macro's class
-# behaviour would be intact had it survived: nothing here should still shadow.
-!assert rawget(_G.__macro.control,'encoder') == nil
-!assert rawget(_G.__macro.control,'cancelReleased') == nil
+# ---- ENTER at the front reports slot 1 -------------------------------------
+lua (function() _G.__v:enterReleased() return tostring(_G.__placed) end)()
+frames 20
+!assert _G.__placed == 1
+
+# ---- and the slot it reports is the slot the macro actually lands in --------
+lua (function() local P=require('Unit.Promote') local m=P.createInertMacro(_G.__origin(),_G.__unit(),_G.__placed) _G.__macro=m return 'ok' end)()
+frames 20
+!assert _G.__pos(_G.__name) == 1
+!assert _G.__count() == _G.__base[3] + 1
+
+# Clean up, then place a second one at the END to prove the other extreme.
+lua (function() require('Unit.Promote').rollback(_G.__unit(),_G.__name) return 'ok' end)()
+frames 20
+!assert _G.__count() == _G.__base[3]
+
+lua (function() local V=require('Unit.PromotePlaceView') _G.__placed=nil _G.__v=V(_G.__unit(),_G.__name,function(p) _G.__placed=p end) _G.__v:show() _G.__v:enterReleased() return tostring(_G.__placed) end)()
+frames 20
+!assert _G.__placed == _G.__base[3] + 1
+lua (function() require('Unit.Promote').createInertMacro(_G.__origin(),_G.__unit(),_G.__placed) return 'ok' end)()
+frames 20
+!assert _G.__pos(_G.__name) == _G.__base[3] + 1
 
 quit

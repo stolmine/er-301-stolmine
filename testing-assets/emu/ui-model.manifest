@@ -1780,6 +1780,31 @@
       },
       "name_resolved": true
     },
+    "Unit.PromotePlaceView": {
+      "class_var": "PromotePlaceView",
+      "file": "xroot/Unit/PromotePlaceView.lua",
+      "handlers": {
+        "cancelReleased": [
+          "dynamic"
+        ],
+        "encoder": [
+          "dynamic"
+        ],
+        "enterReleased": [
+          "dynamic"
+        ],
+        "homeReleased": [
+          "dynamic"
+        ],
+        "subReleased": [
+          "dynamic"
+        ],
+        "upReleased": [
+          "dynamic"
+        ]
+      },
+      "name_resolved": true
+    },
     "Unit.PromoteTargetView": {
       "class_var": "PromoteTargetView",
       "file": "xroot/Unit/PromoteTargetView.lua",
@@ -1794,6 +1819,9 @@
           "dynamic"
         ],
         "homeReleased": [
+          "dynamic"
+        ],
+        "subReleased": [
           "dynamic"
         ],
         "upReleased": [

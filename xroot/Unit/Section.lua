@@ -187,23 +187,19 @@ function UnitSection:moveControl(id, viewName, newPosition, currentPosition)
   end
 end
 
--- [stol:promote-control-to-top-level] moveControl plus a rebuild that keeps the
--- cursor on the control being moved.
+-- [stol:promote-control-to-top-level] Rebuild this section's view and leave the
+-- cursor on a chosen control.
 --
--- moveControl posts an UNFOCUSED rebuildView keyed by this section. Posting a
--- second task under the SAME key replaces it (Application's pendingTriggers is a
--- map, Application.lua:256-260), so exactly one rebuild still runs per frame and
--- it re-selects the control. Without this the rebuild regenerates every spot
--- handle while the cursor still holds the old one, and enableSelection falls
--- back to selectLast -- the cursor jumps to the end of the chain mid-gesture.
-function UnitSection:moveControlFollowingCursor(id, viewName, newPosition,
-                                                currentPosition)
-  self:moveControl(id, viewName, newPosition, currentPosition)
-  self:rebuildViewFollowingControl(viewName, self.controls[id])
-end
-
--- Same trick, for callers that changed the view some other way and need the
--- cursor to land somewhere specific rather than wherever selectLast falls.
+-- A plain rebuild regenerates every spot handle while the cursor still holds the
+-- old one, so enableSelection falls back to selectLast and the cursor jumps to
+-- the end of the chain. Callers that add or remove a control the cursor was
+-- sitting on need this instead.
+--
+-- Posting rather than rebuilding inline is deliberate: the callers below are
+-- reached from paths that ALREADY posted an unfocused rebuild for this section,
+-- and Application's pendingTriggers is a map keyed by the section
+-- (Application.lua:256-260), so posting a second task REPLACES the first. One
+-- rebuild per frame, and it is the focused one.
 function UnitSection:rebuildViewFollowingControl(viewName, control)
   self.cursorFollowControl = control
   self.cursorFollowView = viewName

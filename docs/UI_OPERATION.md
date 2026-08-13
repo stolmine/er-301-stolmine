@@ -85,7 +85,7 @@ A focused unit's controls sit at M1-M6 in the order of its `views.expanded` list
 | LimiterUnit | pre=Fader | type=OptionControl | post=Fader | - | - | - |
 | MixerUnit | gain=BranchMeter | - | - | - | - | - |
 
-_Total surface: 108 classes, 71 units, 449 gesture handlers (from `testing-assets/emu/ui-model.manifest`)._
+_Total surface: 109 classes, 71 units, 456 gesture handlers (from `testing-assets/emu/ui-model.manifest`)._
 
 <!-- END GENERATED -->
 

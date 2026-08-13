@@ -99,24 +99,36 @@ function Promote.check(control, quiet)
   return true, nil
 end
 
+-- The name the macro will take on the target unit: the origin's, unless that
+-- collides. Resolved separately from createInertMacro because the placement
+-- screen shows the name before the macro exists.
+--
+-- addControlBranch REMOVES AND REPLACES a branch whose id already exists, so a
+-- collision left unresolved would silently destroy an existing control.
+function Promote.proposeName(control, targetUnit)
+  local name = control:getCustomizableValue("name") or control.id or "macro"
+  local ok = targetUnit.validateControlName and
+                 targetUnit:validateControlName(name)
+  if not ok then
+    name = targetUnit:generateUniqueControlName(name)
+  end
+  return name
+end
+
 -- Create the macro INERT: right type, right name, placed in the target's
 -- expanded view, but nothing wired and an empty branch. It drives nothing and is
 -- driven by nothing, so it has no audio effect and CANCEL can drop it with no
 -- trace. This is what makes the cancel boundary real (plan §7) -- the expensive,
 -- hard-to-undo work all happens later, at commit.
-function Promote.createInertMacro(control, targetUnit)
-  local name = control:getCustomizableValue("name") or control.id or "macro"
-  local ok = targetUnit.validateControlName and targetUnit:validateControlName(name)
-  if not ok then
-    -- addControlBranch REMOVES AND REPLACES a branch whose id already exists,
-    -- so a collision here would silently destroy an existing control.
-    name = targetUnit:generateUniqueControlName(name)
-  end
+-- `position` is the 1-based slot among the target's movable controls, as chosen
+-- on the placement screen; nil appends.
+function Promote.createInertMacro(control, targetUnit, position)
+  local name = Promote.proposeName(control, targetUnit)
 
   local macro = targetUnit:addControlBranch("GainBias", name)
   -- addControlBranch does not put the control in any view; deserialize pairs the
   -- two (Unit/init.lua), and without this the macro exists but is invisible.
-  targetUnit:placeControl(name, "expanded")
+  targetUnit:placeControl(name, "expanded", position)
   targetUnit:switchView("expanded")
 
   -- Phase 1: copy the origin's display so the macro reads in the same units,
@@ -302,12 +314,34 @@ function Promote.commit(origin, macroBranch)
   return true
 end
 
--- Pick an ancestor, create the macro inert, place it, then commit.
+-- Show the target unit and put the cursor on the macro, so the user lands on
+-- what they just made rather than back where they started. The ancestor's chain
+-- is normally already in the window stack, below the origin's, because that is
+-- how the user descended to the origin in the first place; hideOthers pops back
+-- to it. The show() fallback covers a chain that is somehow not in the stack,
+-- which would otherwise make hideOthers pop the stack to nothing looking for a
+-- window that is not there.
+local function revealResult(targetUnit, control)
+  local chain = targetUnit.chain
+  if chain == nil then
+    return
+  end
+  if chain.context then
+    chain:hideOthers()
+  else
+    chain:show()
+  end
+  if targetUnit.rebuildViewFollowingControl then
+    targetUnit:rebuildViewFollowingControl("expanded", control)
+  end
+end
+
+-- Pick an ancestor, choose a slot on it, then create and commit.
 --
--- The whole gesture is a chain of callbacks rather than a single function
--- because each stage is a UI window the user can walk away from. Every exit
--- before the commit leaves the patch exactly as it was: the picker mutates
--- nothing, and placement operates on a macro that is inert until commit wires it.
+-- The gesture is a chain of callbacks rather than one function because each
+-- stage is a window the user can walk away from. Both stages before the commit
+-- are read-only: the picker mutates nothing and the placement screen works on
+-- proxy panels, so the macro does not exist until ENTER on the second screen.
 function Promote.begin(control)
   local ok, reason = Promote.check(control, false)
   if not ok then
@@ -320,30 +354,30 @@ function Promote.begin(control)
   local ancestors = Promote.ancestorsOf(control)
   local PromoteTargetView = require "Unit.PromoteTargetView"
   local view = PromoteTargetView(control, ancestors, function(targetUnit)
-    local macro, name = Promote.createInertMacro(control, targetUnit)
-    local Placement = require "Unit.PromotePlacement"
-    local started = Placement.begin{
-      unit = targetUnit,
-      control = macro.control,
-      onCommit = function()
-        local done, why = Promote.commit(control, macro)
-        if not done then
-          -- The macro is still inert at this point -- commit refuses before it
-          -- touches anything -- so dropping it leaves the patch untouched.
-          Promote.rollback(targetUnit, name)
-          require("Overlay").flashMainMessage(why or "Promote failed.")
+    local PromotePlaceView = require "Unit.PromotePlaceView"
+    local name = Promote.proposeName(control, targetUnit)
+    local placer = PromotePlaceView(targetUnit, name, function(position)
+      -- Re-check: two windows have been open since the menu was built and the
+      -- scene state can have changed under them.
+      local stillOk, why = Promote.check(control, false)
+      if not stillOk then
+        if why then
+          require("Overlay").flashMainMessage(why)
         end
-      end,
-      onCancel = function()
-        Promote.rollback(targetUnit, name)
+        return
       end
-    }
-    if not started then
-      -- reveal() failed, so there is no window to place on and no way for the
-      -- user to reach the macro's CANCEL. Drop it rather than strand it.
-      Promote.rollback(targetUnit, name)
-      require("Overlay").flashMainMessage("Promote: cannot reach that unit.")
-    end
+      local macro = Promote.createInertMacro(control, targetUnit, position)
+      local done, reasonWhy = Promote.commit(control, macro)
+      if done then
+        revealResult(targetUnit, macro.control)
+      else
+        -- commit refuses before it touches anything, so the macro is still
+        -- inert here and dropping it leaves the patch untouched.
+        Promote.rollback(targetUnit, name)
+        require("Overlay").flashMainMessage(reasonWhy or "Promote failed.")
+      end
+    end)
+    placer:show()
   end)
   view:show()
 end
