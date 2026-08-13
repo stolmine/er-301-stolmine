@@ -89,12 +89,13 @@ PromotePlaceView:include(SpottedStrip)
 
 -- onPlace(position) is called with the 1-based slot among the target unit's
 -- MOVABLE controls -- the indexing UnitSection:placeControl expects.
-function PromotePlaceView:init(targetUnit, macroName, onPlace)
+function PromotePlaceView:init(targetUnit, macroName, macroType, onPlace)
   SpottedStrip.init(self)
   self:setClassName("Unit.PromotePlaceView")
   self:setInstanceName(targetUnit.title)
   self.targetUnit = targetUnit
   self.macroName = macroName
+  self.macroType = macroType or "GainBias"
   self.onPlace = onPlace
   self.sum = 0
 
@@ -127,7 +128,8 @@ function PromotePlaceView:build()
     end
   end
 
-  self.ghost = Item(string.format("%s GainBias", self.macroName), "ghost")
+  self.ghost = Item(string.format("%s %s", self.macroName, self.macroType),
+                    "ghost")
   self:appendSection(self.ghost)
   self:appendSection(Item("End of Unit", nil, app.sectionEnd))
 

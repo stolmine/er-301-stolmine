@@ -15,20 +15,69 @@ local app = app
 
 local Promote = {}
 
--- Exact-metatable test, deliberately NOT `control.type == "GainBias"` and NOT a
--- class check. Base.Class deep-copies members into subclasses (Base/Class.lua:36-49)
--- and there is no isInstanceOf, so `type` is inherited by all ~49 habitat
--- subclasses of GainBias -- and those are exactly the ones whose semantics break
--- (mi/ModeSelector uses bias as a quantized mode index and swaps its fader label
--- to the mode name). Instances take the class table as their metatable
--- (Class.lua:80-86), so this matches plain GainBias{} only: ~509 habitat controls.
+-- Which control classes can be promoted, and how their macro is built.
 --
--- Self-consistency the chaining case depends on: the macro controls this module
--- creates are themselves plain GainBias{} (Unit/ControlBranch/GainBias.lua),
--- so a promoted macro stays promotable.
+-- Promotability is a claim about ARITHMETIC, not about the widget: the control's
+-- value has to compose affinely with its branch input, so that "macro carries the
+-- value, origin goes neutral" is transparent. There are exactly three control
+-- branch objects in the system and only two of them qualify:
+--
+--   ParameterAdapter  out = bias + gain*in   GainBias  -> promotable
+--   ConstantOffset    out = offset + in      Pitch     -> promotable
+--   Comparator        threshold, mode-dependent, nonlinear   Gate -> NOT
+--
+-- Gate is excluded on the arithmetic rather than out of caution. A toggle-mode
+-- origin re-fed from a toggle-mode macro toggles on the macro's EDGES, which
+-- halves the rate; making it work would mean forcing the origin into gate mode
+-- at a fixed threshold, silently rewriting state the user set.
+--
+-- `value` is read through `fader:getValueParameter()` for both, which is the one
+-- accessor the two classes share -- GainBias binds it to Bias (GainBias.lua) and
+-- Pitch to Offset (Pitch.lua). `hasGain` is what actually differs.
+local specs
+
+local function specFor(control)
+  if control == nil then
+    return nil
+  end
+  if specs == nil then
+    specs = {
+      [require "Unit.ViewControl.GainBias"] = {
+        branchType = "GainBias",
+        hasGain = true
+      },
+      [require "Unit.ViewControl.Pitch"] = {
+        branchType = "Pitch",
+        hasGain = false
+      }
+    }
+  end
+  -- Keyed by the class table, so this is an EXACT-metatable test, deliberately
+  -- NOT `control.type == "GainBias"` and NOT a class check. Base.Class
+  -- deep-copies members into subclasses (Base/Class.lua:36-49) and there is no
+  -- isInstanceOf, so `type` is inherited by all 49 habitat subclasses of
+  -- GainBias. Instances take the class table as their metatable
+  -- (Class.lua:80-86), so this matches plain instantiations only.
+  --
+  -- That is narrower than it sounds. A survey of the four unit repos found the
+  -- subclasses are ALL in habitat: Accents, er-301-custom-units and
+  -- er-301-units contain zero subclasses of GainBias, Pitch or Gate between
+  -- them and instantiate the stock classes directly, so 227 third-party
+  -- GainBias controls and 20 third-party Pitch controls are already covered
+  -- here. Admitting the habitat subclasses needs a class-level declaration and
+  -- is filed separately as promote-control-type-spec.
+  return specs[getmetatable(control)]
+end
+
 function Promote.isPromotableControl(control)
-  if control == nil then return false end
-  return getmetatable(control) == require "Unit.ViewControl.GainBias"
+  return specFor(control) ~= nil
+end
+
+-- The ControlBranch type a macro for this control must be built from, or nil if
+-- the control cannot be promoted. Also the label the placement screen shows.
+function Promote.branchTypeFor(control)
+  local spec = specFor(control)
+  return spec and spec.branchType
 end
 
 -- Ancestors of the unit a control sits on, innermost first, terminating at the
@@ -62,6 +111,12 @@ end
 function Promote.check(control, quiet)
   if not Promote.isPromotableControl(control) then
     return false, "Only standard fader controls can be promoted."
+  end
+  if control.branch == nil then
+    -- A control with no modulation branch has nothing for a macro to drive
+    -- into. Both promotable classes hard-error without one at construction, so
+    -- this is a belt-and-braces guard rather than a reachable case.
+    return false, "That control has no modulation branch."
   end
 
   local ancestors = Promote.ancestorsOf(control)
@@ -125,7 +180,9 @@ end
 function Promote.createInertMacro(control, targetUnit, position)
   local name = Promote.proposeName(control, targetUnit)
 
-  local macro = targetUnit:addControlBranch("GainBias", name)
+  -- Same branch type as the origin, so a promoted Pitch is a Pitch and the
+  -- macro reads in cents rather than as a bare number.
+  local macro = targetUnit:addControlBranch(Promote.branchTypeFor(control), name)
   -- addControlBranch does not put the control in any view; deserialize pairs the
   -- two (Unit/init.lua), and without this the macro exists but is invisible.
   targetUnit:placeControl(name, "expanded", position)
@@ -174,10 +231,15 @@ function Promote.rollback(targetUnit, name)
   end
 end
 
-local function biasParamOf(control)
-  return control.bias and control.bias:getParameter()
+-- The parameter carrying the control's value. Uniform across both promotable
+-- classes: GainBias binds the fader's value parameter to Bias, Pitch to Offset.
+-- Reading it through the fader rather than through a readout is what lets the
+-- transplant below be written once instead of per type.
+local function valueParamOf(control)
+  return control.fader and control.fader:getValueParameter()
 end
 
+-- Only GainBias has one. Pitch's ConstantOffset has no gain term at all.
 local function gainParamOf(control)
   return control.gain and control.gain:getParameter()
 end
@@ -196,10 +258,11 @@ end
 -- patch that has never had any.
 --
 -- Why this is necessary at all: a delta is an absolute target for the control's
--- BIAS parameter. Promotion sets that bias to 0, so a surviving delta would drag
--- the origin back to its old value the moment the scene is recalled, and the
--- patch would read roughly 2B. Scoped, honest loss: that one control stops
--- moving in every scene, every other control's scene data is untouched.
+-- VALUE parameter (Bias for GainBias, Offset for Pitch). Promotion sets that to
+-- 0, so a surviving delta would drag the origin back to its old value the moment
+-- the scene is recalled, and the patch would read roughly twice it. Scoped,
+-- honest loss: that one control stops moving in every scene, every other
+-- control's scene data is untouched.
 local function clearSceneState(origin)
   local unit = origin.parent
   if unit == nil or unit.getInstanceKey == nil then
@@ -239,10 +302,11 @@ end
 
 -- The transplant. Plan §5, and the riskiest part of this feature.
 --
--- End state, for origin bias B, gain G and modulation branch F:
---   macro  = bias B, gain G, branch F (moved wholesale)
---   origin = bias 0, gain 1, input source = the macro's output
--- so origin = 0 + 1*macroOut = B + G*F(S), which is what it read before.
+-- End state, for origin value V, gain G (GainBias only) and modulation branch F:
+--   macro  = value V, gain G, branch F (moved wholesale)
+--   origin = value 0, gain 1, input source = the macro's output
+-- so origin = 0 + 1*macroOut = V + G*F(S), which is what it read before. For
+-- Pitch there is no gain term and it reduces to origin = 0 + macroOut = V + F(S).
 --
 -- Returns true, or false plus a reason.
 function Promote.commit(origin, macroBranch)
@@ -259,15 +323,21 @@ function Promote.commit(origin, macroBranch)
   end
 
   local macroControl = macroBranch.control
-  local originBias, originGain = biasParamOf(origin), gainParamOf(origin)
-  local macroBias, macroGain = biasParamOf(macroControl),
-                               gainParamOf(macroControl)
-  if not (originBias and originGain and macroBias and macroGain) then
-    return false, "Missing bias/gain parameters."
+  -- The macro was built from the origin's own branch type, so the two agree on
+  -- whether a gain term exists. Read both sides rather than trusting the spec:
+  -- a mismatch here means the macro is not the shape it should be, and wiring a
+  -- half-configured adapter into the patch is the one outcome worth refusing.
+  local originValue, macroValue = valueParamOf(origin), valueParamOf(macroControl)
+  local originGain, macroGain = gainParamOf(origin), gainParamOf(macroControl)
+  if not (originValue and macroValue) then
+    return false, "Missing value parameter."
+  end
+  if (originGain == nil) ~= (macroGain == nil) then
+    return false, "Macro does not match the control it came from."
   end
 
-  local B = originBias:target()
-  local G = originGain:target()
+  local V = originValue:target()
+  local G = originGain and originGain:target()
 
   -- Pinned to the Chain layer on BOTH sides, deliberately. A polymorphic
   -- origin.branch:serialize() would dispatch to ControlBranch:serialize in the
@@ -293,22 +363,29 @@ function Promote.commit(origin, macroBranch)
 
   -- Macro takes the value BEFORE it is wired, so no frame sees the origin driven
   -- by an unconfigured adapter.
-  macroBias:hardSet(B)
-  macroGain:hardSet(G)
+  macroValue:hardSet(V)
+  if macroGain then
+    macroGain:hardSet(G)
+  end
 
   -- Wiring order buys the cheaper transient. Parameter writes are not batched by
   -- the audio-thread transaction (it covers task-list changes only), so the
-  -- audio thread can observe one frame mid-sequence:
-  --   gain 0 first  -> out = B         (unchanged)
-  --   wire          -> out = B         (unchanged, gain is 0)
-  --   bias 0        -> out = 0         (ONE-FRAME DIP -- a click)
-  --   gain 1        -> out = macroOut  (correct)
-  -- Wiring before zeroing the gain would instead give one frame of B + G*macroOut
-  -- (roughly 2B) -- a pop, and much worse on a level or a cutoff.
-  originGain:hardSet(0)
+  -- audio thread can observe any PREFIX of this sequence:
+  --   (gain 0)   -> out = V         unchanged; branch is already cleared
+  --   value 0    -> out = 0         one-frame DIP
+  --   wire       -> out = 0         still dipped, gain is 0
+  --   (gain 1)   -> out = macroOut  correct
+  -- Every prefix is either the old value or zero. The alternative orderings all
+  -- admit a prefix reading V + G*macroOut, roughly twice the value: a pop rather
+  -- than a click, and much worse on a level, a cutoff or a pitch.
+  if originGain then
+    originGain:hardSet(0)
+  end
+  originValue:hardSet(0)
   originBranch:setInputSource(1, macroBranch:getOutputSource(1))
-  originBias:hardSet(0)
-  originGain:hardSet(1)
+  if originGain then
+    originGain:hardSet(1)
+  end
 
   clearSceneState(origin)
   return true
@@ -356,7 +433,9 @@ function Promote.begin(control)
   local view = PromoteTargetView(control, ancestors, function(targetUnit)
     local PromotePlaceView = require "Unit.PromotePlaceView"
     local name = Promote.proposeName(control, targetUnit)
-    local placer = PromotePlaceView(targetUnit, name, function(position)
+    local placer = PromotePlaceView(targetUnit, name,
+                                    Promote.branchTypeFor(control),
+                                    function(position)
       -- Re-check: two windows have been open since the menu was built and the
       -- scene state can have changed under them.
       local stillOk, why = Promote.check(control, false)

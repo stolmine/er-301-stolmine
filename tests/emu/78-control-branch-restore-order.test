@@ -1,0 +1,54 @@
+# [stol:promote-control-to-top-level] A customized control branch keeps its value
+# across a reload.
+#
+# ControlBranch:deserialize used to restore the objects (the parameter values)
+# and THEN apply the control's customizations. For any control whose customize()
+# disturbs its parameter that is the wrong way round, and Pitch is such a
+# control: customize() rebuilds the dial map and hands it to Readout::setMap,
+# which rewrites the value. So a customized Pitch control came back from every
+# reload with a different offset than it was saved with.
+#
+# NOT a promotion bug, despite being found through one. Reachable from stock UI
+# with no promotion anywhere: Edit Controls -> Insert Pitch Control, then edit
+# Tune Min / Tune Max. Promotion only made it easy to hit, because it copies the
+# origin's customizations onto the macro. This test therefore builds its controls
+# by hand, so it keeps testing the underlying path even if promotion changes.
+
+frames 20
+lua local F=require('Unit.Factory'); local t=F.getUnitsByLibrary('builtins'); for _,u in ipairs(t) do if (u.title or u.moduleName)=='Custom Effect' then require('Channels').getChain(1):loadUnit(u) end end
+frames 60
+lua (function() _G.__unit=function() return require('Channels').getChain(1):getUnit(1) end _G.__val=function(n) return _G.__unit().controls[n].fader:getValueParameter():target() end return 'ok' end)()
+
+# Four control branches: a plain and a customized one of each promotable type.
+# The plain ones are the control group -- they round-tripped correctly before
+# this fix too, so if they ever start failing the cause is somewhere else.
+lua (function() local u=_G.__unit() for _,n in ipairs{'tunePlain','tuneCustom'} do u:addControlBranch('Pitch',n) u:placeControl(n,'expanded') end for _,n in ipairs{'gbPlain','gbCustom'} do u:addControlBranch('GainBias',n) u:placeControl(n,'expanded') end return 'ok' end)()
+frames 20
+
+# Customize first, as the Edit Controls flow does, then dial a value in.
+lua (function() local u=_G.__unit() u.controls.tuneCustom:customize{min=-3600,max=3600,superCoarseStep=1200,coarseStep=100,fineStep=10,superFineStep=1} u.controls.gbCustom:customize{biasMin=-2,biasMax=2,biasSuperCoarseStep=1,biasCoarseStep=0.1,biasFineStep=0.01,biasSuperFineStep=0.001} return 'ok' end)()
+frames 20
+lua (function() local u=_G.__unit() u.controls.tunePlain.fader:getValueParameter():hardSet(0.5) u.controls.tuneCustom.fader:getValueParameter():hardSet(0.5) u.controls.gbPlain.fader:getValueParameter():hardSet(0.7) u.controls.gbCustom.fader:getValueParameter():hardSet(0.7) return 'ok' end)()
+frames 20
+
+!assert math.abs(_G.__val('tunePlain') - 0.5) < 1e-4
+!assert math.abs(_G.__val('tuneCustom') - 0.5) < 1e-4
+!assert math.abs(_G.__val('gbPlain') - 0.7) < 1e-4
+!assert math.abs(_G.__val('gbCustom') - 0.7) < 1e-4
+
+lua (function() _G.__saved=require('Channels').getChain(1):serialize() return 'ok' end)()
+lua (function() require('Channels').getChain(1):deserialize(_G.__saved) return 'ok' end)()
+frames 120
+
+# All four survive. tuneCustom is the one that used to come back as 0.3.
+!assert math.abs(_G.__val('tunePlain') - 0.5) < 1e-4
+!assert math.abs(_G.__val('tuneCustom') - 0.5) < 1e-4
+!assert math.abs(_G.__val('gbPlain') - 0.7) < 1e-4
+!assert math.abs(_G.__val('gbCustom') - 0.7) < 1e-4
+
+# The customizations themselves still round-trip -- the fix reorders the two
+# restores, it does not drop either.
+!assert _G.__unit().controls.tuneCustom:getCustomizableValue('max') == 3600
+!assert _G.__unit().controls.gbCustom:getCustomizableValue('biasMax') == 2
+
+quit

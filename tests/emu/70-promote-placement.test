@@ -30,7 +30,7 @@ lua (function() local n=0 for _ in pairs(_G.__unit().controls) do n=n+1 end loca
 !assert _G.__base[3] >= 2
 
 # ---- the held panel starts at the end, and clamps there --------------------
-lua (function() local V=require('Unit.PromotePlaceView') local P=require('Unit.Promote') _G.__name=P.proposeName(_G.__origin(),_G.__unit()) _G.__placed=nil _G.__v=V(_G.__unit(),_G.__name,function(p) _G.__placed=p end) _G.__v:show() return _G.__name end)()
+lua (function() local V=require('Unit.PromotePlaceView') local P=require('Unit.Promote') _G.__name=P.proposeName(_G.__origin(),_G.__unit()) _G.__placed=nil _G.__v=V(_G.__unit(),_G.__name,'GainBias',function(p) _G.__placed=p end) _G.__v:show() return _G.__name end)()
 frames 20
 
 # Sections are: header, one per existing control, the held panel, end-of-unit.
@@ -68,7 +68,7 @@ lua (function() require('Unit.Promote').rollback(_G.__unit(),_G.__name) return '
 frames 20
 !assert _G.__count() == _G.__base[3]
 
-lua (function() local V=require('Unit.PromotePlaceView') _G.__placed=nil _G.__v=V(_G.__unit(),_G.__name,function(p) _G.__placed=p end) _G.__v:show() _G.__v:enterReleased() return tostring(_G.__placed) end)()
+lua (function() local V=require('Unit.PromotePlaceView') _G.__placed=nil _G.__v=V(_G.__unit(),_G.__name,'GainBias',function(p) _G.__placed=p end) _G.__v:show() _G.__v:enterReleased() return tostring(_G.__placed) end)()
 frames 20
 !assert _G.__placed == _G.__base[3] + 1
 lua (function() require('Unit.Promote').createInertMacro(_G.__origin(),_G.__unit(),_G.__placed) return 'ok' end)()

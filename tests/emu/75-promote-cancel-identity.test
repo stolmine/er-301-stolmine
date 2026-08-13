@@ -39,7 +39,7 @@ lua (function() _G.__before=_G.__dump(_G.__unit():serialize()) return #_G.__befo
 !assert #_G.__before > 100
 
 # Open the placement screen, walk the held panel around, then CANCEL.
-lua (function() local P=require('Unit.Promote') _G.__name=P.proposeName(_G.__origin(),_G.__unit()) local V=require('Unit.PromotePlaceView') _G.__placed=nil _G.__v=V(_G.__unit(),_G.__name,function(p) _G.__placed=p end) _G.__v:show() return 'ok' end)()
+lua (function() local P=require('Unit.Promote') _G.__name=P.proposeName(_G.__origin(),_G.__unit()) local V=require('Unit.PromotePlaceView') _G.__placed=nil _G.__v=V(_G.__unit(),_G.__name,'GainBias',function(p) _G.__placed=p end) _G.__v:show() return 'ok' end)()
 frames 20
 lua (function() for i=1,4 do _G.__v:encoder(-4,false) end return 'ok' end)()
 frames 20

@@ -1,0 +1,85 @@
+# [stol:promote-control-to-top-level] Pitch controls are promotable too.
+#
+# Promotability is a claim about ARITHMETIC, not about the widget. There are
+# exactly three control-branch objects in the system:
+#
+#   ParameterAdapter   out = bias + gain*in        GainBias -> yes
+#   ConstantOffset     out = offset + in           Pitch    -> yes
+#   Comparator         threshold, mode-dependent   Gate     -> NO, nonlinear
+#
+# Pitch is GainBias minus the gain term, so the same transplant works with the
+# gain steps dropped: the macro takes the offset and the branch, the origin goes
+# to offset 0 driven by the macro, and origin = 0 + macroOut = O + F(S).
+#
+# Gate is asserted OUT here as well. It is excluded on the arithmetic rather than
+# out of caution -- a toggle-mode origin re-fed from a toggle-mode macro toggles
+# on the macro's EDGES and halves the rate -- and an accidental relaxation of the
+# discriminator that let it through would be silent.
+
+frames 20
+lua local F=require('Unit.Factory'); local t=F.getUnitsByLibrary('builtins'); for _,u in ipairs(t) do if (u.title or u.moduleName)=='Custom Effect' then require('Channels').getChain(1):loadUnit(u) end end
+frames 60
+lua (function() local c=require('Channels').getChain(1):getUnit(1) local F=require('Unit.Factory') for _,u in ipairs(F.getUnitsByLibrary('builtins')) do if (u.title or u.moduleName)=='Test Osc' then c.patch:loadUnit(u) end end return 'ok' end)()
+frames 60
+lua (function() _G.__unit=function() return require('Channels').getChain(1):getUnit(1) end _G.__osc=function() return require('Channels').getChain(1):getUnit(1).patch:getUnit(1) end _G.__tune=function() return _G.__osc().controls.tune end _G.__val=function(c) return c.fader:getValueParameter():target() end return 'ok' end)()
+
+# ---- the discriminator ------------------------------------------------------
+!assert require('Unit.Promote').isPromotableControl(_G.__tune()) == true
+!assert require('Unit.Promote').branchTypeFor(_G.__tune()) == 'Pitch'
+!assert require('Unit.Promote').branchTypeFor(_G.__osc().controls.freq) == 'GainBias'
+
+# Gate stays out, and so does everything without a branch.
+!assert require('Unit.Promote').isPromotableControl(_G.__osc().controls.sync) == false
+!assert require('Unit.Promote').isPromotableControl(_G.__osc().controls.scope) == false
+!assert require('Unit.Promote').branchTypeFor(_G.__osc().controls.sync) == nil
+
+# The menu offers it on the nested Pitch control.
+!assert require('Unit.Promote').check(_G.__tune(), true) == true
+!assert (function() for _,e in ipairs(_G.__tune():getFloatingMenuItems()) do if e=='promote' then return true end end return false end)()
+
+# ---- promote it -------------------------------------------------------------
+# A distinct offset, in cents, plus a modulator living in the tune branch.
+lua (function() _G.__tune().fader:getValueParameter():hardSet(700) return 'ok' end)()
+frames 20
+!assert math.abs(_G.__val(_G.__tune()) - 700) < 1e-4
+
+lua (function() local b=_G.__tune().branch local F=require('Unit.Factory') for _,u in ipairs(F.getUnitsByLibrary('builtins')) do if (u.title or u.moduleName)=='Test Osc' then b:loadUnit(u) end end return 'ok' end)()
+frames 60
+!assert _G.__tune().branch:length() == 1
+lua (function() _G.__modKey=_G.__tune().branch:getUnit(1):getInstanceKey() return tostring(_G.__modKey) end)()
+
+lua (function() local P=require('Unit.Promote') local m,n=P.createInertMacro(_G.__tune(),_G.__unit()) _G.__name=n _G.__macro=m local ok,why=P.commit(_G.__tune(),m) _G.__why=why return tostring(ok)..','..tostring(why) end)()
+frames 60
+!assert _G.__why == nil
+
+# The macro really is a Pitch, not a GainBias standing in for one: that is what
+# makes it read in cents with the right map instead of as a bare number.
+!assert _G.__macro.control.type == 'Pitch'
+!assert require('Unit.Promote').branchTypeFor(_G.__macro.control) == 'Pitch'
+!assert _G.__macro.control.gain == nil
+
+# The offset moved up; the origin is a pass-through at 0.
+!assert math.abs(_G.__val(_G.__macro.control) - 700) < 1e-4
+!assert math.abs(_G.__val(_G.__tune()) - 0) < 1e-4
+
+# The branch moved whole, keys intact, and the macro drives the origin.
+!assert _G.__tune().branch:length() == 0
+!assert _G.__macro:length() == 1
+!assert _G.__macro:getUnit(1):getInstanceKey() == _G.__modKey
+!assert _G.__tune().branch:getInputSource(1) == _G.__macro:getOutputSource(1)
+
+# A promoted Pitch is itself promotable, so Pitch chains the same way GainBias
+# does -- the self-consistency the repeat-promotion case depends on.
+!assert require('Unit.Promote').isPromotableControl(_G.__macro.control) == true
+
+# ---- and it survives a save/load round-trip --------------------------------
+lua (function() _G.__saved=require('Channels').getChain(1):serialize() return 'ok' end)()
+lua (function() require('Channels').getChain(1):deserialize(_G.__saved) return 'ok' end)()
+frames 120
+!assert _G.__unit().controls[_G.__name] ~= nil
+!assert _G.__unit().controls[_G.__name].type == 'Pitch'
+!assert math.abs(_G.__val(_G.__unit().controls[_G.__name]) - 700) < 1e-4
+!assert math.abs(_G.__val(_G.__tune()) - 0) < 1e-4
+!assert _G.__tune().branch:getInputSource(1) == _G.__unit().controlBranches[_G.__name]:getOutputSource(1)
+
+quit

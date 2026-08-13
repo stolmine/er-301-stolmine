@@ -65,12 +65,29 @@ function ControlBranch:serialize()
   return t
 end
 
+-- [stol:promote-control-to-top-level] Control FIRST, objects SECOND.
+--
+-- These used to run the other way round, and it silently corrupted any control
+-- whose customizations disturb its parameter. Pitch does: customize() rebuilds
+-- the dial map and hands it to Readout::setMap, which rewrites the value. So a
+-- customized Pitch control came back from every reload with a different offset
+-- than it was saved with -- 0.5 saved, 0.3 restored -- because the value was
+-- restored and then customize ran on top of it.
+--
+-- Reachable without promotion at all: Edit Controls -> Insert Pitch Control,
+-- then edit its Tune Min / Tune Max. Promotion only made it easy to hit, by
+-- copying the origin's customizations onto the macro.
+--
+-- This order is the right one on the merits regardless: customizations describe
+-- how a control is DISPLAYED and parameters are the data, so when the two
+-- disagree about a parameter the saved data has to win. Applying display first
+-- and data second is what makes that true.
 function ControlBranch:deserialize(t)
-  if t.objects then
-    Persist.deserializeObjects(self.objects, nil, t.objects)
-  end
   if t.control then
     self.control:deserialize(t.control)
+  end
+  if t.objects then
+    Persist.deserializeObjects(self.objects, nil, t.objects)
   end
   Branch.deserialize(self, t)
 end

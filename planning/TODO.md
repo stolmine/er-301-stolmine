@@ -5,7 +5,7 @@ ER-301-STOLMINE TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**113 items** — 79 done, 32 todo, 2 archived. *Rendered 2026-08-13.*
+**114 items** — 79 done, 33 todo, 2 archived. *Rendered 2026-08-13.*
 
 ## Sequencer
 
@@ -37,6 +37,7 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `crashdiag-ui-flightrecorder-seams` | On-device flight recorder captures UI seam events (P1b) | manual · 2026-07-12 |
 |   | `mix-input-native-cv` | Native CV/modulation on the channel mix input slider (SHIFT gesture) | manual · 2026-07-13 |
 |   | `promote-control-to-top-level` | Promote an inner control to its container's top-level control interface (one action) | manual · 2026-08-13 |
+|   | `promote-control-type-spec` | Class-level promotion spec so habitat GainBias subclasses can be promoted | manual · 2026-08-13 |
 |   | `ui-audio-editor-selection-ops` | Audio editor: selection-scoped destructive operations (idea) | manual · 2026-07-09 |
 |   | `ui-chain-ref-invalidation-link-unlink` | Chain-reference invalidation on stereo link/unlink (LocalChooser / Source.Chooser) | manual · 2026-07-09 |
 |   | `ui-core-keyword-type-revamp` | Core package keyword + type revamp: sampling glyph + keyword audit | manual · 2026-07-09 |
