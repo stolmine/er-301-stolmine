@@ -12,6 +12,21 @@
 -- The macro is inert at this point (empty branch, nothing wired, see
 -- Promote.createInertMacro), so every exit from here is cheap: CANCEL drops it
 -- with no audio consequence and no trace in the serialized patch.
+--
+-- LIFETIME IS THE HARD PART, not the moving. Placement works by shadowing a few
+-- handlers on ONE control instance, so a placement that outlives the gesture
+-- leaves a booby-trapped control behind: turning the encoder to adjust its bias
+-- walks it down the strip instead. That was a real bug (reported from the bench,
+-- 2026-08-13, symptom "the whole control moves position"), and the two defences
+-- against it are:
+--
+--   1. Placement ENDS when the control loses the cursor. It is a modal gesture
+--      bound to the cursor being on the control, so navigating away cancels it
+--      rather than leaving it armed and invisible.
+--   2. Every shadowed handler self-heals. If it is ever reached when `active`
+--      does not name its own control, it strips the shadows off that instance
+--      and delegates to the class method. Belt and braces for any exit path not
+--      thought of here -- a stale shadow can then misbehave at most zero times.
 
 local app = app
 local Env = require "Env"
@@ -26,9 +41,52 @@ local threshold = Env.EncoderThreshold.Default
 -- would restore each other's overrides in the wrong order.
 local active = nil
 
+-- Every handler shadowed on the control instance. Kept in one list so install,
+-- restore and the self-heal path cannot drift apart.
+local SHADOWED = {
+  "encoder",
+  "enterReleased",
+  "cancelReleased",
+  "upReleased",
+  "homeReleased",
+  "onCursorLeave"
+}
+
+-- The class method a shadow is standing in front of. Instances take their class
+-- as the metatable (Base/Class.lua:73,82), so this reaches the real handler
+-- whether or not the instance field is still set.
+local function classMethod(control, name)
+  local class = getmetatable(control)
+  return class and class[name]
+end
+
+local function unshadow(control)
+  for _, name in ipairs(SHADOWED) do
+    control[name] = nil
+  end
+end
+
+-- Returns the live placement if it belongs to this control. Otherwise the
+-- shadows are stale: strip them and return nil so the caller delegates.
+local function claim(control)
+  local p = active
+  if p and p.control == control then
+    return p
+  end
+  unshadow(control)
+  return nil
+end
+
+local function delegate(control, name, ...)
+  local f = classMethod(control, name)
+  if f then
+    return f(control, ...)
+  end
+end
+
 -- Position of a control among the MOVABLE controls of a view -- 1-based, with
 -- the insert and header controls excluded, which is the indexing
--- UnitSection:moveControl expects (Section.lua:160, +2 throughout).
+-- UnitSection:moveControl expects (Section.lua, +2 throughout).
 local function positionOf(unit, control)
   local view = unit:getView("expanded")
   if view == nil then
@@ -71,7 +129,7 @@ end
 -- enterReleased and homeReleased are routed to this control anyway while the
 -- cursor sits on it (ViewControl:onCursorEnter), so releasing them here would
 -- leave the control unable to handle its own ENTER afterwards -- dropping the
--- per-instance overrides is enough. cancelReleased was taken FROM the section
+-- shadows is enough. cancelReleased was taken FROM the section
 -- (UnitSection:onCursorEnter), so it is handed straight back.
 local function finish()
   local p = active
@@ -81,11 +139,7 @@ local function finish()
   end
   local control = p.control
   control:releaseFocus("encoder", "upReleased", "cancelReleased")
-  control.encoder = nil
-  control.enterReleased = nil
-  control.cancelReleased = nil
-  control.upReleased = nil
-  control.homeReleased = nil
+  unshadow(control)
   if control.controlGraphic then
     control.controlGraphic:setBorder(0)
   end
@@ -106,13 +160,17 @@ local function step(direction)
   if target < 1 or target > movableCount(unit) then
     return
   end
+  -- The rebuild this triggers runs disableSelection, which fires onCursorLeave
+  -- on this very control. Mark it so the leave handler does not read our own
+  -- rebuild as the user navigating away and cancel the placement.
+  p.internalRebuild = true
   unit:moveControlFollowingCursor(control.id, "expanded", target, current)
 end
 
-local function onEncoder(_, change, shifted)
-  local p = active
+local function onEncoder(self, change, shifted)
+  local p = claim(self)
   if p == nil then
-    return true
+    return delegate(self, "encoder", change, shifted)
   end
   p.sum = p.sum + change
   if p.sum > threshold then
@@ -125,22 +183,28 @@ local function onEncoder(_, change, shifted)
   return true
 end
 
-local function onEnter(_)
-  local p = active
+local function onEnter(self)
+  local p = claim(self)
+  if p == nil then
+    return delegate(self, "enterReleased")
+  end
   finish()
-  if p and p.onCommit then
+  if p.onCommit then
     p.onCommit()
   end
   return true
 end
 
-local function onAbort(_, shifted)
+local function onAbort(self, shifted)
+  local p = claim(self)
+  if p == nil then
+    return delegate(self, "cancelReleased", shifted)
+  end
   if shifted then
     return false
   end
-  local p = active
   finish()
-  if p and p.onCancel then
+  if p.onCancel then
     p.onCancel()
   end
   return true
@@ -149,8 +213,48 @@ end
 -- UP and HOME abort rather than being ignored: both navigate away from the
 -- target unit, and leaving placement live on a window the user has left would
 -- strand the encoder grab and the inert macro together.
-local function onAbortAlways(_)
-  return onAbort(_, false)
+local function onAbortAlways(self)
+  local p = claim(self)
+  if p == nil then
+    return delegate(self, "upReleased")
+  end
+  finish()
+  if p.onCancel then
+    p.onCancel()
+  end
+  return true
+end
+
+-- Losing the cursor ends the placement. Two cases have to be told apart:
+--
+--   * OUR OWN rebuild. Every encoder step reorders the view, and the rebuild
+--     brackets itself with disable/enableSelection -- so a leave fires on this
+--     control and a matching enter follows immediately. step() flags those;
+--     the flag is consumed here, once per rebuild.
+--   * The user navigating away, with a main button or any other cursor move.
+--     That cancels.
+--
+-- The cancel is POSTED rather than run inline because this handler is reached
+-- from inside disableSelection, part way through a rebuild of the very section
+-- the rollback is about to remove a control from.
+local function onCursorLeave(self, spotIndex, shifted)
+  local p = claim(self)
+  if p == nil then
+    return delegate(self, "onCursorLeave", spotIndex, shifted)
+  end
+  if p.internalRebuild then
+    p.internalRebuild = false
+    return delegate(self, "onCursorLeave", spotIndex, shifted)
+  end
+  local onCancel = p.onCancel
+  finish()
+  local Application = require "Application"
+  Application.post(function()
+    if onCancel then
+      onCancel()
+    end
+  end)
+  return delegate(self, "onCursorLeave", spotIndex, shifted)
 end
 
 -- args: unit (the promotion target), control (the inert macro's ViewControl),
@@ -158,7 +262,7 @@ end
 function Placement.begin(args)
   if active then
     -- Should not happen: the fan-out menu is not reachable during placement.
-    -- Abort the older one rather than interleave two sets of overrides.
+    -- Abort the older one rather than interleave two sets of shadows.
     finish()
   end
 
@@ -180,7 +284,7 @@ function Placement.begin(args)
     sum = 0
   }
 
-  -- Per-instance overrides, not class overrides: Base.Class deep-copies members
+  -- Per-instance shadows, not class overrides: Base.Class deep-copies members
   -- into subclasses at definition time, so touching the class would reach every
   -- GainBias control in the patch. An instance takes its class as the metatable
   -- (Class.lua:73,82), so a field set here shadows the method and clearing it in
@@ -190,6 +294,7 @@ function Placement.begin(args)
   control.cancelReleased = onAbort
   control.upReleased = onAbortAlways
   control.homeReleased = onAbortAlways
+  control.onCursorLeave = onCursorLeave
 
   -- Grabbed AFTER the rebuild: the rebuild's disable/enableSelection cycle runs
   -- onCursorLeave, which releases the encoder grab.
@@ -201,6 +306,13 @@ function Placement.begin(args)
     -- (Unit/Editor.lua ItemHeader:subPressed).
     control.controlGraphic:setBorder(3)
   end
+
+  -- createInertMacro's placeControl left an UNFOCUSED rebuild pending for this
+  -- frame. Replace it with a focused one, and flag it, or it would knock the
+  -- cursor off the macro the instant placement starts -- which now reads as the
+  -- user navigating away and cancels the whole gesture.
+  active.internalRebuild = true
+  unit:rebuildViewFollowingControl("expanded", control)
 
   local Overlay = require "Overlay"
   Overlay.flashSubMessage("Place with knob. ENTER to promote.")

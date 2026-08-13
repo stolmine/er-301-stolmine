@@ -1,0 +1,70 @@
+# [stol:promote-control-to-top-level] Regression: placement must not outlive the
+# gesture.
+#
+# Reported from the bench 2026-08-13: "when we attempt to move sub controls (gain
+# or bias, or even just grabbing bias via top level nav) on a promoted control the
+# whole control moves position in the destination unit."
+#
+# Cause: placement works by shadowing handlers on ONE control instance, and the
+# only exits were ENTER / CANCEL / UP / HOME on that control. Moving the cursor
+# away with a main button ended nothing -- the shadows stayed installed and
+# `active` stayed set, so the next time the user focused that control and turned
+# the encoder they got placement's mover instead of the fader.
+#
+# Two defences, one test each below:
+#   1. losing the cursor ends the placement (and cancels it)
+#   2. a shadow reached with no matching placement strips itself and delegates
+#
+# Defence 2 is what makes this safe rather than merely fixed: it holds for exit
+# paths nobody has thought of yet.
+
+frames 20
+lua local F=require('Unit.Factory'); local t=F.getUnitsByLibrary('builtins'); for _,u in ipairs(t) do if (u.title or u.moduleName)=='Custom Effect' then require('Channels').getChain(1):loadUnit(u) end end
+frames 60
+lua (function() local c=require('Channels').getChain(1):getUnit(1) local F=require('Unit.Factory') for _,u in ipairs(F.getUnitsByLibrary('builtins')) do if (u.title or u.moduleName)=='Test Osc' then c.patch:loadUnit(u) end end return 'ok' end)()
+frames 60
+lua (function() _G.__unit=function() return require('Channels').getChain(1):getUnit(1) end _G.__origin=function() return require('Channels').getChain(1):getUnit(1).patch:getUnit(1).controls.freq end _G.__pos=function(n) local v=_G.__unit():getView('expanded') for i,c in ipairs(v.controls) do if c.id==n then return i-2 end end return -1 end return 'ok' end)()
+lua (function() local u=_G.__unit() u:addControlBranch('GainBias','filler') u:placeControl('filler','expanded') return 'ok' end)()
+frames 20
+
+# ---- 1. Cursor leaves the macro mid-placement -----------------------------
+lua (function() local P=require('Unit.Promote') local m,n=P.createInertMacro(_G.__origin(),_G.__unit()) _G.__name=n _G.__macro=m require('Unit.PromotePlacement').begin{unit=_G.__unit(),control=m.control,onCommit=function() P.commit(_G.__origin(),m) end,onCancel=function() P.rollback(_G.__unit(),n) end} return 'ok' end)()
+frames 20
+!assert require('Unit.PromotePlacement').isActive() == true
+
+# The placement's OWN rebuilds fire a cursor leave on this very control, so they
+# must not be mistaken for the user walking away. One encoder step first: the
+# macro moves and placement is still live.
+lua (function() _G.__macro.control:encoder(-4,false) return 'ok' end)()
+frames 20
+!assert require('Unit.PromotePlacement').isActive() == true
+!assert _G.__pos(_G.__name) < #_G.__unit():getView('expanded').controls - 2
+
+# Now a GENUINE cursor leave, as a main button press on another control gives.
+lua (function() _G.__macro.control:onCursorLeave(1) return 'ok' end)()
+frames 40
+!assert require('Unit.PromotePlacement').isActive() == false
+
+# ...and it cancelled: the inert macro is gone, not left sitting there armed.
+!assert _G.__unit().controls[_G.__name] == nil
+!assert _G.__unit().controlBranches[_G.__name] == nil
+
+# ---- 2. A stale shadow heals itself ---------------------------------------
+# Reconstruct the exact broken state the bench hit -- shadow installed, no live
+# placement -- by capturing the shadow off a real placement, ending it, and
+# putting the shadow back by hand. That is what "stranded" looked like.
+lua (function() local P=require('Unit.Promote') local m,n=P.createInertMacro(_G.__origin(),_G.__unit()) _G.__name2=n _G.__macro2=m local PP=require('Unit.PromotePlacement') PP.begin{unit=_G.__unit(),control=m.control,onCommit=function() end,onCancel=function() end} _G.__shadow=rawget(m.control,'encoder') PP.abandon() m.control.encoder=_G.__shadow return 'ok' end)()
+frames 20
+!assert require('Unit.PromotePlacement').isActive() == false
+!assert _G.__shadow ~= nil
+!assert rawget(_G.__macro2.control,'encoder') == _G.__shadow
+
+# Turning the encoder now must NOT move the control. The shadow sees that no
+# placement names it, strips itself, and hands off to the class method.
+lua (function() _G.__before2=_G.__pos(_G.__name2) return _G.__before2 end)()
+lua (function() local c=_G.__macro2.control for i=1,6 do c:encoder(4,false) end return 'ok' end)()
+frames 20
+!assert _G.__pos(_G.__name2) == _G.__before2
+!assert rawget(_G.__macro2.control,'encoder') == nil
+
+quit
