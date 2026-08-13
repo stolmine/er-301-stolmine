@@ -185,6 +185,21 @@ local defaults = {
       "presets"
     }
   },
+  -- [stol:control-shift-subdisplay-indicator] Persistent mark on controls that
+  -- swap their sub display under SHIFT. OFF by default to match how the fork
+  -- currently ships: the affordance has always been invisible, so turning it on
+  -- for everyone would silently change every unit's appearance on update.
+  -- Detection is structural (see ViewControl:hasShiftLayer), so no unit or
+  -- package has to declare anything and third-party packages are covered too.
+  showShiftLayerHints = {
+    category = "Units",
+    description = "Mark controls with a SHIFT sub display?",
+    value = false,
+    onSet = function()
+      local Signal = require "Signal"
+      Signal.emit("onShiftLayerHintsChanged")
+    end
+  },
   containerUnitNameGen = {
     category = "Units",
     description = "Name generation for container units:",

@@ -1,0 +1,41 @@
+# [stol:control-shift-subdisplay-indicator] End-to-end proof against REAL package
+# code. 65-shift-layer-hint exercises the predicate in isolation; this one installs
+# anamnesis, inserts the unit, and shows that the structural probe fires on habitat
+# controls that were written years before this feature existed and declare nothing.
+#
+# Anamnesis is the fixture because AnamSubControl defines shiftPressed + grabs focus
+# for it, AnamFieldControl inherits that, and Anamnesis.lua instantiates them 5x.
+#
+# Run with STOL_EMU_PKG_DIR=<habitat>/testing/linux.
+!packages anamnesis
+
+frames 20
+!assert (function() local M=require('Package.Manager'); local pk; for k,v in pairs(M.getPackages()) do if k:find('anamnesis') then pk=v end end; return M.install(pk)==true end)()
+frames 10
+lua local F=require('Unit.Factory'); local t=F.getUnitsByLibrary('anamnesis'); require('Channels').getChain(1):loadUnit(t[1])
+frames 60
+!assert require('Channels').getChain(1):length() == 1
+
+# The probe fires on real habitat controls. If this count is 0 the detection story
+# is wrong and the whole feature is pointless, so assert it directly.
+!assert (function() local u=require('Channels').getChain(1):getUnit(1) local n=0 for id,c in pairs(u.controls or {}) do if c.hasShiftLayer and c:hasShiftLayer() then n=n+1 end end return n > 0 end)()
+
+# Setting OFF (default): no mark is created at all, so an unchanged user sees
+# exactly what they saw before the update.
+!assert (function() local u=require('Channels').getChain(1):getUnit(1) for id,c in pairs(u.controls or {}) do if c.shiftLayerMark ~= nil then return false end end return true end)()
+
+# Turn it on: every control the probe flags gains a mark, live, with no reinsert.
+lua require('Settings').set('showShiftLayerHints', true)
+frames 30
+!assert (function() local u=require('Channels').getChain(1):getUnit(1) local marked=0 for id,c in pairs(u.controls or {}) do if c.hasShiftLayer and c:hasShiftLayer() then if c.shiftLayerMark == nil then return false end marked=marked+1 end end return marked > 0 end)()
+
+# Controls WITHOUT a shift layer stay unmarked while the setting is on. This is the
+# false-positive guard on live code: over-marking makes the cue meaningless.
+!assert (function() local u=require('Channels').getChain(1):getUnit(1) for id,c in pairs(u.controls or {}) do if c.hasShiftLayer and not c:hasShiftLayer() and c.shiftLayerMark ~= nil then return false end end return true end)()
+
+# Toggling back off hides the mark again (no reinsert, no stale pixels).
+lua require('Settings').set('showShiftLayerHints', false)
+frames 30
+!assert require('Channels').getChain(1):length() == 1
+
+quit

@@ -174,6 +174,8 @@ function BranchMeter:onMuteStateChanged(muted, solo)
 end
 
 function BranchMeter:onInsert()
+  -- Chain: the base onInsert is no longer a no-op (shift-layer mark).
+  Base.onInsert(self)
   local branch = self.branch
   if branch then
     if branch.channelCount < 2 then

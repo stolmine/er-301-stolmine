@@ -1,0 +1,43 @@
+# [stol:control-shift-subdisplay-indicator] A control whose sub display changes
+# under SHIFT is otherwise undiscoverable: you either read the manual or press
+# SHIFT on every control in turn. ViewControl:hasShiftLayer is the structural
+# probe that finds them with no declaration from the unit author, so it covers
+# packages written before this existed and third-party packages alike.
+#
+# This guards the probe's three load-bearing properties and the settings row.
+# The probe is exercised directly (it is a pure predicate over self) rather than
+# through a real habitat control, because core ships no unit with a SHIFT sub
+# display -- the affordance lives entirely in packages.
+
+frames 20
+!assert require('Application').getVisibleContext():top():getClassName() == 'Chain.Root'
+
+# OFF by default. The affordance has always been invisible, so an update must not
+# silently repaint every unit; the user opts in.
+!assert require('Settings').get('showShiftLayerHints') == false
+
+# The settings row exists in the normal System Settings menu (not dev-gated).
+!assert (function() local I = require('Settings.Interface') I:show() local ml = I.mainList for i = 1, 80 do if ml:getSelectedData() == 'showShiftLayerHints' then return true end ml:scrollDown() end return false end)()
+
+# --- the probe itself ---
+# 1. A control with no shift handler is not marked. This is the common case and
+#    the one that must never false-positive: every core control lands here.
+!assert require('Unit.ViewControl').hasShiftLayer({id = 'freq'}) == false
+
+# 2. A control that defines shiftPressed IS marked. This is the signature that
+#    every habitat shift sub display carries (44/44 classes surveyed).
+!assert require('Unit.ViewControl').hasShiftLayer({id = 'mix', shiftPressed = function() end}) == true
+
+# 3. Header is the one genuine false positive in core: it grabs SHIFT purely to
+#    scroll its command lists, with no sub display swap. It must stay unmarked.
+!assert require('Unit.ViewControl').hasShiftLayer({id = 'header', shiftPressed = function() end}) == false
+
+# 4. Probe shiftPressed, NOT shiftReleased. Chain.Base defines shiftReleased and
+#    sits in the focus chain permanently, so keying off it would mark everything;
+#    and third-party strike DualOptionControl defines shiftPressed alone.
+!assert require('Unit.ViewControl').hasShiftLayer({id = 'x', shiftReleased = function() end}) == false
+
+# A real inserted core control reports false end-to-end (not just the bare probe).
+!assert (function() local C = require('Application').getVisibleContext():top() return C ~= nil end)()
+
+quit

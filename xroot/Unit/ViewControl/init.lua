@@ -184,6 +184,68 @@ function ViewControl:createPinMark()
   self.pinMark = graphic
 end
 
+-- [stol:control-shift-subdisplay-indicator] ---------------------------------
+-- Does this control swap its sub display when SHIFT is held?
+--
+-- Structural probe, no declaration required, so every package (including
+-- third-party and anything written before this existed) is covered for free.
+-- It works because NO class in the ViewControl hierarchy defines shiftPressed
+-- -- there is no inherited no-op for a subclass to "override" and thereby
+-- false-positive on. Controls that own a shift sub display define shiftPressed
+-- and grab focus for it; the same w[event] ~= nil test is already used by
+-- emu/UIState.lua to build its gesture map.
+--
+-- Probe shiftPressed and NOT shiftReleased, deliberately:
+--   * Chain.Base defines shiftReleased and is always in the focus chain.
+--   * Some controls (third-party strike DualOptionControl) define shiftPressed
+--     with no shiftReleased at all.
+--
+-- Header is the one genuine false positive in core: it grabs SHIFT purely to
+-- scroll its command lists, with no sub display swap. Excluded by id.
+--
+-- Known miss: controls that repurpose SHIFT+encoder to scroll a list have no
+-- structural signature and are not marked. That is intended -- the mark means
+-- "SHIFT changes what the sub display shows", not "SHIFT does something".
+function ViewControl:hasShiftLayer()
+  if self.id == "header" then
+    return false
+  end
+  return self.shiftPressed ~= nil
+end
+
+function ViewControl:refreshShiftLayerMark()
+  local Settings = require "Settings"
+  local wanted = Settings.get("showShiftLayerHints") == true and
+                     self:hasShiftLayer()
+  if wanted then
+    if self.shiftLayerMark == nil then
+      local Drawings = require "Drawings"
+      local graphic = app.Drawing(0, 0, app.SECTION_PLY, 64)
+      graphic:add(Drawings.Control.ShiftLayer)
+      self.controlGraphic:addChildOnce(graphic)
+      -- Hold the Lua reference or the Drawing is collected out from under the
+      -- C++ child list (same reason createPinMark keeps self.pinMark).
+      self.shiftLayerMark = graphic
+    end
+    self.shiftLayerMark:show()
+  elseif self.shiftLayerMark then
+    self.shiftLayerMark:hide()
+  end
+end
+
+function ViewControl:onShiftLayerHintsChanged()
+  self:refreshShiftLayerMark()
+end
+
+-- Resolved here rather than in init() because a control has no parent while it
+-- is being constructed; onInsert runs from Unit/Section.lua after the parent is
+-- attached. Habitat overrides onInsert zero times across 12 packages.
+function ViewControl:onInsert()
+  local Signal = require "Signal"
+  Signal.weakRegister("onShiftLayerHintsChanged", self)
+  self:refreshShiftLayerMark()
+end
+
 function ViewControl:onPinned()
   if self.pinCount == 0 then
     if self.pinMark == nil then

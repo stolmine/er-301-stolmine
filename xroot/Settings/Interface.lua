@@ -85,6 +85,12 @@ menuItems[#menuItems + 1] = {
   "addVariable",
   "containerUnitNameGen"
 }
+-- [stol:control-shift-subdisplay-indicator] Discoverability mark for controls
+-- whose sub display changes under SHIFT. Off by default; see Settings/init.lua.
+menuItems[#menuItems + 1] = {
+  "addVariable",
+  "showShiftLayerHints"
+}
 menuItems[#menuItems + 1] = {
   "addCategory",
   "Unit Picker"

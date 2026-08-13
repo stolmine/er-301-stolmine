@@ -50,4 +50,23 @@ x:hline(0, 8, 4)
 x:vline(4, 0, 8)
 Drawings.Control.Plus = x
 
+-- [stol:control-shift-subdisplay-indicator] "There is another sub display
+-- under this control, hold SHIFT to see it." Two short bars, the lower one
+-- dimmer and offset down-right, reading as a card peeking out from under
+-- another. Sits in the TOP-LEFT of the control ply. y grows UPWARD here
+-- (verified in the emu: y=3 lands on the label row, y=60 at the top edge), so
+-- these y values keep the mark clear of the label text at the bottom, while
+-- Control.Pin's ply-7..ply-3 keeps it clear of the pin at top-RIGHT, and
+-- so a control can carry both marks at once. Drawn, not appended to the
+-- label: control labels serialize into pin-set/scene files and into DSP
+-- parameter names (Unit/ViewControl/Fader.lua getPinControl -> PinView/
+-- Fader.lua -> PinView/PinSet.lua), so a glyph in the label string would
+-- leak out of the display layer entirely.
+x = app.DrawingInstructions()
+x:color(app.WHITE)
+x:hline(2, 8, 60)
+x:color(app.GRAY7)
+x:hline(4, 10, 58)
+Drawings.Control.ShiftLayer = x
+
 return Drawings

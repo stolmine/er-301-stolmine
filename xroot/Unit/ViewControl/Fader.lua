@@ -118,6 +118,8 @@ function Fader:setScopeTarget(monitor)
 end
 
 function Fader:onInsert()
+  -- Chain: the base onInsert is no longer a no-op (shift-layer mark).
+  Base.onInsert(self)
   if not self.hasMonitor then
     self:setScopeTarget(self.parent)
   end
