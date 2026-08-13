@@ -193,7 +193,12 @@ local defaults = {
   -- package has to declare anything and third-party packages are covered too.
   showShiftLayerHints = {
     category = "Units",
-    description = "Mark controls with a SHIFT sub display?",
+    -- Starts with "Show" both to match the sibling rows ("Show favorites in unit
+    -- browser?", "Show section dividers in dense picker?") and because a leading
+    -- "M" renders a pixel left of every other row: consolas10 gives M xoffset=0
+    -- while N/S/U/D get xoffset=1, so an M-initial description breaks the visual
+    -- left edge of the settings list.
+    description = "Show SHIFT sub-display marks?",
     value = false,
     onSet = function()
       local Signal = require "Signal"
