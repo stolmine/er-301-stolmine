@@ -6,8 +6,53 @@ its modulation.*
 
 ## CURRENT STATE (2026-08-13) — resume here
 
-**Status: designed and reviewed, NOT implemented. No code written.** Nothing in
-this plan has been built; the repo is untouched by it.
+**Status: partially implemented. Promotion is NOT yet usable end to end.**
+Picking `promote` today opens the ancestor picker, creates the inert macro on the
+chosen unit, then immediately **rolls it back** and flashes "transplant not
+implemented yet". That is deliberate: with the commit path missing, rolling back
+is what stops a half-promoted patch escaping. Suite was 46/46 green at the last
+commit.
+
+### Landed
+
+| step | what | where | test |
+|---|---|---|---|
+| Phase 1 | `scaling` joins the GainBias customization path | `GainBias.lua` (`customKeys`, `customize`, `getCustomizableValue`, `setFaderScaling` now records `self.faderScaling` because `od::Fader` has no getter) | `tests/emu/67` |
+| Step 2 | discriminator + menu gating, all four preconditions in one choke point | `xroot/Unit/Promote.lua` (`isPromotableControl`, `ancestorsOf`, `check`) + the `promote` entry in `Unit/ViewControl/init.lua` | `tests/emu/68` |
+| Step 3a | ancestor picker | `xroot/Unit/PromoteTargetView.lua` | none yet (UI) |
+| Step 3b | inert macro create + rollback | `Promote.createInertMacro` / `Promote.rollback` | `tests/emu/69` |
+| fix | `removeControlBranch` leaked a running branch and a stale `unit.branches` entry | `Unit/Section.lua` | covered by `69`'s create/cancel loop |
+
+Commits: `eb37399` (Phase 1), `4c86577` (steps 2 + 3a/3b + the fix).
+
+### Resume here — remaining work, in order
+
+1. **Placement.** After `createInertMacro`, hold the macro under the cursor:
+   encoder drives `moveControl` (`Section.lua:160`), ENTER commits, CANCEL calls
+   `Promote.rollback`. `Unit.Editor` is a *separate screen* (entered at
+   `Unit/Section.lua:59`) built from `ItemHeader` proxies, so its screen is not
+   reusable in place — only its `moveControl` call is.
+2. **Transplant**, §5. Replace the rollback-and-flash in `Promote.begin`'s
+   callback with the real commit. **This is the riskiest step in the whole plan**
+   (post-queue drain order, non-polymorphic dispatch, audio-frame interleaving —
+   all three at once). Start fresh on it rather than tacking it onto a long
+   session.
+3. **Scene clear**, §6, three-part.
+4. Plan tests 9-11 (cancel leaves the patch byte-identical; quicksave round-trip
+   with a promoted macro; scene delta cleared and still absent after a quicksave).
+
+### Deviation from this plan, already made
+
+`createInertMacro` snapshots the origin's display attributes under `pcall` per
+key. A blanket copy threw on Test Osc's `freq`, whose `freqGain` map has no
+`superCoarseStep`. So **"matching in every respect" is best-effort per
+attribute**, not unconditional as §3 and §4 imply — an attribute that cannot be
+read is one the macro does not inherit. Cosmetic shortfall, not a correctness
+problem, but the plan overstated it.
+
+---
+
+## ORIGINAL PLAN (design + review history below)
 
 Three adversarial review passes against the source were run during design. Passes
 1 and 2 each found real blockers (listed under the revision note below); pass 3
