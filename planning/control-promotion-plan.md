@@ -20,7 +20,7 @@ on a real patch — only programmatically from the test harness.
 | Step 2 | discriminator + menu gating, all four preconditions in one choke point | `xroot/Unit/Promote.lua` (`isPromotableControl`, `ancestorsOf`, `check`) + the `promote` entry in `Unit/ViewControl/init.lua` | `tests/emu/68` |
 | Step 3a | ancestor picker | `xroot/Unit/PromoteTargetView.lua` | none (UI) |
 | Step 3b | inert macro create + rollback | `Promote.createInertMacro` / `Promote.rollback` | `tests/emu/69` |
-| Step 4 | placement — macro held under the cursor, encoder walks it along the strip | `xroot/Unit/PromotePlacement.lua` + `UnitSection:moveControlFollowingCursor` | `tests/emu/70`, `75` |
+| Step 4 | placement — a proxy screen; encoder walks a name panel along a row of name panels | `xroot/Unit/PromotePlaceView.lua` | `tests/emu/70`, `75` |
 | Step 5 | transplant | `Promote.commit` | `tests/emu/71`, `72`, `74` |
 | Step 6 | three-part scene clear | `clearSceneState` in `Promote.lua` | `tests/emu/73` |
 | fix | `removeControlBranch` leaked a running branch and a stale `unit.branches` entry | `Unit/Section.lua` | covered by `69`'s create/cancel loop |
@@ -50,14 +50,38 @@ attribute**, not unconditional as §3 and §4 imply — an attribute that cannot
 read is one the macro does not inherit. Cosmetic shortfall, not a correctness
 problem, but the plan overstated it.
 
-**Placement needed a cursor-following rebuild that the plan did not anticipate.**
-`moveControl` posts an *unfocused* `rebuildView`, which regenerates every spot
-handle while the cursor still holds the old one, so `enableSelection` falls back
-to `selectLast` and the cursor jumps to the end of the chain mid-gesture.
-`UnitSection:moveControlFollowingCursor` posts a *focused* rebuild under the same
-trigger key, which replaces the unfocused one rather than adding a second.
-`Promote.rollback` uses the same mechanism to park the cursor on the target
-unit's header, since cancelling deletes the control the cursor was sitting on.
+**§7 was wrong about placement, and the bench proved it.** The plan said to move
+the real control on the target unit's own strip, and rejected the Editor screen
+because it shows `ItemHeader` proxies rather than the controls themselves. That
+reasoning had it backwards. Shipped in-place first; the bench report (2026-08-13)
+was that it *"appears the control has already been placed, and we are able to
+focus nav on the gainbias itself before placement has actually occurred — if we
+move the enc after focusing fader in this state, the promoted control simply
+disappears."* Proxies are the right medium precisely **because** they are not the
+control: there is nothing real to mistake for a finished promotion, and nothing
+focusable. `xroot/Unit/PromotePlaceView.lua` is the Editor's list shape with the
+macro as one more panel, and the encoder walks it.
+
+Two consequences, both improvements rather than side effects:
+
+- **Nothing is created until ENTER.** §7's whole "create it inert so CANCEL has a
+  real rollback boundary" argument is moot — the macro is built at commit, at the
+  chosen slot. `createInertMacro` and `rollback` survive for the one case that
+  still needs them: a commit that refuses after the macro exists.
+- **The stranded-shadow bug class is gone.** In-place placement shadowed handlers
+  on the macro's own `ViewControl` to steal the encoder, so a placement outliving
+  its gesture left a booby-trapped fader that walked down the strip when you
+  turned the encoder to adjust its bias. Fixed once (cursor-leave ends placement,
+  plus self-healing shadows, `035ed1c`) and then deleted wholesale with the
+  in-place screen. A separate window overrides its own methods and needs none of
+  it.
+
+**`UnitSection:rebuildViewFollowingControl`** is what survives of that work. A
+plain rebuild regenerates every spot handle while the cursor still holds the old
+one, so `enableSelection` falls back to `selectLast` and the cursor jumps to the
+end of the chain. It posts a *focused* rebuild under the same trigger key as the
+unfocused one it replaces. Used to park the cursor after a rollback deletes the
+control it was on, and to land on the new macro after a successful commit.
 
 **§9 test 10's "byte-identical" needs one qualification.** `tests/emu/75`
 compares the target unit's full serialized form across a create/cancel cycle, but
