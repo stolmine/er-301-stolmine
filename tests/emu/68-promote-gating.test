@@ -1,0 +1,49 @@
+# [stol:promote-control-to-top-level] Step 2 of the plan: the discriminator and
+# the menu entry's gating. Nothing is promoted here -- Promote.begin is still a
+# stub -- this proves ONLY that the entry appears exactly when it should.
+#
+# The gating is the part most likely to be got wrong silently, because a menu
+# entry that appears on a control it must not act on looks fine until someone
+# picks it. Four preconditions, all owned by Promote.check:
+#   exact-metatable control class / at least one ancestor / not scene authoring /
+#   not scene engaged.
+
+frames 20
+
+# A top-level Test Osc: promotable CLASS, but no ancestor to promote to, so the
+# entry must be absent. This is the case a naive class-only check would offer.
+lua local F=require('Unit.Factory'); local t=F.getUnitsByLibrary('builtins'); for _,u in ipairs(t) do if (u.title or u.moduleName)=='Test Osc' then require('Channels').getChain(1):loadUnit(u) end end
+frames 60
+!assert require('Unit.Promote').isPromotableControl(require('Channels').getChain(1):getUnit(1).controls.freq) == true
+!assert #require('Unit.Promote').ancestorsOf(require('Channels').getChain(1):getUnit(1).controls.freq) == 0
+!assert require('Unit.Promote').check(require('Channels').getChain(1):getUnit(1).controls.freq, true) == false
+!assert (function() for _,e in ipairs(require('Channels').getChain(1):getUnit(1).controls.freq:getFloatingMenuItems()) do if e=='promote' then return false end end return true end)()
+
+# Non-GainBias controls are rejected on class alone. `scope` is an OutputScope,
+# `header` a Header -- neither has bias/gain semantics.
+!assert require('Unit.Promote').isPromotableControl(require('Channels').getChain(1):getUnit(1).controls.scope) == false
+!assert require('Unit.Promote').isPromotableControl(require('Channels').getChain(1):getUnit(1).controls.header) == false
+
+# Now nest: a Custom Effect containing a Test Osc. The inner osc's controls gain
+# exactly one ancestor (the container), so the entry appears.
+lua require('Channels').getChain(1):clear()
+frames 20
+lua local F=require('Unit.Factory'); local t=F.getUnitsByLibrary('builtins'); for _,u in ipairs(t) do if (u.title or u.moduleName)=='Custom Effect' then require('Channels').getChain(1):loadUnit(u) end end
+frames 60
+lua (function() local c=require('Channels').getChain(1):getUnit(1) local F=require('Unit.Factory') for _,u in ipairs(F.getUnitsByLibrary('builtins')) do if (u.title or u.moduleName)=='Test Osc' then c.patch:loadUnit(u) end end return 'ok' end)()
+frames 60
+!assert require('Channels').getChain(1):getUnit(1).patch:length() == 1
+
+# The ancestor walk finds the container, and only the container.
+!assert #require('Unit.Promote').ancestorsOf(require('Channels').getChain(1):getUnit(1).patch:getUnit(1).controls.freq) == 1
+!assert require('Unit.Promote').ancestorsOf(require('Channels').getChain(1):getUnit(1).patch:getUnit(1).controls.freq)[1] == require('Channels').getChain(1):getUnit(1)
+
+# ...so the entry is now offered on the nested control.
+!assert require('Unit.Promote').check(require('Channels').getChain(1):getUnit(1).patch:getUnit(1).controls.freq, true) == true
+!assert (function() for _,e in ipairs(require('Channels').getChain(1):getUnit(1).patch:getUnit(1).controls.freq:getFloatingMenuItems()) do if e=='promote' then return true end end return false end)()
+
+# The container's OWN controls still have no ancestor above them, so no entry --
+# guards against the walk accidentally including the origin's own unit.
+!assert #require('Unit.Promote').ancestorsOf(require('Channels').getChain(1):getUnit(1).controls.meter) == 0
+
+quit

@@ -1,0 +1,44 @@
+# [stol:promote-control-to-top-level] Step 3 (partial): the inert-macro create
+# and its rollback -- the cancel boundary the plan's §7 depends on.
+#
+# A macro created inert has the right type, name, view placement and display, but
+# nothing wired and an empty branch, so it is silent and droppable with no trace.
+# Rolling it back must leave the target unit exactly as it was, INCLUDING after a
+# create/cancel/create loop (removeControlBranch used to leak a running branch and
+# a stale unit.branches entry; both are fixed in Unit/Section.lua).
+
+frames 20
+lua local F=require('Unit.Factory'); local t=F.getUnitsByLibrary('builtins'); for _,u in ipairs(t) do if (u.title or u.moduleName)=='Custom Effect' then require('Channels').getChain(1):loadUnit(u) end end
+frames 60
+lua (function() local c=require('Channels').getChain(1):getUnit(1) local F=require('Unit.Factory') for _,u in ipairs(F.getUnitsByLibrary('builtins')) do if (u.title or u.moduleName)=='Test Osc' then c.patch:loadUnit(u) end end return 'ok' end)()
+frames 60
+
+# Baseline: the container's control + branch counts before any promotion.
+lua (function() local u=require('Channels').getChain(1):getUnit(1) local n=0 for _ in pairs(u.controls) do n=n+1 end local b=0 for _ in pairs(u.branches) do b=b+1 end _G.__base={n,b} return n..','..b end)()
+
+# Create the inert macro on the container from the nested osc's freq control.
+lua (function() local P=require('Unit.Promote') local origin=require('Channels').getChain(1):getUnit(1).patch:getUnit(1).controls.freq local target=require('Channels').getChain(1):getUnit(1) local m,name=P.createInertMacro(origin,target) _G.__name=name return name end)()
+frames 20
+
+# It exists, is a control on the target, and inherited the origin's octave scaling.
+!assert require('Channels').getChain(1):getUnit(1).controls[_G.__name] ~= nil
+!assert require('Channels').getChain(1):getUnit(1).controls[_G.__name]:getCustomizableValue('scaling') == app.octaveScaling
+
+# It is INERT: empty branch, nothing driving the origin.
+!assert require('Channels').getChain(1):getUnit(1).controlBranches[_G.__name]:length() == 0
+!assert require('Channels').getChain(1):getUnit(1).patch:getUnit(1).controls.freq.branch:getInputSource(1) == nil
+
+# Roll it back: counts return to baseline, nothing left in controls or branches.
+lua require('Unit.Promote').rollback(require('Channels').getChain(1):getUnit(1), _G.__name)
+frames 20
+!assert require('Channels').getChain(1):getUnit(1).controls[_G.__name] == nil
+!assert require('Channels').getChain(1):getUnit(1).controlBranches[_G.__name] == nil
+!assert (function() local u=require('Channels').getChain(1):getUnit(1) local n=0 for _ in pairs(u.controls) do n=n+1 end local b=0 for _ in pairs(u.branches) do b=b+1 end return n==_G.__base[1] and b==_G.__base[2] end)()
+
+# Create/cancel LOOP: three rounds must not accumulate branches. This is the case
+# the two removeControlBranch leaks multiplied.
+lua (function() local P=require('Unit.Promote') local origin=require('Channels').getChain(1):getUnit(1).patch:getUnit(1).controls.freq local target=require('Channels').getChain(1):getUnit(1) for i=1,3 do local m,name=P.createInertMacro(origin,target) P.rollback(target,name) end return 'ok' end)()
+frames 20
+!assert (function() local u=require('Channels').getChain(1):getUnit(1) local n=0 for _ in pairs(u.controls) do n=n+1 end local b=0 for _ in pairs(u.branches) do b=b+1 end return n==_G.__base[1] and b==_G.__base[2] end)()
+
+quit

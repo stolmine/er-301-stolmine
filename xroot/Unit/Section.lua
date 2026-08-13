@@ -337,9 +337,25 @@ end
 function UnitSection:removeControlBranch(id)
   local branch = self.controlBranches[id]
   if branch then
+    -- [stol:promote-control-to-top-level] Two long-standing leaks, fixed here
+    -- because promotion's CANCEL path creates and removes branches in a loop and
+    -- multiplies both. The existing Editor delete path benefits equally.
+    --
+    -- 1. stop() first. releaseResources removes only the ObjectList task
+    --    (Unit/ControlBranch/init.lua); the branch's own pChain task is removed
+    --    by Chain:onStop, which nothing was calling, so a removed branch stayed
+    --    scheduled on the audio thread.
+    -- 2. removeBranch takes a NAME, not the object (Unit/init.lua). Passing the
+    --    branch made this a silent no-op, so the dead branch stayed in
+    --    unit.branches and remained reachable by findByInstanceKey. On a
+    --    create/cancel retry, generateUniqueControlName reuses the freed name and
+    --    addBranch overwrites the stale entry, orphaning the old task for good.
+    if branch.stop then
+      branch:stop()
+    end
     branch:releaseResources()
     self:removeControl(id)
-    self:removeBranch(branch)
+    self:removeBranch(id)
     self.controlBranches[id] = nil
   end
 end

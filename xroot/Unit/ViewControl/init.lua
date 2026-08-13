@@ -287,6 +287,16 @@ function ViewControl:getFloatingMenuItems()
   if self.canEdit then
     t[#t + 1] = "edit"
   end
+  -- [stol:promote-control-to-top-level] Absent, not greyed, when it does not
+  -- apply. Promote.check is the single choke point for every precondition
+  -- (exact-metatable control class, at least one ancestor, scene authoring, scene
+  -- engaged); do not inline any of them here. It lives on the base rather than on
+  -- GainBias because Base.Class copies methods into subclasses, so an override
+  -- there would be inherited by the ~49 habitat GainBias subclasses this must
+  -- NOT offer -- the metatable test inside Promote.check is what excludes them.
+  if require("Unit.Promote").check(self, true) then
+    t[#t + 1] = "promote"
+  end
   if self.getPinControl then
     local chain = self:getRootChain()
     if chain and chain.isRoot then
@@ -318,6 +328,20 @@ function ViewControl:onFloatingMenuSelection(choice)
     return true
   elseif choice == "edit" then
     self:callUp("doEditControl", self)
+    return true
+  elseif choice == "promote" then
+    -- Re-check without `quiet`: the menu was built from a snapshot and the scene
+    -- state can have changed since it opened, and here we DO want the flash.
+    local Promote = require "Unit.Promote"
+    local ok, reason = Promote.check(self, false)
+    if not ok then
+      if reason then
+        local Overlay = require "Overlay"
+        Overlay.flashMainMessage(reason)
+      end
+      return true
+    end
+    Promote.begin(self)
     return true
   elseif choice == "pin to all" then
     local chain = self:getRootChain()
