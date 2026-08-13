@@ -1,0 +1,42 @@
+# [stol:promote-control-to-top-level] Phase 1 of the control-promotion plan:
+# fader `scaling` (linear / octave / decibel) joins the customization path.
+#
+# It was the one display attribute GainBias:customize could not carry, which
+# matters because promotion copies a control's display onto the macro it creates
+# via exactly this path -- without scaling, a promoted exponential cutoff fader
+# comes out linear and feels wrong.
+#
+# Fixture is Test Osc's `freq` control (button label "f0"), which ships scaling = app.octaveScaling
+# (xroot/builtins/TestOscillator.lua:109), so this also proves the value is read
+# from the live control rather than from a default.
+
+frames 20
+lua local F=require('Unit.Factory'); local t=F.getUnitsByLibrary('builtins'); for _,u in ipairs(t) do if (u.title or u.moduleName)=='Test Osc' then require('Channels').getChain(1):loadUnit(u) end end
+frames 60
+!assert require('Channels').getChain(1):length() == 1
+
+# 1. `scaling` is now a customizable key at all.
+!assert (function() for _,k in ipairs(require('Channels').getChain(1):getUnit(1).controls.freq:getCustomizableKeys()) do if k=='scaling' then return true end end return false end)()
+
+# 2. It reads back the control's REAL scaling, not a default. f0 is octave.
+!assert require('Channels').getChain(1):getUnit(1).controls.freq:getCustomizableValue('scaling') == app.octaveScaling
+
+# 3. A sibling that never set scaling reports linear, so this is not just
+#    returning a constant.
+!assert require('Channels').getChain(1):getUnit(1).controls.phase:getCustomizableValue('scaling') == app.linearScaling
+
+# 4. customize() applies it. Uses the enum's ZERO member deliberately:
+#    app.linearScaling == 0, so a truthiness guard in customize would drop it.
+lua require('Channels').getChain(1):getUnit(1).controls.freq:customize{ scaling = app.linearScaling }
+!assert require('Channels').getChain(1):getUnit(1).controls.freq:getCustomizableValue('scaling') == app.linearScaling
+
+# 5. ...and back again, to a non-zero member.
+lua require('Channels').getChain(1):getUnit(1).controls.freq:customize{ scaling = app.decibelScaling }
+!assert require('Channels').getChain(1):getUnit(1).controls.freq:getCustomizableValue('scaling') == app.decibelScaling
+
+# 6. It round-trips through serialize/deserialize, which is what carries a
+#    promoted macro's display across a quicksave.
+lua (function() local c=require('Channels').getChain(1):getUnit(1).controls.freq local t=c:serialize() c:customize{ scaling = app.linearScaling } c:deserialize(t) return tostring(c:getCustomizableValue('scaling')) end)()
+!expect ^ok 2$
+
+quit

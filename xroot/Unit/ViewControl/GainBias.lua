@@ -26,7 +26,12 @@ local customKeys = {
   "name",
   "description",
   "biasUnits",
-  "biasPrecision"
+  "biasPrecision",
+  -- [stol:promote-control-to-top-level] Fader scaling (linear / octave /
+  -- decibel) was the one display attribute the customization path could not
+  -- carry. It is what makes an exponential cutoff fader feel right, so a macro
+  -- promoted from one has to inherit it or the copy is linear and wrong.
+  "scaling"
 }
 local isGainMapProperty = {}
 local isBiasMapProperty = {}
@@ -283,6 +288,12 @@ function GainBias:customize(args)
   if args.biasPrecision then
     self:setBiasPrecision(args.biasPrecision)
   end
+  -- [stol:promote-control-to-top-level] `~= nil` rather than truthiness: the
+  -- enum's first member app.linearScaling is 0, which is truthy in Lua today but
+  -- this reads correctly regardless and survives an enum reordering.
+  if args.scaling ~= nil then
+    self:setFaderScaling(args.scaling)
+  end
 
   if refreshBiasMap then
     local map = self.privateBiasMap
@@ -340,6 +351,8 @@ function GainBias:getCustomizableValue(key)
     return self.bias:getUnits()
   elseif key == "biasPrecision" then
     return self:getBiasPrecision()
+  elseif key == "scaling" then
+    return self.faderScaling or app.linearScaling
   elseif key == "biasMin" then
     return self:getBiasMap():min()
   elseif key == "biasMax" then
@@ -594,7 +607,11 @@ function GainBias:setGain(x)
 end
 
 function GainBias:setFaderScaling(scaling)
-  self.fader:setScaling(scaling or app.linearScaling)
+  -- [stol:promote-control-to-top-level] Remember the value. od::Fader keeps
+  -- mScaling private with no getter (od/graphics/controls/Fader.h:70), so this
+  -- field is the only readable source for getCustomizableValue("scaling").
+  self.faderScaling = scaling or app.linearScaling
+  self.fader:setScaling(self.faderScaling)
 end
 
 function GainBias:setTextBelow(value, text)
