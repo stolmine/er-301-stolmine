@@ -187,6 +187,32 @@ function UnitSection:moveControl(id, viewName, newPosition, currentPosition)
   end
 end
 
+-- [stol:promote-control-to-top-level] moveControl plus a rebuild that keeps the
+-- cursor on the control being moved.
+--
+-- moveControl posts an UNFOCUSED rebuildView keyed by this section. Posting a
+-- second task under the SAME key replaces it (Application's pendingTriggers is a
+-- map, Application.lua:256-260), so exactly one rebuild still runs per frame and
+-- it re-selects the control. Without this the rebuild regenerates every spot
+-- handle while the cursor still holds the old one, and enableSelection falls
+-- back to selectLast -- the cursor jumps to the end of the chain mid-gesture.
+function UnitSection:moveControlFollowingCursor(id, viewName, newPosition,
+                                                currentPosition)
+  self:moveControl(id, viewName, newPosition, currentPosition)
+  self.cursorFollowControl = self.controls[id]
+  self.cursorFollowView = viewName
+  local Application = require "Application"
+  Application.postTrigger(self, "rebuildViewFollowingCursor")
+end
+
+function UnitSection:rebuildViewFollowingCursor()
+  local control = self.cursorFollowControl
+  local viewName = self.cursorFollowView
+  self.cursorFollowControl = nil
+  self.cursorFollowView = nil
+  self:rebuildView(viewName, control, 1)
+end
+
 function UnitSection:renameControl(oldName, newName)
   local controls = self.controls
   local control = controls[oldName]

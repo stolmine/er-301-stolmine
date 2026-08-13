@@ -153,9 +153,12 @@ function Promote.rollback(targetUnit, name)
   end
 end
 
--- Step 3 of the plan's build order: pick an ancestor, then create the macro inert
--- and hand off to placement. Steps 4 (transplant) and 5 (scene clear) are not
--- wired yet; commit currently rolls back so no half-promoted state can escape.
+-- Pick an ancestor, create the macro inert, place it, then commit.
+--
+-- The whole gesture is a chain of callbacks rather than a single function
+-- because each stage is a UI window the user can walk away from. Every exit
+-- before the commit leaves the patch exactly as it was: the picker mutates
+-- nothing, and placement operates on a macro that is inert until commit wires it.
 function Promote.begin(control)
   local ok, reason = Promote.check(control, false)
   if not ok then
@@ -169,11 +172,28 @@ function Promote.begin(control)
   local PromoteTargetView = require "Unit.PromoteTargetView"
   local view = PromoteTargetView(control, ancestors, function(targetUnit)
     local macro, name = Promote.createInertMacro(control, targetUnit)
-    -- NOT YET IMPLEMENTED: placement (plan §7 step 4) and commit (§5 transplant
-    -- + §6 scene clear). Until those land, roll the inert macro straight back so
-    -- the patch is never left in a half-promoted state.
-    Promote.rollback(targetUnit, name)
-    require("Overlay").flashMainMessage("Promote: transplant not implemented yet.")
+    local Placement = require "Unit.PromotePlacement"
+    local started = Placement.begin{
+      unit = targetUnit,
+      control = macro.control,
+      onCommit = function()
+        -- NOT YET IMPLEMENTED: the transplant (plan §5) and the scene clear
+        -- (§6). Until those land, roll the inert macro straight back so the
+        -- patch is never left in a half-promoted state.
+        Promote.rollback(targetUnit, name)
+        require("Overlay").flashMainMessage(
+            "Promote: transplant not implemented yet.")
+      end,
+      onCancel = function()
+        Promote.rollback(targetUnit, name)
+      end
+    }
+    if not started then
+      -- reveal() failed, so there is no window to place on and no way for the
+      -- user to reach the macro's CANCEL. Drop it rather than strand it.
+      Promote.rollback(targetUnit, name)
+      require("Overlay").flashMainMessage("Promote: cannot reach that unit.")
+    end
   end)
   view:show()
 end
