@@ -1,0 +1,68 @@
+# [stol:promote-control-to-top-level] Plan test 10: CANCEL leaves the patch
+# byte-identical.
+#
+# The whole gesture is built around one guarantee -- nothing irreversible happens
+# until ENTER -- and that guarantee is worth exactly as much as this test. The
+# macro is created REAL (a control branch, registered, placed in a view, started)
+# and merely inert, because no ghost-control class exists and a GainBias
+# hard-errors without a branch. So "no trace" is a claim about cleanup, not about
+# having never touched anything.
+#
+# Counting controls and branches, as test 69 does, is too weak to back it: a
+# leftover entry in a view's control list, a stale customization, or a renamed
+# control all keep the counts right. This compares the unit's full serialized
+# form before and after, which is the same form the patch is saved in.
+
+frames 20
+lua local F=require('Unit.Factory'); local t=F.getUnitsByLibrary('builtins'); for _,u in ipairs(t) do if (u.title or u.moduleName)=='Custom Effect' then require('Channels').getChain(1):loadUnit(u) end end
+frames 60
+lua (function() local c=require('Channels').getChain(1):getUnit(1) local F=require('Unit.Factory') for _,u in ipairs(F.getUnitsByLibrary('builtins')) do if (u.title or u.moduleName)=='Test Osc' then c.patch:loadUnit(u) end end return 'ok' end)()
+frames 60
+lua (function() _G.__unit=function() return require('Channels').getChain(1):getUnit(1) end _G.__origin=function() return require('Channels').getChain(1):getUnit(1).patch:getUnit(1).controls.freq end return 'ok' end)()
+
+# Deterministic deep dump: keys sorted by their string form, so two structurally
+# identical tables always render to the same string regardless of pairs() order.
+#
+# "Internal Phase" is skipped. It is the free-running phase accumulator of an
+# oscillator, so it advances every frame whether or not anything is promoted --
+# including during the frames this test spends creating and cancelling. It is
+# runtime state that happens to be serialized, not patch structure, and leaving
+# it in makes the comparison measure elapsed time instead of residue.
+lua (function() _G.__volatile={['Internal Phase']=true} _G.__dump=function(t) if type(t)~='table' then return tostring(t) end local ks={} for k,v in pairs(t) do if not _G.__volatile[k] then ks[#ks+1]={tostring(k),v} end end table.sort(ks,function(a,b) return a[1]<b[1] end) local o={} for _,e in ipairs(ks) do o[#o+1]=e[1]..'='.._G.__dump(e[2]) end return '{'..table.concat(o,',')..'}' end return 'ok' end)()
+
+# Give the origin a non-default value and a modulator, so the snapshot has
+# something to be wrong about.
+lua (function() local o=_G.__origin() o.bias:getParameter():hardSet(440) o.gain:getParameter():hardSet(0.25) return 'ok' end)()
+lua (function() local b=_G.__origin().branch local F=require('Unit.Factory') for _,u in ipairs(F.getUnitsByLibrary('builtins')) do if (u.title or u.moduleName)=='Test Osc' then b:loadUnit(u) end end return 'ok' end)()
+frames 60
+lua (function() _G.__before=_G.__dump(_G.__unit():serialize()) return #_G.__before end)()
+!assert #_G.__before > 100
+
+# Create the inert macro, place it, walk it around, then CANCEL.
+lua (function() local P=require('Unit.Promote') local m,n=P.createInertMacro(_G.__origin(),_G.__unit()) _G.__name=n _G.__macro=m require('Unit.PromotePlacement').begin{unit=_G.__unit(),control=m.control,onCancel=function() P.rollback(_G.__unit(),n) end} return 'ok' end)()
+frames 20
+lua (function() local c=_G.__macro.control for i=1,4 do c:encoder(-4,false) end return 'ok' end)()
+frames 20
+lua (function() _G.__macro.control:cancelReleased(false) return 'ok' end)()
+frames 60
+
+!assert require('Unit.PromotePlacement').isActive() == false
+!assert _G.__unit().controls[_G.__name] == nil
+
+# The origin never moved: still its own value, still its own modulation.
+!assert math.abs(_G.__origin().bias:getParameter():target() - 440) < 1e-4
+!assert math.abs(_G.__origin().gain:getParameter():target() - 0.25) < 1e-4
+!assert _G.__origin().branch:length() == 1
+!assert _G.__origin().branch:getInputSource(1) == nil
+
+# The real assertion: the unit serializes to exactly what it did before.
+lua (function() _G.__after=_G.__dump(_G.__unit():serialize()) return #_G.__after end)()
+!assert _G.__after == _G.__before
+
+# And a create/cancel LOOP still leaves it identical -- the case where the two
+# removeControlBranch leaks used to accumulate.
+lua (function() local P=require('Unit.Promote') for i=1,3 do local m,n=P.createInertMacro(_G.__origin(),_G.__unit()) require('Unit.PromotePlacement').begin{unit=_G.__unit(),control=m.control,onCancel=function() P.rollback(_G.__unit(),n) end} m.control:cancelReleased(false) end return 'ok' end)()
+frames 60
+!assert _G.__dump(_G.__unit():serialize()) == _G.__before
+
+quit

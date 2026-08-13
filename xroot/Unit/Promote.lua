@@ -150,7 +150,156 @@ end
 function Promote.rollback(targetUnit, name)
   if targetUnit and name then
     targetUnit:removeControlBranch(name)
+    -- The cursor was sitting ON the macro during placement, so removing it
+    -- leaves the selection pointing at a spot handle that the next rebuild
+    -- regenerates out of existence; enableSelection then falls back to
+    -- selectLast and the cursor jumps to the end of the chain. Park it on the
+    -- target unit's header instead, which is where the user's attention is.
+    local header = targetUnit.controls and targetUnit.controls.header
+    if header and targetUnit.rebuildViewFollowingControl then
+      targetUnit:rebuildViewFollowingControl("expanded", header)
+    end
   end
+end
+
+local function biasParamOf(control)
+  return control.bias and control.bias:getParameter()
+end
+
+local function gainParamOf(control)
+  return control.gain and control.gain:getParameter()
+end
+
+-- Drop the promoted control out of every scene, completely. Plan §6.
+--
+-- Three steps, not one. Scene:setDelta touches only `deltas`; the live
+-- Parameter lives in `params` and Scene:_syncDeltasFromParams copies params
+-- BACK into deltas before every serialize and every countDeltas
+-- (SceneView/Scene.lua), so clearing the delta alone means the delta is
+-- resurrected at the next quicksave. Root:exitSceneAuthoring does all three and
+-- is the precedent this follows.
+--
+-- Read `root.sceneView` directly rather than getSceneView(): the latter creates
+-- the container lazily, so asking through it would manufacture scene state for a
+-- patch that has never had any.
+--
+-- Why this is necessary at all: a delta is an absolute target for the control's
+-- BIAS parameter. Promotion sets that bias to 0, so a surviving delta would drag
+-- the origin back to its old value the moment the scene is recalled, and the
+-- patch would read roughly 2B. Scoped, honest loss: that one control stops
+-- moving in every scene, every other control's scene data is untouched.
+local function clearSceneState(origin)
+  local unit = origin.parent
+  if unit == nil or unit.getInstanceKey == nil then
+    return
+  end
+  local root = unit.getRootChain and unit:getRootChain()
+  if root == nil or root.sceneView == nil then
+    return
+  end
+  local unitKey = unit:getInstanceKey()
+  local ctrlId = origin.id
+  if unitKey == nil or ctrlId == nil then
+    return
+  end
+  for i = 1, root.sceneView:getSceneCount() do
+    local scene = root.sceneView:getScene(i)
+    if scene then
+      scene:setDelta(unitKey, ctrlId, nil)
+      local params = scene.params and scene.params[unitKey]
+      if params then
+        params[ctrlId] = nil
+        if next(params) == nil then
+          scene.params[unitKey] = nil
+        end
+      end
+    end
+  end
+  -- A guaranteed no-op here, because rebuildSceneMorph early-returns unless a
+  -- scene is engaged and Promote.check refuses promotion while engaged. Kept so
+  -- the sequence stays correct if that refusal is ever relaxed. Do NOT read this
+  -- as "the rebuild handles the engaged case" -- it does not; the morpher's base
+  -- snapshot is what drives an engaged scene, not the delta.
+  if root.rebuildSceneMorph then
+    root:rebuildSceneMorph()
+  end
+end
+
+-- The transplant. Plan §5, and the riskiest part of this feature.
+--
+-- End state, for origin bias B, gain G and modulation branch F:
+--   macro  = bias B, gain G, branch F (moved wholesale)
+--   origin = bias 0, gain 1, input source = the macro's output
+-- so origin = 0 + 1*macroOut = B + G*F(S), which is what it read before.
+--
+-- Returns true, or false plus a reason.
+function Promote.commit(origin, macroBranch)
+  local Chain = require "Chain"
+  local originBranch = origin.branch
+  if originBranch == nil then
+    return false, "That control has no modulation branch."
+  end
+  -- Chain:deserialize silently DROPS the right input on a channel-count
+  -- mismatch, so refuse rather than half-transplant. Every ControlBranch type
+  -- hardcodes channelCount = 1; this guards a stereo origin branch.
+  if originBranch.channelCount ~= macroBranch.channelCount then
+    return false, "Cannot promote a multi-channel modulation branch."
+  end
+
+  local macroControl = macroBranch.control
+  local originBias, originGain = biasParamOf(origin), gainParamOf(origin)
+  local macroBias, macroGain = biasParamOf(macroControl),
+                               gainParamOf(macroControl)
+  if not (originBias and originGain and macroBias and macroGain) then
+    return false, "Missing bias/gain parameters."
+  end
+
+  local B = originBias:target()
+  local G = originGain:target()
+
+  -- Pinned to the Chain layer on BOTH sides, deliberately. A polymorphic
+  -- origin.branch:serialize() would dispatch to ControlBranch:serialize in the
+  -- chaining case (§8: promoting a control that is itself a macro), which adds
+  -- t.control, t.objects, t.id and t.type -- feeding those to deserialize would
+  -- rename the macro to the origin's name behind validateControlName's back and
+  -- overwrite the adapter params outside the B/G assignment below.
+  local payload = Chain.serialize(originBranch)
+  -- The origin branch survives still holding its own chain-level key, and
+  -- Chain:deserialize adopts whatever key the payload carries. Only this
+  -- top-level key needs stripping; the keys INSIDE are left alone on purpose.
+  payload.instanceKey = nil
+  payload.selection = nil
+
+  -- Clear FIRST, deserialize second. Instance keys are deliberately NOT
+  -- regenerated -- promotion is a move, and Chain/Clipboard suppresses
+  -- regeneration for exactly that reason; scene deltas belonging to units INSIDE
+  -- the branch are keyed by those instance keys and regenerating orphans them
+  -- permanently. Clearing first is what keeps old and new keys from coexisting,
+  -- so findByInstanceKey can never bind to the wrong one.
+  originBranch:clear()
+  Chain.deserialize(macroBranch, payload)
+
+  -- Macro takes the value BEFORE it is wired, so no frame sees the origin driven
+  -- by an unconfigured adapter.
+  macroBias:hardSet(B)
+  macroGain:hardSet(G)
+
+  -- Wiring order buys the cheaper transient. Parameter writes are not batched by
+  -- the audio-thread transaction (it covers task-list changes only), so the
+  -- audio thread can observe one frame mid-sequence:
+  --   gain 0 first  -> out = B         (unchanged)
+  --   wire          -> out = B         (unchanged, gain is 0)
+  --   bias 0        -> out = 0         (ONE-FRAME DIP -- a click)
+  --   gain 1        -> out = macroOut  (correct)
+  -- Wiring before zeroing the gain would instead give one frame of B + G*macroOut
+  -- (roughly 2B) -- a pop, and much worse on a level or a cutoff.
+  originGain:hardSet(0)
+  originBranch:setInputSource(1, macroBranch:getOutputSource(1))
+  originBias:hardSet(0)
+  originGain:hardSet(1)
+
+  clearSceneState(origin)
+  return true
 end
 
 -- Pick an ancestor, create the macro inert, place it, then commit.
@@ -177,12 +326,13 @@ function Promote.begin(control)
       unit = targetUnit,
       control = macro.control,
       onCommit = function()
-        -- NOT YET IMPLEMENTED: the transplant (plan §5) and the scene clear
-        -- (§6). Until those land, roll the inert macro straight back so the
-        -- patch is never left in a half-promoted state.
-        Promote.rollback(targetUnit, name)
-        require("Overlay").flashMainMessage(
-            "Promote: transplant not implemented yet.")
+        local done, why = Promote.commit(control, macro)
+        if not done then
+          -- The macro is still inert at this point -- commit refuses before it
+          -- touches anything -- so dropping it leaves the patch untouched.
+          Promote.rollback(targetUnit, name)
+          require("Overlay").flashMainMessage(why or "Promote failed.")
+        end
       end,
       onCancel = function()
         Promote.rollback(targetUnit, name)

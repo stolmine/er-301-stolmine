@@ -1,0 +1,65 @@
+# [stol:promote-control-to-top-level] Plan test 7: promote a promoted macro.
+#
+# Two levels of nesting, promoted twice: macro2 -> macro1 -> origin. This is the
+# case that catches a polymorphic serialize. On the SECOND promotion the origin
+# is itself a macro, so its branch is a ControlBranch rather than a plain
+# Chain.Branch -- and ControlBranch:serialize adds t.control (the customizations,
+# INCLUDING the name), t.objects (the adapter's own bias and gain), t.id and
+# t.type. Round-tripping those would rename macro2 to macro1's name behind
+# validateControlName's back and overwrite the B/G assignment. Promote.commit
+# pins both calls to the Chain layer to avoid it; this test is what notices if
+# that pin is ever removed.
+#
+# It also depends on instance keys NOT being regenerated: the origin branch's
+# serialized input source references macro1's key, which lies OUTSIDE the payload
+# and is resolved later by findByInstanceKey.
+
+frames 20
+lua local F=require('Unit.Factory'); local t=F.getUnitsByLibrary('builtins'); for _,u in ipairs(t) do if (u.title or u.moduleName)=='Custom Effect' then require('Channels').getChain(1):loadUnit(u) end end
+frames 60
+lua (function() local o=require('Channels').getChain(1):getUnit(1) local F=require('Unit.Factory') for _,u in ipairs(F.getUnitsByLibrary('builtins')) do if (u.title or u.moduleName)=='Custom Effect' then o.patch:loadUnit(u) end end return 'ok' end)()
+frames 60
+lua (function() local i=require('Channels').getChain(1):getUnit(1).patch:getUnit(1) local F=require('Unit.Factory') for _,u in ipairs(F.getUnitsByLibrary('builtins')) do if (u.title or u.moduleName)=='Test Osc' then i.patch:loadUnit(u) end end return 'ok' end)()
+frames 60
+
+lua (function() _G.__outer=function() return require('Channels').getChain(1):getUnit(1) end _G.__inner=function() return require('Channels').getChain(1):getUnit(1).patch:getUnit(1) end _G.__origin=function() return _G.__inner().patch:getUnit(1).controls.freq end return 'ok' end)()
+!assert #require('Unit.Promote').ancestorsOf(_G.__origin()) == 2
+
+lua (function() local o=_G.__origin() o.bias:getParameter():hardSet(440) o.gain:getParameter():hardSet(0.25) return 'ok' end)()
+frames 20
+
+# First promotion: origin -> inner container.
+lua (function() local P=require('Unit.Promote') local m,n=P.createInertMacro(_G.__origin(),_G.__inner()) _G.__m1=m _G.__n1=n local ok,why=P.commit(_G.__origin(),m) return tostring(ok)..','..tostring(why) end)()
+frames 60
+!assert math.abs(_G.__m1.control.bias:getParameter():target() - 440) < 1e-4
+!assert _G.__origin().branch:getInputSource(1) == _G.__m1:getOutputSource(1)
+
+# macro1 has exactly one ancestor now (the outer container), so it is promotable
+# in turn -- the self-consistency the chain depends on.
+!assert require('Unit.Promote').isPromotableControl(_G.__m1.control) == true
+!assert #require('Unit.Promote').ancestorsOf(_G.__m1.control) == 1
+!assert require('Unit.Promote').ancestorsOf(_G.__m1.control)[1] == _G.__outer()
+
+# Second promotion: macro1 -> outer container.
+lua (function() local P=require('Unit.Promote') local m,n=P.createInertMacro(_G.__m1.control,_G.__outer()) _G.__m2=m _G.__n2=n local ok,why=P.commit(_G.__m1.control,m) return tostring(ok)..','..tostring(why) end)()
+frames 60
+
+# The value walked all the way up.
+!assert math.abs(_G.__m2.control.bias:getParameter():target() - 440) < 1e-4
+!assert math.abs(_G.__m2.control.gain:getParameter():target() - 0.25) < 1e-4
+
+# macro1 is now the pass-through in the middle of the chain.
+!assert math.abs(_G.__m1.control.bias:getParameter():target() - 0) < 1e-4
+!assert math.abs(_G.__m1.control.gain:getParameter():target() - 1) < 1e-4
+
+# The full drive chain: macro2 -> macro1 -> origin.
+!assert _G.__m1.control.branch:getInputSource(1) == _G.__m2:getOutputSource(1)
+!assert _G.__origin().branch:getInputSource(1) == _G.__m1:getOutputSource(1)
+
+# macro2 was NOT renamed to macro1's name by a polymorphic deserialize, and both
+# macros still exist under the names they were created with.
+!assert _G.__outer().controls[_G.__n2] ~= nil
+!assert _G.__inner().controls[_G.__n1] ~= nil
+!assert _G.__m2.control:getCustomizableValue('name') == _G.__n2
+
+quit

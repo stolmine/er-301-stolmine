@@ -1,0 +1,55 @@
+# [stol:promote-control-to-top-level] Plan test 11: a promoted patch survives a
+# save/load round-trip.
+#
+# Promotion leaves a cross-reference that nothing else in the codebase creates
+# quite this way: the origin's modulation input is the macro's output source, and
+# the macro lives on an ANCESTOR unit -- so on load the reference points OUTWARD
+# and UPWARD, out of the origin's own subtree. It is restored by instance key
+# through findByInstanceKey, in a callback posted until after every unit exists.
+#
+# If promotion ever regenerated instance keys (it must not -- plan §5), this is
+# the test that would catch it: the patch would reload with the macro sitting
+# there disconnected and the origin silently reading 0.
+
+frames 20
+lua local F=require('Unit.Factory'); local t=F.getUnitsByLibrary('builtins'); for _,u in ipairs(t) do if (u.title or u.moduleName)=='Custom Effect' then require('Channels').getChain(1):loadUnit(u) end end
+frames 60
+lua (function() local c=require('Channels').getChain(1):getUnit(1) local F=require('Unit.Factory') for _,u in ipairs(F.getUnitsByLibrary('builtins')) do if (u.title or u.moduleName)=='Test Osc' then c.patch:loadUnit(u) end end return 'ok' end)()
+frames 60
+lua (function() _G.__root=function() return require('Channels').getChain(1) end _G.__unit=function() return require('Channels').getChain(1):getUnit(1) end _G.__origin=function() return require('Channels').getChain(1):getUnit(1).patch:getUnit(1).controls.freq end return 'ok' end)()
+
+# Dial it in, give it a modulator, promote it.
+lua (function() local o=_G.__origin() o.bias:getParameter():hardSet(440) o.gain:getParameter():hardSet(0.25) return 'ok' end)()
+lua (function() local b=_G.__origin().branch local F=require('Unit.Factory') for _,u in ipairs(F.getUnitsByLibrary('builtins')) do if (u.title or u.moduleName)=='Test Osc' then b:loadUnit(u) end end return 'ok' end)()
+frames 60
+lua (function() local P=require('Unit.Promote') local m,n=P.createInertMacro(_G.__origin(),_G.__unit()) _G.__name=n local ok,why=P.commit(_G.__origin(),m) return tostring(ok)..','..tostring(why) end)()
+frames 60
+!assert _G.__origin().branch:getInputSource(1) == _G.__unit().controlBranches[_G.__name]:getOutputSource(1)
+
+# Round-trip the whole chain through its serialized form. Every unit, control
+# branch and source is rebuilt from scratch, so the handles above are all stale
+# afterwards -- everything below is re-found by name.
+lua (function() _G.__saved=_G.__root():serialize() return 'ok' end)()
+!assert _G.__saved ~= nil
+lua (function() _G.__root():deserialize(_G.__saved) return 'ok' end)()
+frames 120
+
+# The macro came back, on the container, with the value.
+!assert _G.__unit().controls[_G.__name] ~= nil
+!assert _G.__unit().controlBranches[_G.__name] ~= nil
+!assert math.abs(_G.__unit().controls[_G.__name].bias:getParameter():target() - 440) < 1e-4
+!assert math.abs(_G.__unit().controls[_G.__name].gain:getParameter():target() - 0.25) < 1e-4
+
+# The modulation is still on the macro's branch, not back on the origin.
+!assert _G.__unit().controlBranches[_G.__name]:length() == 1
+!assert _G.__origin().branch:length() == 0
+
+# The origin is still the pass-through.
+!assert math.abs(_G.__origin().bias:getParameter():target() - 0) < 1e-4
+!assert math.abs(_G.__origin().gain:getParameter():target() - 1) < 1e-4
+
+# ...and the cross-reference resolved: the macro drives the origin again.
+!assert _G.__origin().branch:getInputSource(1) ~= nil
+!assert _G.__origin().branch:getInputSource(1) == _G.__unit().controlBranches[_G.__name]:getOutputSource(1)
+
+quit

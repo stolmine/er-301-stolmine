@@ -199,7 +199,13 @@ end
 function UnitSection:moveControlFollowingCursor(id, viewName, newPosition,
                                                 currentPosition)
   self:moveControl(id, viewName, newPosition, currentPosition)
-  self.cursorFollowControl = self.controls[id]
+  self:rebuildViewFollowingControl(viewName, self.controls[id])
+end
+
+-- Same trick, for callers that changed the view some other way and need the
+-- cursor to land somewhere specific rather than wherever selectLast falls.
+function UnitSection:rebuildViewFollowingControl(viewName, control)
+  self.cursorFollowControl = control
   self.cursorFollowView = viewName
   local Application = require "Application"
   Application.postTrigger(self, "rebuildViewFollowingCursor")

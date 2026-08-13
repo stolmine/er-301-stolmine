@@ -1,0 +1,71 @@
+# [stol:promote-control-to-top-level] Step 5 of the plan: the transplant itself.
+#
+# The whole feature turns on one claim -- that promotion does not change the
+# sound -- and that claim is arithmetic, not vibes:
+#
+#   before:  origin = B + G*F(S)
+#   after:   macro  = B + G*F(S)   (bias, gain and the whole branch moved up)
+#            origin = 0 + 1*macro
+#
+# So the assertions below are the identity, term by term: B and G land on the
+# macro, the branch's UNITS land on the macro, the origin collapses to a
+# pass-through, and the origin's modulation input is the macro's output.
+#
+# The instance-key assertion is the one that looks pedantic and is not. Promotion
+# is a MOVE, so keys must survive: scene deltas are keyed by unit instance key
+# and units INSIDE a transplanted branch can carry their own, so regenerating
+# would orphan them silently and permanently. See plan §5.
+
+frames 20
+lua local F=require('Unit.Factory'); local t=F.getUnitsByLibrary('builtins'); for _,u in ipairs(t) do if (u.title or u.moduleName)=='Custom Effect' then require('Channels').getChain(1):loadUnit(u) end end
+frames 60
+lua (function() local c=require('Channels').getChain(1):getUnit(1) local F=require('Unit.Factory') for _,u in ipairs(F.getUnitsByLibrary('builtins')) do if (u.title or u.moduleName)=='Test Osc' then c.patch:loadUnit(u) end end return 'ok' end)()
+frames 60
+lua (function() _G.__unit=function() return require('Channels').getChain(1):getUnit(1) end _G.__origin=function() return require('Channels').getChain(1):getUnit(1).patch:getUnit(1).controls.freq end return 'ok' end)()
+
+# Dial the origin in: a distinct bias and a distinct gain, so a macro that
+# silently kept its own defaults cannot pass by coincidence.
+lua (function() local o=_G.__origin() o.bias:getParameter():hardSet(440) o.gain:getParameter():hardSet(0.25) return 'ok' end)()
+frames 20
+!assert math.abs(_G.__origin().bias:getParameter():target() - 440) < 1e-4
+!assert math.abs(_G.__origin().gain:getParameter():target() - 0.25) < 1e-4
+
+# Give it real modulation: a unit living inside the origin's branch. This is the
+# part a source-only move would leave behind, changing G*F(S) into F(macroOut).
+lua (function() local b=_G.__origin().branch local F=require('Unit.Factory') for _,u in ipairs(F.getUnitsByLibrary('builtins')) do if (u.title or u.moduleName)=='Test Osc' then b:loadUnit(u) end end return 'ok' end)()
+frames 60
+!assert _G.__origin().branch:length() == 1
+lua (function() _G.__modKey=_G.__origin().branch:getUnit(1):getInstanceKey() return tostring(_G.__modKey) end)()
+!assert _G.__modKey ~= nil
+
+# Promote onto the container.
+lua (function() local P=require('Unit.Promote') local m,name=P.createInertMacro(_G.__origin(),_G.__unit()) _G.__name=name _G.__macro=m local ok,why=P.commit(_G.__origin(),m) _G.__why=why return tostring(ok)..','..tostring(why) end)()
+frames 60
+!assert _G.__why == nil
+
+# The macro holds the value, in the origin's own units.
+!assert math.abs(_G.__macro.control.bias:getParameter():target() - 440) < 1e-4
+!assert math.abs(_G.__macro.control.gain:getParameter():target() - 0.25) < 1e-4
+
+# The origin has collapsed to a pass-through: 0 + 1*macro.
+!assert math.abs(_G.__origin().bias:getParameter():target() - 0) < 1e-4
+!assert math.abs(_G.__origin().gain:getParameter():target() - 1) < 1e-4
+
+# The branch moved WHOLE. Not the source, not a copy alongside -- the units are
+# on the macro and the origin's branch is empty.
+!assert _G.__origin().branch:length() == 0
+!assert _G.__macro:length() == 1
+
+# ...and the macro drives the origin.
+!assert _G.__origin().branch:getInputSource(1) == _G.__macro:getOutputSource(1)
+
+# Keys survive the move. If this fails, scene deltas on units inside the branch
+# have been orphaned.
+!assert _G.__macro:getUnit(1):getInstanceKey() == _G.__modKey
+
+# Self-consistency: the macro is itself a plain GainBias, so it can be promoted
+# again. §8's chaining case depends on this being true.
+!assert require('Unit.Promote').isPromotableControl(_G.__macro.control) == true
+!assert #require('Unit.Promote').ancestorsOf(_G.__origin()) == 1
+
+quit

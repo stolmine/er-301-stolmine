@@ -1,0 +1,68 @@
+# [stol:promote-control-to-top-level] Plan test 9: the promoted control drops out
+# of every scene, and STAYS out.
+#
+# A scene delta is an absolute target for the control's BIAS parameter, keyed by
+# (unit instance key, control id). Promotion sets that bias to 0, so a surviving
+# delta drags the origin back to its old value the moment the scene is recalled
+# and the patch reads roughly 2B. The delta has to go.
+#
+# The subtle half is that clearing it is a THREE-part operation, not one.
+# Scene:setDelta touches only `deltas`; the live Parameter lives in `params`, and
+# Scene:_syncDeltasFromParams copies params back INTO deltas before every
+# serialize and every countDeltas. So a delta cleared without also dropping its
+# param is quietly resurrected at the next quicksave -- which is why this test
+# creates a live param first (as the morpher would) and then re-checks after a
+# serialize round-trip. A one-line setDelta(nil) fix passes the first half of
+# this test and fails the second.
+#
+# Loss must also be SCOPED: only the promoted control leaves the scene.
+
+frames 20
+lua local F=require('Unit.Factory'); local t=F.getUnitsByLibrary('builtins'); for _,u in ipairs(t) do if (u.title or u.moduleName)=='Custom Effect' then require('Channels').getChain(1):loadUnit(u) end end
+frames 60
+lua (function() local c=require('Channels').getChain(1):getUnit(1) local F=require('Unit.Factory') for _,u in ipairs(F.getUnitsByLibrary('builtins')) do if (u.title or u.moduleName)=='Test Osc' then c.patch:loadUnit(u) end end return 'ok' end)()
+frames 60
+lua (function() _G.__root=function() return require('Channels').getChain(1) end _G.__unit=function() return require('Channels').getChain(1):getUnit(1) end _G.__osc=function() return require('Channels').getChain(1):getUnit(1).patch:getUnit(1) end _G.__origin=function() return _G.__osc().controls.freq end return 'ok' end)()
+
+# A scene with deltas on two controls of the SAME unit. Only freq is promoted, so
+# only freq's delta may disappear -- level's is the scoping witness.
+lua (function() local sv=_G.__root():getSceneView() local s=sv:addScene('A') _G.__key=_G.__osc():getInstanceKey() s:setDelta(_G.__key,'freq',777) s:setDelta(_G.__key,'level',0.5) return tostring(_G.__key) end)()
+!assert _G.__root().sceneView:getSceneCount() == 1
+!assert _G.__root().sceneView:getScene(1):hasDelta(_G.__key,'freq') == true
+!assert _G.__root().sceneView:getScene(1):hasDelta(_G.__key,'level') == true
+
+# Live Parameters for both, the way the morpher creates them on engage. This is
+# what makes the resurrection path reachable at all.
+lua (function() local s=_G.__root().sceneView:getScene(1) s:getOrCreateParam(_G.__key,'freq',777) s:getOrCreateParam(_G.__key,'level',0.5) return 'ok' end)()
+!assert _G.__root().sceneView:getScene(1):getParam(_G.__key,'freq') ~= nil
+!assert _G.__root().sceneView:getScene(1):getParam(_G.__key,'level') ~= nil
+
+# Promotion is still allowed: a scene EXISTS, but none is being authored and none
+# is engaged. Those two states are refused outright (plan §6) and are covered by
+# the gating test.
+!assert require('Unit.Promote').check(_G.__origin(), true) == true
+
+lua (function() local P=require('Unit.Promote') local m,n=P.createInertMacro(_G.__origin(),_G.__unit()) _G.__macro=m local ok,why=P.commit(_G.__origin(),m) return tostring(ok)..','..tostring(why) end)()
+frames 60
+
+# freq is out of the scene, delta AND live param.
+!assert _G.__root().sceneView:getScene(1):hasDelta(_G.__key,'freq') == false
+!assert _G.__root().sceneView:getScene(1):getParam(_G.__key,'freq') == nil
+
+# level is untouched -- the loss is scoped to the control that moved.
+!assert _G.__root().sceneView:getScene(1):hasDelta(_G.__key,'level') == true
+!assert _G.__root().sceneView:getScene(1):getParam(_G.__key,'level') ~= nil
+
+# The resurrection guard. serialize() runs _syncDeltasFromParams, which is what
+# copies live params back into deltas; freq must not reappear, level must.
+lua (function() local t=_G.__root().sceneView:getScene(1):serialize() _G.__ser=t return 'ok' end)()
+!assert _G.__ser.deltas[_G.__key] == nil or _G.__ser.deltas[_G.__key]['freq'] == nil
+!assert _G.__ser.deltas[_G.__key] ~= nil and _G.__ser.deltas[_G.__key]['level'] ~= nil
+
+# Still gone after a full SceneView round-trip through the serialized form.
+lua (function() local sv=_G.__root():getSceneView() local t=sv:serialize() sv:deserialize(t) return 'ok' end)()
+frames 20
+!assert _G.__root().sceneView:getScene(1):hasDelta(_G.__key,'freq') == false
+!assert _G.__root().sceneView:getScene(1):hasDelta(_G.__key,'level') == true
+
+quit
