@@ -1780,6 +1780,28 @@
       },
       "name_resolved": true
     },
+    "Unit.PromoteTargetView": {
+      "class_var": "PromoteTargetView",
+      "file": "xroot/Unit/PromoteTargetView.lua",
+      "handlers": {
+        "cancelReleased": [
+          "dynamic"
+        ],
+        "encoder": [
+          "dynamic"
+        ],
+        "enterReleased": [
+          "dynamic"
+        ],
+        "homeReleased": [
+          "dynamic"
+        ],
+        "upReleased": [
+          "dynamic"
+        ]
+      },
+      "name_resolved": true
+    },
     "Unit.ViewControl": {
       "class_var": "ViewControl",
       "file": "xroot/Unit/ViewControl/init.lua",
