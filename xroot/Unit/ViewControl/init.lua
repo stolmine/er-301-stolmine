@@ -212,7 +212,37 @@ end
 -- No-op when the global setting is already "actual", since the readout is showing
 -- the true value anyway and "restoring" it later would silently turn the setting
 -- off for that control.
-function ViewControl:refreshPromotedReadout()
+-- A follower has to LOOK like one. Both halves of that -- the mark and the
+-- readout -- key off the same derived state, so they cannot disagree.
+function ViewControl:refreshDrivenState()
+  local driven = self:isDrivenByMacro()
+  self:refreshDrivenMark(driven)
+  self:refreshDrivenReadout(driven)
+end
+
+-- Without this the origin just looks like a control that lost its setting, which
+-- is the most confusing thing promotion does. Same lifecycle as the pin mark:
+-- built once, then shown and hidden, and the Lua reference is held or the
+-- Drawing is collected out from under the C++ child list.
+function ViewControl:refreshDrivenMark(driven)
+  if driven then
+    if self.drivenMark == nil then
+      if self.controlGraphic == nil then
+        return
+      end
+      local Drawings = require "Drawings"
+      local graphic = app.Drawing(0, 0, app.SECTION_PLY, 64)
+      graphic:add(Drawings.Control.Driven)
+      self.controlGraphic:addChildOnce(graphic)
+      self.drivenMark = graphic
+    end
+    self.drivenMark:show()
+  elseif self.drivenMark then
+    self.drivenMark:hide()
+  end
+end
+
+function ViewControl:refreshDrivenReadout(driven)
   local fader = self.fader
   if fader == nil or fader.setControlParameter == nil then
     return
@@ -221,7 +251,7 @@ function ViewControl:refreshPromotedReadout()
   if Settings.get("unitControlReadoutSource") == "actual" then
     return
   end
-  if self:isDrivenByMacro() then
+  if driven then
     if self.preMacroReadout == nil then
       local range = fader.getRangeObject and fader:getRangeObject()
       local center = range and range:getParameter("Center")

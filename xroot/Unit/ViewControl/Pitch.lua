@@ -399,7 +399,7 @@ function Pitch:contentChanged(chain)
     -- changed, which is the only thing that can make this control start or stop
     -- being driven by a macro. Fires on load too, because the restored source is
     -- assigned through this same path.
-    self:refreshPromotedReadout()
+    self:refreshDrivenState()
   end
 end
 

@@ -46,6 +46,10 @@ frames 60
 # shows it, or the user could not reach the offset the origin still owns.
 !assert _G.__origin().fader:getValueParameter() ~= _G.__center(_G.__origin())
 
+# ...and the control WEARS the fact. Without a mark it just looks like a control
+# that lost its setting, which is the most confusing thing promotion does.
+!assert rawget(_G.__origin(),'drivenMark') ~= nil
+
 # ---- it survives a reload, with nothing extra serialized --------------------
 lua (function() _G.__saved=require('Channels').getChain(1):serialize() return 'ok' end)()
 lua (function() require('Channels').getChain(1):deserialize(_G.__saved) return 'ok' end)()
@@ -60,5 +64,8 @@ lua (function() _G.__unit():removeControlBranch(_G.__name) return 'ok' end)()
 frames 60
 !assert _G.__origin():isDrivenByMacro() == false
 !assert rawget(_G.__origin(),'preMacroReadout') == nil
+
+# The mark is hidden rather than destroyed, same lifecycle as the pin mark.
+!assert rawget(_G.__origin(),'drivenMark') ~= nil
 
 quit
