@@ -3,18 +3,13 @@
 # Promotability is a claim about ARITHMETIC, not about the widget. There are
 # exactly three control-branch objects in the system:
 #
-#   ParameterAdapter   out = bias + gain*in        GainBias -> yes
-#   ConstantOffset     out = offset + in           Pitch    -> yes
-#   Comparator         threshold, mode-dependent   Gate     -> NO, nonlinear
+#   ParameterAdapter   out = bias + gain*in        GainBias
+#   ConstantOffset     out = offset + in           Pitch
+#   Comparator         threshold, mode-dependent   Gate (see test 79)
 #
 # Pitch is GainBias minus the gain term, so the same transplant works with the
 # gain steps dropped: the macro takes the offset and the branch, the origin goes
 # to offset 0 driven by the macro, and origin = 0 + macroOut = O + F(S).
-#
-# Gate is asserted OUT here as well. It is excluded on the arithmetic rather than
-# out of caution -- a toggle-mode origin re-fed from a toggle-mode macro toggles
-# on the macro's EDGES and halves the rate -- and an accidental relaxation of the
-# discriminator that let it through would be silent.
 
 frames 20
 lua local F=require('Unit.Factory'); local t=F.getUnitsByLibrary('builtins'); for _,u in ipairs(t) do if (u.title or u.moduleName)=='Custom Effect' then require('Channels').getChain(1):loadUnit(u) end end
@@ -28,10 +23,11 @@ lua (function() _G.__unit=function() return require('Channels').getChain(1):getU
 !assert require('Unit.Promote').branchTypeFor(_G.__tune()) == 'Pitch'
 !assert require('Unit.Promote').branchTypeFor(_G.__osc().controls.freq) == 'GainBias'
 
-# Gate stays out, and so does everything without a branch.
-!assert require('Unit.Promote').isPromotableControl(_G.__osc().controls.sync) == false
+# Each promotable class routes to its OWN branch type, and controls with no
+# branch at all -- scopes, meters, option pickers -- stay out.
+!assert require('Unit.Promote').branchTypeFor(_G.__osc().controls.sync) == 'Gate'
 !assert require('Unit.Promote').isPromotableControl(_G.__osc().controls.scope) == false
-!assert require('Unit.Promote').branchTypeFor(_G.__osc().controls.sync) == nil
+!assert require('Unit.Promote').branchTypeFor(_G.__osc().controls.scope) == nil
 
 # The menu offers it on the nested Pitch control.
 !assert require('Unit.Promote').check(_G.__tune(), true) == true

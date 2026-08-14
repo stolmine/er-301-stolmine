@@ -1,0 +1,87 @@
+# [stol:promote-control-to-top-level] Gate controls are promotable.
+#
+# THIS FILE EXISTS BECAUSE THE EARLIER ANALYSIS WAS WRONG. Gate was excluded from
+# promotion twice on the grounds that a Comparator is nonlinear: a toggle-mode
+# origin re-fed from a toggle-mode macro toggles on the macro's EDGES, which
+# halves the rate. That is true, and it assumes the origin KEEPS its mode. It
+# does not. Going neutral is exactly what bias 0 / gain 1 is for GainBias, and a
+# Comparator's neutral is plain GATE at threshold 0.5:
+#
+#   macro  = the origin's mode, threshold, hysteresis, inversion and live toggle
+#            state, plus the whole branch -- so it emits precisely the 0/1 signal
+#            the origin used to emit
+#   origin = GATE at 0.5, not inverted, fed by the macro -- so it passes that
+#            through unchanged
+#
+# 0.5 is the neutral threshold because Comparator::process emits exactly 0.0f or
+# 1.0f, so half way between them is the one level no signal sits near. Default
+# hysteresis 0.03 puts the edges at 0.47 and 0.53, both crossed by a 0-to-1 step.
+#
+# The assertions below are that identity: the mode, threshold and inversion move
+# up, the origin lands on the neutral triple, and the branch comes with it.
+
+frames 20
+lua local F=require('Unit.Factory'); local t=F.getUnitsByLibrary('builtins'); for _,u in ipairs(t) do if (u.title or u.moduleName)=='Custom Effect' then require('Channels').getChain(1):loadUnit(u) end end
+frames 60
+lua (function() local c=require('Channels').getChain(1):getUnit(1) local F=require('Unit.Factory') for _,u in ipairs(F.getUnitsByLibrary('builtins')) do if (u.title or u.moduleName)=='Test Osc' then c.patch:loadUnit(u) end end return 'ok' end)()
+frames 60
+lua (function() _G.__unit=function() return require('Channels').getChain(1):getUnit(1) end _G.__osc=function() return require('Channels').getChain(1):getUnit(1).patch:getUnit(1) end _G.__sync=function() return _G.__osc().controls.sync end _G.__cmp=function(c) return c.comparator end return 'ok' end)()
+
+!assert require('Unit.Promote').isPromotableControl(_G.__sync()) == true
+!assert require('Unit.Promote').branchTypeFor(_G.__sync()) == 'Gate'
+!assert require('Unit.Promote').check(_G.__sync(), true) == true
+!assert (function() for _,e in ipairs(_G.__sync():getFloatingMenuItems()) do if e=='promote' then return true end end return false end)()
+
+# Dial the origin into a state nothing could reach by accident: TOGGLE mode,
+# inverted output, an off-default threshold and hysteresis. Toggle is the mode
+# the old analysis said could not survive, so it is the one to test.
+lua (function() local o=_G.__cmp(_G.__sync()) o:setMode(app.COMPARATOR_TOGGLE) o:setOutputInversion(true) o:getParameter('Threshold'):hardSet(0.42) o:getParameter('Hysteresis'):hardSet(0.07) return 'ok' end)()
+frames 20
+!assert _G.__cmp(_G.__sync()):getMode() == app.COMPARATOR_TOGGLE
+!assert _G.__cmp(_G.__sync()):isOutputInverted() == true
+
+# A modulator in the gate's own branch, so the branch move is exercised too.
+lua (function() local b=_G.__sync().branch local F=require('Unit.Factory') for _,u in ipairs(F.getUnitsByLibrary('builtins')) do if (u.title or u.moduleName)=='Test Osc' then b:loadUnit(u) end end return 'ok' end)()
+frames 60
+!assert _G.__sync().branch:length() == 1
+lua (function() _G.__modKey=_G.__sync().branch:getUnit(1):getInstanceKey() return tostring(_G.__modKey) end)()
+
+lua (function() local P=require('Unit.Promote') local m,n=P.createInertMacro(_G.__sync(),_G.__unit()) _G.__name=n _G.__macro=m local ok,why=P.commit(_G.__sync(),m) _G.__why=why return tostring(ok)..','..tostring(why) end)()
+frames 60
+!assert _G.__why == nil
+!assert _G.__macro.control.type == 'Gate'
+
+# ---- the macro carries the behaviour ---------------------------------------
+!assert _G.__cmp(_G.__macro.control):getMode() == app.COMPARATOR_TOGGLE
+!assert _G.__cmp(_G.__macro.control):isOutputInverted() == true
+!assert math.abs(_G.__cmp(_G.__macro.control):getParameter('Threshold'):target() - 0.42) < 1e-4
+!assert math.abs(_G.__cmp(_G.__macro.control):getParameter('Hysteresis'):target() - 0.07) < 1e-4
+
+# ---- the origin is the neutral pass-through --------------------------------
+# Not "unchanged" and not "destroyed": plain GATE at 0.5, un-inverted, which is
+# the only configuration that reproduces a 0/1 input exactly.
+!assert _G.__cmp(_G.__sync()):getMode() == app.COMPARATOR_GATE
+!assert _G.__cmp(_G.__sync()):isOutputInverted() == false
+!assert math.abs(_G.__cmp(_G.__sync()):getParameter('Threshold'):target() - 0.5) < 1e-4
+
+# ---- and the branch moved whole --------------------------------------------
+!assert _G.__sync().branch:length() == 0
+!assert _G.__macro:length() == 1
+!assert _G.__macro:getUnit(1):getInstanceKey() == _G.__modKey
+!assert _G.__sync().branch:getInputSource(1) == _G.__macro:getOutputSource(1)
+
+# A promoted Gate is itself promotable, so Gate chains like the other two.
+!assert require('Unit.Promote').isPromotableControl(_G.__macro.control) == true
+
+# ---- round-trip -------------------------------------------------------------
+lua (function() _G.__saved=require('Channels').getChain(1):serialize() return 'ok' end)()
+lua (function() require('Channels').getChain(1):deserialize(_G.__saved) return 'ok' end)()
+frames 120
+!assert _G.__unit().controls[_G.__name] ~= nil
+!assert _G.__unit().controls[_G.__name].type == 'Gate'
+!assert _G.__cmp(_G.__unit().controls[_G.__name]):getMode() == app.COMPARATOR_TOGGLE
+!assert _G.__cmp(_G.__unit().controls[_G.__name]):isOutputInverted() == true
+!assert _G.__cmp(_G.__sync()):getMode() == app.COMPARATOR_GATE
+!assert _G.__sync().branch:getInputSource(1) == _G.__unit().controlBranches[_G.__name]:getOutputSource(1)
+
+quit

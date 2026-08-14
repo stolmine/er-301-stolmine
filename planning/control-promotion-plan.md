@@ -38,8 +38,8 @@ Commits: `eb37399` (Phase 1), `4c86577` (steps 2 + 3a/3b + the fix), `f835461`
    exactly the ancestors) and 8 (key uniqueness across the whole tree)** are the
    three from §9 with no direct coverage. 5 is partly covered by `68` against
    core classes only; `66` shows the habitat harness exists if it is wanted.
-3. The v2 items deliberately deferred: clamp forwarding (§4), Pitch support
-   (§2), `canMove` honoured by placement (§8).
+3. The v2 items still deferred: clamp forwarding (§4) and `canMove` honoured by
+   placement (§8). Pitch and Gate both landed, see below.
 
 ### Deviations from this plan, already made
 
@@ -49,6 +49,34 @@ blanket copy threw on Test Osc's `freq`, whose `freqGain` map has no
 attribute**, not unconditional as §3 and §4 imply — an attribute that cannot be
 read is one the macro does not inherit. Cosmetic shortfall, not a correctness
 problem, but the plan overstated it.
+
+**§2 was wrong to exclude Gate, and the correction is worth understanding.**
+The plan excluded `Gate` on the arithmetic: a `Comparator` is nonlinear, and a
+toggle-mode origin re-fed from a toggle-mode macro toggles on the macro's *edges*
+and halves the rate. That is true, and it silently assumes the origin **keeps its
+mode**. It does not. Going neutral is exactly what bias 0 / gain 1 is for
+GainBias; a Comparator's neutral is plain `GATE` at threshold `0.5`. The macro
+takes the mode, threshold, hysteresis, inversion and live toggle state, so it
+emits precisely the 0/1 signal the origin emitted; the origin passes it through.
+`0.5` is the neutral threshold because `Comparator::process` emits exactly `0.0f`
+or `1.0f`, so half way between is the one level no signal sits near. Trigger
+modes survive too — a one-sample pulse crosses 0.5 and is passed on as a
+one-sample pulse. `tests/emu/79`.
+
+Adding Gate forced the spec table to grow from "value plus optional gain" into a
+four-hook protocol per class — `capture`, `apply`, `neutralize`, `activate` —
+which is also the shape the follow-up (`promote-control-type-spec`) needs.
+Splitting `neutralize` from `activate` is what keeps the transient safe: every
+prefix of the sequence must read either the old value or silence.
+
+**Gate promotion needed one thing nothing else did: making the neutral state
+persist.** A `Comparator`'s `Mode` option is not serialized by default — a
+builtin gate takes its mode from its unit's constructor on every load. Harmless
+until promotion leaves one neutral, at which point a reload would rebuild it in
+its *original* mode and re-trigger on the macro's edges instead of passing them
+through. `neutralize` therefore calls `enableSerialization()` on the option. The
+general lesson for the follow-up: **if promotion writes a neutral state, check
+that the neutral state is actually saved.**
 
 **§7 was wrong about placement, and the bench proved it.** The plan said to move
 the real control on the target unit's own strip, and rejected the Editor screen

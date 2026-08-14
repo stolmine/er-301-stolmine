@@ -36,21 +36,147 @@ local Promote = {}
 -- Pitch to Offset (Pitch.lua). `hasGain` is what actually differs.
 local specs
 
+-- Each entry says how to build a macro for that control class and how to move
+-- the control's state onto it. Four hooks, in the order commit() runs them:
+--
+--   capture(origin)      read everything that makes the control sound as it does
+--   apply(macro, state)  put it on the macro, BEFORE the macro is wired in
+--   neutralize(origin)   make the origin a pass-through, BEFORE wiring
+--   activate(origin)     the part that must happen AFTER wiring, if any
+--
+-- Splitting neutralize from activate is what keeps the transient safe. Every
+-- prefix of the sequence has to read either the old value or silence; a step
+-- ordered wrongly gives a frame of roughly double, which is a pop rather than a
+-- click. GainBias needs its gain zeroed before wiring and restored to 1 after,
+-- so it is the only one with a non-empty activate.
+local function buildSpecs()
+  local GainBias = require "Unit.ViewControl.GainBias"
+  local Pitch = require "Unit.ViewControl.Pitch"
+  local Gate = require "Unit.ViewControl.Gate"
+
+  -- GainBias binds the fader's value parameter to Bias, Pitch to Offset. Reading
+  -- through the fader rather than a readout is what lets the two share code.
+  local function value(control)
+    return control.fader and control.fader:getValueParameter()
+  end
+  local function gain(control)
+    return control.gain and control.gain:getParameter()
+  end
+
+  return {
+    -- out = bias + gain*in
+    [GainBias] = {
+      branchType = "GainBias",
+      capture = function(c)
+        return {value = value(c):target(), gain = gain(c):target()}
+      end,
+      apply = function(c, s)
+        value(c):hardSet(s.value)
+        gain(c):hardSet(s.gain)
+      end,
+      neutralize = function(c)
+        gain(c):hardSet(0)
+        value(c):hardSet(0)
+      end,
+      activate = function(c)
+        gain(c):hardSet(1)
+      end,
+      ready = function(c)
+        return value(c) ~= nil and gain(c) ~= nil
+      end
+    },
+
+    -- out = offset + in. GainBias without the gain term.
+    [Pitch] = {
+      branchType = "Pitch",
+      capture = function(c)
+        return {value = value(c):target()}
+      end,
+      apply = function(c, s)
+        value(c):hardSet(s.value)
+      end,
+      neutralize = function(c)
+        value(c):hardSet(0)
+      end,
+      activate = function() end,
+      ready = function(c)
+        return value(c) ~= nil
+      end
+    },
+
+    -- out = compare(in, threshold) under a mode. NOT affine, and promotable
+    -- anyway -- the earlier reading of this file said otherwise and was wrong.
+    --
+    -- The objection was that a toggle-mode origin re-fed from a toggle-mode
+    -- macro toggles on the macro's EDGES and halves the rate. True, but it
+    -- assumes the origin KEEPS its mode. It does not: going neutral is exactly
+    -- what bias 0 / gain 1 is for GainBias. The macro takes the mode, the
+    -- threshold, the hysteresis, the inversion and the live toggle state, so it
+    -- emits precisely the 0/1 signal the origin used to emit; the origin drops
+    -- to plain GATE at threshold 0.5 and passes that through unchanged.
+    --
+    -- 0.5 is the neutral threshold because Comparator::process emits exactly
+    -- 0.0f or 1.0f (od/objects/timing/Comparator.cpp), so half way between them
+    -- is the one threshold no signal can sit near. Default hysteresis is 0.03,
+    -- giving edges at 0.47 and 0.53 -- both crossed cleanly by a 0-to-1 step.
+    --
+    -- Trigger modes survive too: a one-sample pulse from the macro crosses 0.5
+    -- and is passed through as a one-sample pulse.
+    [Gate] = {
+      branchType = "Gate",
+      capture = function(c)
+        local o = c.comparator
+        return {
+          mode = o:getMode(),
+          inverted = o:isOutputInverted(),
+          threshold = o:getParameter("Threshold"):target(),
+          hysteresis = o:getParameter("Hysteresis"):target(),
+          -- The live toggle level. Without it a toggle that is currently HIGH
+          -- comes back LOW and stays inverted until the next edge.
+          state = o:getOptionValue("State")
+        }
+      end,
+      apply = function(c, s)
+        local o = c.comparator
+        o:setMode(s.mode)
+        o:setOutputInversion(s.inverted)
+        o:getParameter("Threshold"):hardSet(s.threshold)
+        o:getParameter("Hysteresis"):hardSet(s.hysteresis)
+        if s.state then
+          o:setOptionValue("State", s.state)
+        end
+      end,
+      neutralize = function(c)
+        local o = c.comparator
+        o:setMode(app.COMPARATOR_GATE)
+        o:setOutputInversion(false)
+        o:getParameter("Threshold"):hardSet(0.5)
+        -- A Comparator's Mode option is NOT serialized by default: a builtin
+        -- gate gets its mode from whatever its unit's constructor passes, every
+        -- load. That is fine until promotion moves the mode onto a macro and
+        -- leaves this one neutral -- reload and the unit would rebuild it in its
+        -- original mode, re-triggering on the macro's edges instead of passing
+        -- them through, and the patch would come back sounding different. The
+        -- neutral state is now part of the patch, so it has to persist like one.
+        local mode = o:getOption("Mode")
+        if mode and mode.enableSerialization then
+          mode:enableSerialization()
+        end
+      end,
+      activate = function() end,
+      ready = function(c)
+        return c.comparator ~= nil
+      end
+    }
+  }
+end
+
 local function specFor(control)
   if control == nil then
     return nil
   end
   if specs == nil then
-    specs = {
-      [require "Unit.ViewControl.GainBias"] = {
-        branchType = "GainBias",
-        hasGain = true
-      },
-      [require "Unit.ViewControl.Pitch"] = {
-        branchType = "Pitch",
-        hasGain = false
-      }
-    }
+    specs = buildSpecs()
   end
   -- Keyed by the class table, so this is an EXACT-metatable test, deliberately
   -- NOT `control.type == "GainBias"` and NOT a class check. Base.Class
@@ -231,19 +357,6 @@ function Promote.rollback(targetUnit, name)
   end
 end
 
--- The parameter carrying the control's value. Uniform across both promotable
--- classes: GainBias binds the fader's value parameter to Bias, Pitch to Offset.
--- Reading it through the fader rather than through a readout is what lets the
--- transplant below be written once instead of per type.
-local function valueParamOf(control)
-  return control.fader and control.fader:getValueParameter()
-end
-
--- Only GainBias has one. Pitch's ConstantOffset has no gain term at all.
-local function gainParamOf(control)
-  return control.gain and control.gain:getParameter()
-end
-
 -- Drop the promoted control out of every scene, completely. Plan §6.
 --
 -- Three steps, not one. Scene:setDelta touches only `deltas`; the live
@@ -323,21 +436,19 @@ function Promote.commit(origin, macroBranch)
   end
 
   local macroControl = macroBranch.control
-  -- The macro was built from the origin's own branch type, so the two agree on
-  -- whether a gain term exists. Read both sides rather than trusting the spec:
-  -- a mismatch here means the macro is not the shape it should be, and wiring a
-  -- half-configured adapter into the patch is the one outcome worth refusing.
-  local originValue, macroValue = valueParamOf(origin), valueParamOf(macroControl)
-  local originGain, macroGain = gainParamOf(origin), gainParamOf(macroControl)
-  if not (originValue and macroValue) then
-    return false, "Missing value parameter."
-  end
-  if (originGain == nil) ~= (macroGain == nil) then
+  local spec = specFor(origin)
+  -- The macro was built from the origin's own branch type, so the two must agree
+  -- on shape. Check both rather than trusting that: a mismatch means the macro is
+  -- not what it should be, and wiring a half-configured object into the patch is
+  -- the one outcome worth refusing outright.
+  if spec == nil or specFor(macroControl) ~= spec then
     return false, "Macro does not match the control it came from."
   end
+  if not (spec.ready(origin) and spec.ready(macroControl)) then
+    return false, "Missing parameters."
+  end
 
-  local V = originValue:target()
-  local G = originGain and originGain:target()
+  local state = spec.capture(origin)
 
   -- Pinned to the Chain layer on BOTH sides, deliberately. A polymorphic
   -- origin.branch:serialize() would dispatch to ControlBranch:serialize in the
@@ -361,31 +472,24 @@ function Promote.commit(origin, macroBranch)
   originBranch:clear()
   Chain.deserialize(macroBranch, payload)
 
-  -- Macro takes the value BEFORE it is wired, so no frame sees the origin driven
-  -- by an unconfigured adapter.
-  macroValue:hardSet(V)
-  if macroGain then
-    macroGain:hardSet(G)
-  end
+  -- Macro takes the state BEFORE it is wired, so no frame sees the origin driven
+  -- by an unconfigured object.
+  spec.apply(macroControl, state)
 
-  -- Wiring order buys the cheaper transient. Parameter writes are not batched by
-  -- the audio-thread transaction (it covers task-list changes only), so the
-  -- audio thread can observe any PREFIX of this sequence:
-  --   (gain 0)   -> out = V         unchanged; branch is already cleared
-  --   value 0    -> out = 0         one-frame DIP
-  --   wire       -> out = 0         still dipped, gain is 0
-  --   (gain 1)   -> out = macroOut  correct
-  -- Every prefix is either the old value or zero. The alternative orderings all
-  -- admit a prefix reading V + G*macroOut, roughly twice the value: a pop rather
-  -- than a click, and much worse on a level, a cutoff or a pitch.
-  if originGain then
-    originGain:hardSet(0)
-  end
-  originValue:hardSet(0)
+  -- Ordering buys the cheaper transient. Parameter writes are not batched by the
+  -- audio-thread transaction (it covers task-list changes only), so the audio
+  -- thread can observe any PREFIX of this sequence:
+  --   neutralize -> the origin reads 0 / sits low     one-frame DIP
+  --   wire       -> still dipped, it is not active yet
+  --   activate   -> reads macroOut                    correct
+  -- Every prefix is either the old value or silence. The alternative orderings
+  -- all admit a prefix reading value + gain*macroOut, roughly double: a pop
+  -- rather than a click, and much worse on a level, a cutoff or a pitch. For a
+  -- gate the dip is a frame held low, which drops an edge rather than inventing
+  -- one -- again the safe direction.
+  spec.neutralize(origin)
   originBranch:setInputSource(1, macroBranch:getOutputSource(1))
-  if originGain then
-    originGain:hardSet(1)
-  end
+  spec.activate(origin)
 
   clearSceneState(origin)
   return true
