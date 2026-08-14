@@ -69,20 +69,4 @@ x:color(app.GRAY7)
 x:hline(4, 10, 58)
 Drawings.Control.ShiftLayer = x
 
--- [stol:promote-control-to-top-level] "This control is driven from somewhere
--- else." A short line running into an arrowhead, reading as a signal arriving
--- from outside. Worn by the ORIGIN of a promotion, whose value now lives on a
--- macro further up: without it the control looks like it simply lost its
--- setting, which is the single most confusing thing promotion does.
---
--- Sits TOP-CENTRE. Control.Pin holds top-right (ply-7..ply-3) and
--- Control.ShiftLayer holds top-left (x 2..10), and a promoted control can
--- easily carry all three at once, so this takes the only free corner. y grows
--- UPWARD, so 59 sits near the top edge and well clear of the label row.
-x = app.DrawingInstructions()
-x:color(app.WHITE)
-x:hline(0.5 * ply - 6, 0.5 * ply, 59)
-x:triangle(0.5 * ply + 2, 59, 0, 3)
-Drawings.Control.Driven = x
-
 return Drawings
