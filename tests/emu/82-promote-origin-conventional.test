@@ -1,0 +1,64 @@
+# [stol:promote-control-to-top-level] A promoted origin is just a modulated
+# control. Nothing special happens to it.
+#
+# This test exists to STOP someone helpfully adding something. Twice now the
+# reasoning "the origin reads 0 while the patch plays 440 Hz, that needs
+# explaining" has led to special-casing it: once by rebinding its readout to the
+# live value, once by drawing a mark on it. Both were removed on the same
+# argument, which is worth stating plainly rather than rediscovering:
+#
+#   A control whose readout shows its own bias while something else moves the
+#   actual value is what EVERY modulated control on this instrument does.
+#   Promotion only makes that bias 0. Users read this fluently already, and
+#   dressing up the promoted case makes it the single control that behaves
+#   differently from the convention, which is a worse thing to learn than the
+#   convention.
+#
+# Anyone who wants to see through modulation already has the global
+# unitControlReadoutSource = "actual", and it applies uniformly.
+#
+# So: after promotion the origin's readout must be UNCHANGED and the control must
+# carry no promotion-specific state. The macro is where the value lives and where
+# the display work belongs -- see tests 71, 77 and 83.
+
+frames 20
+lua local F=require('Unit.Factory'); local t=F.getUnitsByLibrary('builtins'); for _,u in ipairs(t) do if (u.title or u.moduleName)=='Custom Effect' then require('Channels').getChain(1):loadUnit(u) end end
+frames 60
+lua (function() local c=require('Channels').getChain(1):getUnit(1) local F=require('Unit.Factory') for _,u in ipairs(F.getUnitsByLibrary('builtins')) do if (u.title or u.moduleName)=='Test Osc' then c.patch:loadUnit(u) end end return 'ok' end)()
+frames 60
+lua (function() _G.__unit=function() return require('Channels').getChain(1):getUnit(1) end _G.__origin=function() return require('Channels').getChain(1):getUnit(1).patch:getUnit(1).controls.freq end return 'ok' end)()
+
+# Snapshot what the fader reports from, BEFORE anything happens to it.
+lua (function() local o=_G.__origin() o.fader:getValueParameter():hardSet(440) _G.__readout0=o.fader:getValueParameter() return 'ok' end)()
+frames 20
+
+lua (function() local P=require('Unit.Promote') local m,n=P.createInertMacro(_G.__origin(),_G.__unit()) _G.__name=n _G.__macro=m local ok,why=P.commit(_G.__origin(),m) _G.__ok=ok return tostring(ok)..','..tostring(why) end)()
+frames 60
+!assert _G.__ok == true
+
+# The value moved to the macro and the origin is hollow. That much is the point.
+!assert math.abs(_G.__macro.control.fader:getValueParameter():target() - 440) < 1e-4
+!assert math.abs(_G.__origin().fader:getValueParameter():target() - 0) < 1e-4
+
+# THE ASSERTION: the origin's display was not touched. Same parameter behind the
+# fader as before, and none of the state the two removed attempts left behind.
+!assert _G.__origin().fader:getValueParameter() == _G.__readout0
+!assert rawget(_G.__origin(),'preMacroReadout') == nil
+!assert rawget(_G.__origin(),'drivenMark') == nil
+!assert _G.__origin().isDrivenByMacro == nil
+!assert _G.__origin().refreshDrivenState == nil
+
+# Still true after a reload, which is the easiest place for special-casing to
+# creep back in, since the control is rebuilt from scratch there.
+lua (function() _G.__saved=require('Channels').getChain(1):serialize() return 'ok' end)()
+lua (function() require('Channels').getChain(1):deserialize(_G.__saved) return 'ok' end)()
+frames 120
+!assert math.abs(_G.__origin().fader:getValueParameter():target() - 0) < 1e-4
+!assert rawget(_G.__origin(),'preMacroReadout') == nil
+!assert rawget(_G.__origin(),'drivenMark') == nil
+
+# ...and the origin really is still being driven, so the reading above is the
+# conventional modulated-control one rather than a control that lost its wiring.
+!assert _G.__origin().branch:getInputSource(1) == _G.__unit().controlBranches[_G.__name]:getOutputSource(1)
+
+quit

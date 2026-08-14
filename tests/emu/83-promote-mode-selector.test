@@ -69,7 +69,7 @@ frames 60
 # The value really did move, and the origin really is hollow underneath.
 !assert math.abs(_G.__macro.control.fader:getValueParameter():target() - 2) < 1e-4
 !assert math.abs(_G.__origin().fader:getValueParameter():target() - 0) < 1e-4
-!assert _G.__origin():isDrivenByMacro() == true
+!assert _G.__origin().branch:getInputSource(1) ~= nil
 
 # 3. save, load, and it is still a mode selector showing the same mode
 lua (function() _G.__saved=require('Channels').getChain(1):serialize() return 'ok' end)()
@@ -81,6 +81,6 @@ frames 120
 !assert getmetatable(_G.__unit().controls[_G.__name]) == getmetatable(_G.__origin())
 !assert math.abs(_G.__unit().controls[_G.__name].fader:getValueParameter():target() - 2) < 1e-4
 !assert _G.__unit().controls[_G.__name].fader:getLabel() == _G.__originLabel
-!assert _G.__origin():isDrivenByMacro() == true
+!assert _G.__origin().branch:getInputSource(1) ~= nil
 
 quit

@@ -688,11 +688,6 @@ function GainBias:contentChanged(chain)
     local outlet = chain:getMonitoringOutput(1)
     self.scope:watchOutlet(outlet)
     self.modButton:setText(chain:mnemonic())
-    -- [stol:promote-control-to-top-level] The branch's input source just
-    -- changed, which is the only thing that can make this control start or stop
-    -- being driven by a macro. Fires on load too, because the restored source is
-    -- assigned through this same path.
-    self:refreshDrivenState()
   end
 end
 

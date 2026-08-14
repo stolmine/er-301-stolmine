@@ -176,76 +176,20 @@ function ViewControl:toggleContext()
   end
 end
 
--- [stol:promote-control-to-top-level] ------------------------------------------
--- Is this control's modulation input the output of a macro on another unit?
+-- [stol:promote-control-to-top-level] There is deliberately NOTHING here for a
+-- promoted origin.
 --
--- That is exactly the shape promotion leaves behind, and it is DERIVED rather
--- than flagged, which is the point: the branch's input source is already part of
--- the serialized patch, so this survives a reload with nothing extra written.
--- A stored flag would have to be kept in step with the wiring; this cannot drift
--- from it because it IS the wiring.
+-- An earlier version rebound the origin's readout to the live value and gave it
+-- a mark, on the theory that a control reading 0 while the patch plays 440 Hz
+-- needs explaining. It does not. A control whose readout shows its own bias
+-- while something else moves the actual value is what EVERY modulated control
+-- on this instrument already does, and users read it fluently. Promotion just
+-- makes the bias 0.
 --
--- The probe is `src.object` being a ControlBranch: Chain builds its output source
--- as Source.Internal over the chain itself (Chain/init.lua), and only a
--- ControlBranch carries both `classType` and `control`.
-function ViewControl:isDrivenByMacro()
-  local branch = self.branch
-  local source = branch and branch.getInputSource and branch:getInputSource(1)
-  local object = source and source.object
-  return object ~= nil and object.classType ~= nil and object.control ~= nil
-end
-
--- Show the value actually passing through, rather than this control's own bias.
---
--- After promotion the origin holds 0 and the macro holds the value, so the
--- origin's readout would say 0 while the patch plays 440 Hz. Rebinding the
--- readout to the range object's Center makes it report what is really there.
--- This is the same swap the global `unitControlReadoutSource = "actual"` setting
--- performs at construction (GainBias.lua, Pitch.lua), applied per control and
--- only while the control is being driven.
---
--- Only the READOUT moves. The fader's target and value parameters still point at
--- the control's own bias, so the encoder keeps editing the trim and the bar keeps
--- showing it. Rebinding those too would leave the user unable to reach the offset
--- the control still owns.
---
--- No-op when the global setting is already "actual", since the readout is showing
--- the true value anyway and "restoring" it later would silently turn the setting
--- off for that control.
-function ViewControl:refreshDrivenState()
-  self:refreshDrivenReadout(self:isDrivenByMacro())
-end
-
--- NO MARK on a promoted origin, decided 2026-08-13 and worth recording because
--- it looks like an omission. A control being driven while its readout shows its
--- own bias is not a special state that needs explaining: it is what EVERY
--- modulated control on this instrument already does, and users read it fluently.
--- Marking the promoted case would single out the one instance of an existing
--- convention.
-function ViewControl:refreshDrivenReadout(driven)
-  local fader = self.fader
-  if fader == nil or fader.setControlParameter == nil then
-    return
-  end
-  local Settings = require "Settings"
-  if Settings.get("unitControlReadoutSource") == "actual" then
-    return
-  end
-  if driven then
-    if self.preMacroReadout == nil then
-      local range = fader.getRangeObject and fader:getRangeObject()
-      local center = range and range:getParameter("Center")
-      if center == nil then
-        return
-      end
-      self.preMacroReadout = fader:getValueParameter()
-      fader:setControlParameter(center)
-    end
-  elseif self.preMacroReadout then
-    fader:setControlParameter(self.preMacroReadout)
-    self.preMacroReadout = nil
-  end
-end
+-- Both additions made the promoted origin the single control that behaved
+-- differently from that convention, which is a worse thing to learn than the
+-- convention itself. Anyone wanting to see through modulation already has
+-- unitControlReadoutSource = "actual", which applies uniformly.
 
 function ViewControl:createPinMark()
   local Drawings = require "Drawings"
