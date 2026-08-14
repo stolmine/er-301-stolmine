@@ -222,6 +222,88 @@ end
 
 -- The ControlBranch type a macro for this control must be built from, or nil if
 -- the control cannot be promoted. Also the label the placement screen shows.
+-- PROTOTYPE. Deliberately NOT wired into isPromotableControl or check() -- this
+-- classifies, it does not admit. Ledger item promote-control-type-spec.
+--
+-- The question it answers: for a control that SUBCLASSES a promotable class, can
+-- the macro be built as the same class, or must it fall back to a plain one?
+--
+-- Cloning is possible because GainBias:setDefaults stores the constructor's args
+-- table verbatim on the instance, so a subclass's own arguments (modeNames,
+-- discrete, the maps) are all still there. Override the four that bind a control
+-- to its unit and the class constructs standalone -- verified against biome's
+-- ModeSelector, whose clone comes up labelled "Fold" rather than a bare number.
+--
+-- When cloning is WRONG: a subclass whose extra constructor arguments are live
+-- Parameter references into the origin unit's own objects. The habitat SHIFT
+-- sub-layer controls are all like this (DriveControl takes args.toneAmount and
+-- args.toneFreq). Clone one and the macro's shift layer would edit the ORIGIN's
+-- tone control. Those want a plain macro for the promoted parameter instead.
+--
+-- The test is structural, so no package has to declare anything: an object-valued
+-- entry in `defaults` outside the set below means the control is wired to
+-- something else in its unit. `branch` is a Lua table carrying a metatable;
+-- data like modeNames is a plain table, which is why the metatable test matters.
+--
+-- The failure direction is the safe one. An unfamiliar control with extra object
+-- arguments falls back to "flatten" rather than aliasing something it should not.
+local CLONE_SAFE_KEYS = {
+  branch = true,
+  gainbias = true,
+  range = true,
+  biasMap = true,
+  gainMap = true,
+  offset = true,
+  comparator = true
+}
+
+local function isObjectValued(v)
+  local t = type(v)
+  if t == "userdata" then
+    return true
+  end
+  -- A Lua object carries a metatable; a data table like modeNames does not.
+  return t == "table" and getmetatable(v) ~= nil
+end
+
+-- Returns "exact" | "clone" | "flatten" | nil, plus the sorted list of foreign
+-- object-valued keys that forced a "flatten".
+function Promote.classify(control)
+  if control == nil then
+    return nil
+  end
+  if specFor(control) then
+    return "exact"
+  end
+  local class = getmetatable(control)
+  if class == nil or specs == nil then
+    return nil
+  end
+  -- Must descend from a promotable class. Base.Class deep-copies members, so the
+  -- inherited `type` is exactly the right signal HERE, where the whole point is
+  -- to catch subclasses -- the opposite of what specFor needs.
+  local base
+  for cls, spec in pairs(specs) do
+    if cls.type == class.type then
+      base = spec
+    end
+  end
+  if base == nil or control.branch == nil or control.defaults == nil then
+    return nil
+  end
+  local foreign = {}
+  for k, v in pairs(control.defaults) do
+    if not CLONE_SAFE_KEYS[k] and isObjectValued(v) then
+      foreign[#foreign + 1] = k
+    end
+  end
+  table.sort(foreign)
+  if #foreign == 0 then
+    return "clone", foreign
+  end
+  return "flatten", foreign
+end
+
 function Promote.branchTypeFor(control)
   local spec = specFor(control)
   return spec and spec.branchType

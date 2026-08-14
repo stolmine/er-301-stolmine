@@ -1,0 +1,70 @@
+# [stol:promote-control-type-spec] PROTOTYPE: does the clone/flatten rule hold
+# against real habitat code?
+#
+# Promote.classify is NOT wired into the discriminator. It classifies, it does not
+# admit. The question it answers, for a control that SUBCLASSES a promotable
+# class: can the macro be built as the same class, or must it fall back to a
+# plain one? The rule is structural -- an object-valued entry in the control's
+# `defaults` outside {branch, gainbias, range, biasMap, gainMap, offset,
+# comparator} means the control is wired to something else inside its unit and
+# must not be cloned.
+#
+# The rule was designed by reading TWO of habitat's 49 subclasses, which is why
+# this exists: it installs two real packages, loads every unit in both, and
+# classifies every subclass control that turns up -- 70 of them at time of
+# writing, 28 clone and 42 flatten.
+#
+# It checks the rule against SEMANTIC signals rather than against itself:
+#
+#   a class defining `setParamMode`  is a SHIFT sub-layer control, whose extra
+#                                    arguments are Parameters belonging to its
+#                                    unit                     -> must flatten
+#   a control carrying `modeNames`   is a discrete mode selector, whose extra
+#                                    arguments are plain data  -> should clone
+#
+# THE SECOND ONE HAS A REAL EXCEPTION, found by this test on its first run, and
+# the exception is the rule being RIGHT rather than wrong. See below.
+
+!packages biome
+!packages spreadsheet
+
+frames 20
+!assert (function() local M=require('Package.Manager') local n=0 for k,v in pairs(M.getPackages()) do if k:find('biome') or k:find('spreadsheet') then if M.install(v) then n=n+1 end end end return n>=2 end)()
+frames 20
+
+# Vitrail's Clock Src is a ModeSelector that ALSO takes `op = self.objects.op`,
+# because it hosts a tunnel visualization whose rotation IS the A/B clock drift.
+# It carries modeNames and still must NOT be cloned: a clone would hold a
+# reference to the ORIGIN unit's DSP object and animate from its internal state.
+# So "has modeNames" does not imply "clonable" -- being a mode selector and being
+# wired into your unit are independent, and the structural rule catches the
+# overlap that the semantic reading misses. Any NEW entry appearing here is a
+# control to go and read, not a line to add.
+lua (function() _G.__allowed={['Vitrail/clkSrc']=true} return 'ok' end)()
+
+# Load every unit of both libraries in turn, walk its controls, classify each one
+# that subclasses a promotable class. Units are loaded one at a time and the
+# chain cleared between them, so a large package cannot exhaust it.
+lua (function() _G.__seen={} _G.__bad={} _G.__counts={clone=0,flatten=0} local P=require('Unit.Promote') local F=require('Unit.Factory') local C=require('Channels').getChain(1) for _,lib in ipairs{'biome','spreadsheet'} do for _,info in ipairs(F.getUnitsByLibrary(lib)) do local ok,u=pcall(function() return C:loadUnit(info) end) if ok and u and u.controls then local title=tostring(info.title or info.moduleName) for id,ctl in pairs(u.controls) do local cls,foreign=P.classify(ctl) if cls=='clone' or cls=='flatten' then _G.__counts[cls]=_G.__counts[cls]+1 local mt=getmetatable(ctl) local m=(rawget(ctl,'modeNames')~=nil) local s=(mt and mt.setParamMode~=nil) _G.__seen[#_G.__seen+1]={unit=title,id=id,cls=cls,m=m,s=s,f=table.concat(foreign or {},'+')} if s and cls~='flatten' then _G.__bad[#_G.__bad+1]='setParamMode but '..cls..' @'..title..'/'..id end if m and cls~='clone' and not _G.__allowed[title..'/'..id] then _G.__bad[#_G.__bad+1]='modeNames but '..cls..' @'..title..'/'..id..' foreign='..table.concat(foreign or {},'+') end end end end C:clear() end end return #_G.__seen..' subclass controls' end)()
+frames 60
+
+# Population first: if the packages failed to install, the loop finds nothing and
+# every assertion below would pass vacuously.
+!assert #_G.__seen >= 40
+!assert _G.__counts.clone > 0
+!assert _G.__counts.flatten > 0
+
+# THE ASSERTION. The structural rule agrees with both semantic signals on every
+# subclass control in two real packages, modulo the reviewed exception above.
+# A failure prints the unit, the control and the foreign keys that caused it.
+!assert (function() if #_G.__bad==0 then return true end return table.concat(_G.__bad,' | ') end)()
+
+# Every flatten really is caused by a foreign object-valued argument, never by a
+# control simply lacking defaults -- that would be a silent, wrong flatten.
+!assert (function() for _,e in ipairs(_G.__seen) do if e.cls=='flatten' and e.f=='' then return 'flatten with no foreign key @'..e.unit..'/'..e.id end end return true end)()
+
+# Both semantic families are actually represented, so the discrimination was
+# exercised rather than merely not contradicted.
+!assert (function() local m,s=0,0 for _,e in ipairs(_G.__seen) do if e.m then m=m+1 end if e.s and e.cls=='flatten' then s=s+1 end end return m>0 and s>0 end)()
+
+quit
