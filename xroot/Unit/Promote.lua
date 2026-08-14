@@ -192,6 +192,27 @@ local function specFor(control)
   -- GainBias controls and 20 third-party Pitch controls are already covered
   -- here. Admitting the habitat subclasses needs a class-level declaration and
   -- is filed separately as promote-control-type-spec.
+  --
+  -- CONSIDERED AND EXCLUDED, so nobody re-derives them:
+  --
+  -- BranchMeter (18 instances across the repos). It has a branch, so it passes
+  -- the structural gate, and it is excluded deliberately rather than by
+  -- omission. Every instance in every repo is a mixer-style AUDIO INPUT level --
+  -- MixerUnit's "input", XFade's a/b, ABSwitch, Logics, Maths, FadeMixer -- and
+  -- always in the same shape, `faderParam = objects.X:getParameter("Gain")` with
+  -- the branch being the unit's audio input. Two reasons, either sufficient:
+  --   * its branch carries the SIGNAL, not modulation. Transplanting the branch
+  --     contents, which is what promotion does, would relocate the audio source
+  --     itself into an ancestor. That is a different operation and one that
+  --     already exists as move-to-mixer.
+  --   * it hands over a bare `faderParam`, not a typed object. GainBias, Pitch
+  --     and Gate each pass the OBJECT they drive, and its type is what tells us
+  --     the composition law. A lone Parameter does not, so there is nothing to
+  --     check an affine assumption against.
+  --
+  -- OptionControl, Fader, InputGate, OutputScope and the bespoke package
+  -- controls are out for a simpler reason: no branch at all, so a macro would
+  -- have nothing to drive them through. Promote.check tests that separately.
   return specs[getmetatable(control)]
 end
 

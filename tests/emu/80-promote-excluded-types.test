@@ -1,0 +1,60 @@
+# [stol:promote-control-to-top-level] Control types that must NOT be promotable.
+#
+# The three promotable classes are asserted positively elsewhere (68, 77, 79).
+# This is the other half: the classes that pass close to the gate and are kept
+# out on purpose. A negative test matters more than usual here, because the
+# discriminator is a lookup table -- widening it is a one-line change, and a line
+# added without reading the reasoning would sail through every other test in the
+# suite.
+#
+# BRANCHMETER is the one that actually gets close. It HAS a branch, so it clears
+# the structural gate that excludes scopes and option pickers. It is out because:
+#
+#   * its branch carries the SIGNAL, not modulation. Every instance across all
+#     four unit repos is a mixer-style audio input level -- MixerUnit's "input",
+#     XFade's a/b, ABSwitch, Logics, Maths, FadeMixer -- always in the shape
+#     `faderParam = objects.X:getParameter("Gain")`. Transplanting the branch
+#     contents, which is what promotion does, would move the audio SOURCE into
+#     an ancestor. That is move-to-mixer, a different operation that already
+#     exists.
+#   * it hands over a bare faderParam rather than the object it drives. The
+#     other three pass an object whose TYPE is what establishes the composition
+#     law; a lone Parameter establishes nothing.
+
+frames 20
+lua local F=require('Unit.Factory'); local t=F.getUnitsByLibrary('builtins'); for _,u in ipairs(t) do if (u.title or u.moduleName)=='Custom Effect' then require('Channels').getChain(1):loadUnit(u) end end
+frames 60
+
+# A Mix inside the container, so its controls have a genuine ancestor to promote
+# to. Without that, "not promotable" would pass for the wrong reason.
+lua (function() local c=require('Channels').getChain(1):getUnit(1) local F=require('Unit.Factory') for _,u in ipairs(F.getUnitsByLibrary('builtins')) do if (u.title or u.moduleName)=='Mix' then c.patch:loadUnit(u) end end return 'ok' end)()
+frames 60
+lua (function() local c=require('Channels').getChain(1):getUnit(1) local F=require('Unit.Factory') for _,u in ipairs(F.getUnitsByLibrary('builtins')) do if (u.title or u.moduleName)=='Test Osc' then c.patch:loadUnit(u) end end return 'ok' end)()
+frames 60
+# Found by title, not by index: loadUnit inserts at the current selection, so
+# the second unit loaded does not reliably land second.
+lua (function() local function byTitle(t) local p=require('Channels').getChain(1):getUnit(1).patch for i=1,p:length() do local u=p:getUnit(i) if u.title and u.title:find(t,1,true) then return u end end end _G.__mix=function() return byTitle('Mix') end _G.__osc=function() return byTitle('Test Osc') end return 'ok' end)()
+!assert _G.__mix() ~= nil
+!assert _G.__mix().controls.gain ~= nil
+
+# The ancestor exists, so nothing below can pass vacuously.
+!assert #require('Unit.Promote').ancestorsOf(_G.__mix().controls.gain) == 1
+
+# BranchMeter: has a branch, still refused.
+!assert _G.__mix().controls.gain.branch ~= nil
+!assert require('Unit.Promote').isPromotableControl(_G.__mix().controls.gain) == false
+!assert require('Unit.Promote').branchTypeFor(_G.__mix().controls.gain) == nil
+!assert require('Unit.Promote').check(_G.__mix().controls.gain, true) == false
+!assert (function() for _,e in ipairs(_G.__mix().controls.gain:getFloatingMenuItems()) do if e=='promote' then return false end end return true end)()
+
+# ...while a GainBias sitting in the SAME chain, one unit over, is promotable.
+# That is what makes the refusal above about the control TYPE rather than about
+# the unit, the chain or the patch.
+!assert require('Unit.Promote').isPromotableControl(_G.__osc().controls.freq) == true
+!assert (function() for _,e in ipairs(_G.__osc().controls.freq:getFloatingMenuItems()) do if e=='promote' then return true end end return false end)()
+
+# Branchless controls are out for the simpler reason. Header is excluded by id
+# in the shift-layer probe and has no branch either.
+!assert require('Unit.Promote').isPromotableControl(_G.__mix().controls.header) == false
+
+quit

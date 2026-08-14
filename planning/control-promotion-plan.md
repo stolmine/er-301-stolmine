@@ -521,6 +521,39 @@ that is what the encoder drives here.
 - **Repeat promotion chains**: `macro1 -> macro2 -> origin`. The origin branch's
   serialized source references macro1's key, which lies outside the payload and
   resolves via `findByInstanceKey`. Depends on §5's no-regeneration rule.
+- **A unit that writes a promoted control's own parameter now writes the TRIM,
+  not the value.** Promotion hollows the origin, so any code inside the unit that
+  reaches for that control's bias is reaching for the 0-centred offset on top of
+  the macro, not the number the user sees. Surveyed across all four unit repos
+  (2026-08-13): 706 writes to `Bias`/`Offset`/`Threshold`, of which all but 29
+  are construction or self-consistent restore. What is left is **two units**,
+  both copies of `MultitapDelay` (spreadsheet and stolmine):
+    - its **randomize** writes `masterTime`, `feedback`, `feedbackTone`, `skew`
+      and others directly. After promotion, randomize still moves the sound but
+      no longer lands in its intended absolute range: the result is
+      macro + random rather than random.
+    - its **buffer resize** clamps `masterTime` down when the buffer shrinks.
+      After promotion that clamp silently stops protecting anything, because the
+      real time value lives on the macro and the clamp is applied to the trim.
+
+  Not fixable from promotion's side and not a correctness failure — it follows
+  directly from §3's decision to hollow the origin. Documented because it will
+  read as a bug from the bench. `Accents/WeightedCoinToss` and `JF` match the
+  same grep and are false positives: both write internal objects that no control
+  drives.
+
+- **BranchMeter is excluded deliberately, not by omission.** It has a branch, so
+  it clears the structural gate that keeps scopes and option pickers out, and it
+  is still refused. Every instance in every repo is a mixer-style audio input
+  level (`MixerUnit` "input", `XFade` a/b, `ABSwitch`, `Logics`, `Maths`,
+  `FadeMixer`), always `faderParam = objects.X:getParameter("Gain")`. Its branch
+  carries the SIGNAL, so transplanting the branch contents would relocate the
+  audio source into an ancestor — that is move-to-mixer, a different operation
+  that already exists. It also hands over a bare Parameter rather than the object
+  it drives, and the object's TYPE is what establishes the composition law.
+  `tests/emu/80` holds the line, because widening the discriminator is a one-line
+  change that no positive test would catch.
+
 - **`canMove` is declared on ten control classes and read nowhere.** If placement
   should honour `canMove = false`, that needs wiring up.
 
