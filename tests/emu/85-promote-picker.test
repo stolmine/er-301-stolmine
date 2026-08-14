@@ -1,0 +1,63 @@
+# [stol:promote-control-to-top-level] The ancestor picker: what it offers, where
+# the cursor starts, and that EVERY ancestor is reachable.
+#
+# The picker is deliberately not a pruned ScopeView. ScopeView descends into
+# children; the valid targets are the origin's ANCESTORS, the opposite direction.
+# Emitting only that path is what enforces the rule -- a unit that does not
+# contain the origin is never drawn, so it cannot be chosen.
+#
+# Two bugs from the bench on 2026-08-13, both covered here:
+#
+#   * the cursor started on the chain node ABOVE the topmost unit, which is not a
+#     promotion target, so every promotion began with a downward turn to escape a
+#     row that was never selectable
+#   * more than one layer deep, nothing below the uppermost unit was DRAWN. A
+#     unit's children hang off a patch or branch node, never off the unit
+#     directly, so nesting startUnit inside startUnit gave the widget nothing to
+#     hang the inner one from. Chain/ScopeView.lua is the reference shape:
+#     unit -> patch/branch -> unit.
+#
+# The second is the reason for the three-deep case below: a two-deep patch would
+# have passed the id-count assertion while drawing only one box.
+
+frames 20
+lua local F=require('Unit.Factory'); local t=F.getUnitsByLibrary('builtins'); for _,u in ipairs(t) do if (u.title or u.moduleName)=='Custom Effect' then require('Channels').getChain(1):loadUnit(u) end end
+frames 60
+lua (function() local o=require('Channels').getChain(1):getUnit(1) local F=require('Unit.Factory') for _,u in ipairs(F.getUnitsByLibrary('builtins')) do if (u.title or u.moduleName)=='Custom Effect' then o.patch:loadUnit(u) end end return 'ok' end)()
+frames 60
+lua (function() local i=require('Channels').getChain(1):getUnit(1).patch:getUnit(1) local F=require('Unit.Factory') for _,u in ipairs(F.getUnitsByLibrary('builtins')) do if (u.title or u.moduleName)=='Custom Effect' then i.patch:loadUnit(u) end end return 'ok' end)()
+frames 60
+lua (function() local i=require('Channels').getChain(1):getUnit(1).patch:getUnit(1).patch:getUnit(1) local F=require('Unit.Factory') for _,u in ipairs(F.getUnitsByLibrary('builtins')) do if (u.title or u.moduleName)=='Test Osc' then i.patch:loadUnit(u) end end return 'ok' end)()
+frames 60
+lua (function() _G.__a=function() return require('Channels').getChain(1):getUnit(1) end _G.__b=function() return _G.__a().patch:getUnit(1) end _G.__c=function() return _G.__b().patch:getUnit(1) end _G.__origin=function() return _G.__c().patch:getUnit(1).controls.freq end return 'ok' end)()
+
+# Three nested containers, so "reachable" and "topmost" are both real questions.
+!assert #require('Unit.Promote').ancestorsOf(_G.__origin()) == 3
+
+lua (function() local o=_G.__origin() local P=require('Unit.Promote') local V=require('Unit.PromoteTargetView') _G.__v=V(o,P.ancestorsOf(o),function(u) _G.__chosen=u end) _G.__v:show() return 'ok' end)()
+frames 40
+
+# Exactly the ancestors, and nothing else. The origin's own unit is excluded --
+# the rule the picker exists to enforce.
+!assert (function() local n=0 for _ in pairs(_G.__v.unitById) do n=n+1 end return n==3 end)()
+!assert (function() local seen={} for _,u in pairs(_G.__v.unitById) do seen[u]=true end return seen[_G.__a()] and seen[_G.__b()] and seen[_G.__c()] and not seen[_G.__c().patch:getUnit(1)] end)()
+
+# The cursor is on a UNIT immediately, and on the outermost one -- the top of the
+# drawn path. nil here is what sitting on the chain node used to give.
+!assert _G.__v:selectedUnit() ~= nil
+!assert _G.__v:selectedUnit() == _G.__a()
+
+# EVERY ancestor is reachable by navigating down. This is the assertion the
+# drawing bug would fail: with the inner units unhung, the walk finds only one.
+lua (function() local seen={} local sel=_G.__v:selectedUnit() if sel then seen[sel]=true end for i=1,12 do if not _G.__v.ptr:down() then break end local u=_G.__v:selectedUnit() if u then seen[u]=true end end _G.__reached=seen local n=0 for _ in pairs(seen) do n=n+1 end _G.__n=n return 'reached='..n end)()
+!assert _G.__n == 3
+!assert _G.__reached[_G.__a()] == true
+!assert _G.__reached[_G.__b()] == true
+!assert _G.__reached[_G.__c()] == true
+
+# ENTER commits straight away, with no navigation at all.
+lua (function() local o=_G.__origin() local P=require('Unit.Promote') local V=require('Unit.PromoteTargetView') _G.__v2=V(o,P.ancestorsOf(o),function(u) _G.__chosen=u end) _G.__v2:show() _G.__v2:enterReleased() return 'ok' end)()
+frames 20
+!assert _G.__chosen == _G.__a()
+
+quit

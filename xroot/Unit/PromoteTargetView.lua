@@ -52,20 +52,71 @@ function PromoteTargetView:init(control, ancestors, onChoose)
   self:build()
 end
 
+-- A unit's children hang off a PATCH or a BRANCH node, never off the unit
+-- directly. Nesting startUnit inside startUnit gives the widget nothing to hang
+-- the inner one from, and it draws only the outermost -- which is what happened
+-- (reported 2026-08-13: "in situations more than one layer deep we do not see
+-- anything below the uppermost layer"). Chain/ScopeView.lua is the reference for
+-- the shape: unit -> patch/branch -> unit.
+--
+-- Which container to open is decided by the INNER unit's own chain, since that
+-- chain is precisely the patch or branch of the outer unit that holds it.
+function PromoteTargetView:openContainerFor(innerUnit)
+  local chain = innerUnit and innerUnit.chain
+  if chain == nil then
+    return nil
+  end
+  local name = chain.subTitle or chain.name or chain.title or "in"
+  if getmetatable(chain) == require "Chain.Patch" then
+    self.ptr:startPatch(name, 1)
+    return "patch"
+  end
+  self.ptr:startBranch(name, 1)
+  return "branch"
+end
+
+function PromoteTargetView:closeContainer(kind)
+  if kind == "patch" then
+    self.ptr:endPatch()
+  elseif kind == "branch" then
+    self.ptr:endBranch()
+  end
+end
+
 function PromoteTargetView:build()
   local overview = self.ptr
   self.unitById = {}
   overview:clear()
-  local opened = 0
-  for _, unit in ipairs(self.ancestors) do
+
+  -- Outermost first, each one opening the container that holds the next, so the
+  -- drawn nesting reads as containment all the way down to the origin's unit.
+  local opened = {}
+  local firstId
+  for i, unit in ipairs(self.ancestors) do
     local id = overview:startUnit(unit.mnemonic, unit.title, 1)
     self.unitById[id] = unit
-    opened = opened + 1
+    firstId = firstId or id
+    opened[#opened + 1] = "unit"
+    local inner = self.ancestors[i + 1]
+    if inner then
+      opened[#opened + 1] = self:openContainerFor(inner)
+    end
   end
-  for _ = 1, opened do
-    overview:endUnit()
+  for i = #opened, 1, -1 do
+    if opened[i] == "unit" then
+      overview:endUnit()
+    else
+      self:closeContainer(opened[i])
+    end
   end
   overview:rebuild()
+  -- Land on the topmost unit rather than on the chain node above it. That node
+  -- is not a promotion target -- only units are -- so leaving the cursor there
+  -- means every promotion starts with a downward turn to get out of a row that
+  -- was never selectable.
+  if firstId then
+    overview:select(firstId)
+  end
 end
 
 function PromoteTargetView:selectedUnit()
