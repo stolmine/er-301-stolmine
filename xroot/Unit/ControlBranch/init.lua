@@ -62,6 +62,16 @@ function ControlBranch:serialize()
   t.type = self.classType
   t.control = self.control:serialize()
   t.objects = Persist.serializeObjects(self.objects)
+  -- [stol:promote-control-type-spec] `type` names the BRANCH, which is enough to
+  -- rebuild the DSP object and not enough to rebuild the widget. A promoted
+  -- subclass records its own class and the data its constructor needs, or it
+  -- would come back from every load as a stock fader.
+  local ControlClass = require "Unit.ControlClass"
+  local name = ControlClass.nameOf(getmetatable(self.control))
+  if name and not ControlClass.isStock(name) then
+    t.controlClass = name
+    t.controlArgs = ControlClass.dataArgs(self.control.defaults)
+  end
   return t
 end
 
@@ -89,6 +99,10 @@ function ControlBranch:deserialize(t)
   if t.objects then
     Persist.deserializeObjects(self.objects, nil, t.objects)
   end
+  -- The value has just been restored underneath a widget that was built before
+  -- it existed. A label derived from that value is now stale, and nothing else
+  -- will notice.
+  require("Unit.ControlClass").resyncDisplay(self.control)
   Branch.deserialize(self, t)
 end
 

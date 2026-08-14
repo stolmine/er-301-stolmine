@@ -1,0 +1,86 @@
+# [stol:promote-control-type-spec] Promoting a real habitat mode selector.
+#
+# This is the case the whole subclass path exists for, run against real package
+# code rather than a fixture. biome's "94 Discont" has a `mode` control that is a
+# ModeSelector: it subclasses GainBias, its bias IS a quantized mode index, and
+# its fader label is the mode NAME rather than a number.
+#
+# Promote it as a plain GainBias and the user gets a continuous fader reading
+# "2.00" driving a discrete index. So the macro is built as the SAME class, from
+# a copy of the origin's own constructor arguments, and three separate things
+# have to hold for that to be worth anything:
+#
+#   1. the macro is a ModeSelector, and its label reads a mode NAME
+#   2. the label is right IMMEDIATELY -- updateLabel is called by the class only
+#      from its init and its encoder handler, never after a programmatic set, so
+#      without an explicit resync the macro sits on modeNames[0] until touched
+#   3. it is all still true after a save and load, which needs the control CLASS
+#      and its mode list written into the patch, since a control branch otherwise
+#      records only "GainBias"
+#
+# 2 and 3 are the ones that would ship silently broken: the macro looks right in
+# the moment you build it and lies afterwards.
+
+!packages biome
+
+frames 20
+!assert (function() local M=require('Package.Manager') local pk for k,v in pairs(M.getPackages()) do if k:find('biome') then pk=v end end return M.install(pk)==true end)()
+frames 10
+lua local F=require('Unit.Factory'); local t=F.getUnitsByLibrary('builtins'); for _,u in ipairs(t) do if (u.title or u.moduleName)=='Custom Effect' then require('Channels').getChain(1):loadUnit(u) end end
+frames 60
+lua (function() local c=require('Channels').getChain(1):getUnit(1) local F=require('Unit.Factory') for _,u in ipairs(F.getUnitsByLibrary('biome')) do if (u.title or ''):find('Discont') then c.patch:loadUnit(u) end end return 'ok' end)()
+frames 60
+lua (function() _G.__unit=function() return require('Channels').getChain(1):getUnit(1) end _G.__origin=function() return require('Channels').getChain(1):getUnit(1).patch:getUnit(1).controls.mode end return 'ok' end)()
+!assert _G.__origin() ~= nil
+
+# It is a SUBCLASS, so the old exact-metatable test would have refused it, and it
+# is clonable, so it must not be flattened to a stock fader.
+!assert getmetatable(_G.__origin()) ~= require('Unit.ViewControl.GainBias')
+!assert require('Unit.Promote').classify(_G.__origin()) == 'clone'
+!assert require('Unit.Promote').isPromotableControl(_G.__origin()) == true
+!assert (function() for _,e in ipairs(_G.__origin():getFloatingMenuItems()) do if e=='promote' then return true end end return false end)()
+
+# Move it off index 0, so a macro that merely defaulted could not pass by luck.
+lua (function() local o=_G.__origin() o.fader:getValueParameter():hardSet(2) o:updateLabel() _G.__originLabel=o.fader:getLabel() return _G.__originLabel end)()
+frames 20
+!assert _G.__originLabel ~= nil and #_G.__originLabel > 0
+
+lua (function() local P=require('Unit.Promote') local m,n=P.createInertMacro(_G.__origin(),_G.__unit()) _G.__name=n _G.__macro=m local ok,why=P.commit(_G.__origin(),m) _G.__ok=ok _G.__why=why return tostring(ok)..','..tostring(why) end)()
+frames 60
+
+# Assert the commit SUCCEEDED. Leaving this out is how a refusal slipped past
+# once already: commit returned false, the macro sat there inert, and every
+# assertion after it was testing an unpromoted control.
+!assert _G.__ok == true
+!assert _G.__why == nil
+
+# 1. same class, so it has the mode machinery rather than a bare fader
+!assert getmetatable(_G.__macro.control) == getmetatable(_G.__origin())
+!assert _G.__macro.control.updateLabel ~= nil
+!assert _G.__macro.control.modeNames ~= nil
+
+# The mode list was COPIED, not shared: a rebuilt control must not be able to
+# mutate the table its origin is still using.
+!assert _G.__macro.control.modeNames ~= _G.__origin().modeNames
+
+# 2. and the label is already correct, with nothing touched
+!assert _G.__macro.control.fader:getLabel() == _G.__originLabel
+
+# The value really did move, and the origin really is hollow underneath.
+!assert math.abs(_G.__macro.control.fader:getValueParameter():target() - 2) < 1e-4
+!assert math.abs(_G.__origin().fader:getValueParameter():target() - 0) < 1e-4
+!assert _G.__origin():isDrivenByMacro() == true
+
+# 3. save, load, and it is still a mode selector showing the same mode
+lua (function() _G.__saved=require('Channels').getChain(1):serialize() return 'ok' end)()
+!assert (function() local cb=_G.__saved.units[1].controlBranches[_G.__name] return cb.controlClass=='biome.ModeSelector' and cb.controlArgs~=nil and cb.controlArgs.modeNames~=nil end)()
+lua (function() require('Channels').getChain(1):deserialize(_G.__saved) return 'ok' end)()
+frames 120
+
+!assert _G.__unit().controls[_G.__name] ~= nil
+!assert getmetatable(_G.__unit().controls[_G.__name]) == getmetatable(_G.__origin())
+!assert math.abs(_G.__unit().controls[_G.__name].fader:getValueParameter():target() - 2) < 1e-4
+!assert _G.__unit().controls[_G.__name].fader:getLabel() == _G.__originLabel
+!assert _G.__origin():isDrivenByMacro() == true
+
+quit

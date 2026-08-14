@@ -332,14 +332,30 @@ function UnitSection:addControlBranch(type, id, data)
   end
 
   local BranchClass = require("Unit.ControlBranch." .. type)
-  local controlBranch = BranchClass {
+  local branchArgs = {
     id = id,
     depth = self.depth + 1,
     title = self.title
   }
+  -- [stol:promote-control-type-spec] A promoted subclass records the control
+  -- class it needs. Resolving it can fail -- the package may have been
+  -- uninstalled since the patch was saved -- in which case the branch builds its
+  -- stock control and the macro reads as a plain fader. It still drives what it
+  -- drove; only the widget is poorer.
+  if data then
+    if data.controlClass then
+      branchArgs.controlClass = require("Unit.ControlClass").resolve(
+                                    data.controlClass)
+    end
+    branchArgs.controlArgs = data.controlArgs
+  end
+  local controlBranch = BranchClass(branchArgs)
   self.controlBranches[id] = controlBranch
 
-  if data then
+  -- `data` carrying a `type` is a serialized branch to restore. Promotion passes
+  -- a data table holding only the control class it wants built, which the branch
+  -- has already consumed above and which must NOT be run through deserialize.
+  if data and data.type then
     controlBranch:deserialize(data)
   end
 

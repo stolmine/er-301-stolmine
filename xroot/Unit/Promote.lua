@@ -216,8 +216,24 @@ local function specFor(control)
   return specs[getmetatable(control)]
 end
 
+-- OPT-OUT: a subclass of a promotable class is promotable unless it says
+-- otherwise. Declaring `canPromote = false` on the class refuses it, in the
+-- style of the existing canMove / canEdit declarations.
+--
+-- Opt-out rather than opt-in because the alternative couples firmware to package
+-- versions: the entry would appear on core faders and not on package ones, with
+-- nothing on screen to explain why. The measured risk of the other direction is
+-- small -- a survey of all 11 habitat packages found no unit that reads its own
+-- control's VALUE to decide anything, which is the one failure the structural
+-- rule cannot see -- and no package outside habitat subclasses these classes at
+-- all.
 function Promote.isPromotableControl(control)
-  return specFor(control) ~= nil
+  if control ~= nil and getmetatable(control) and
+      getmetatable(control).canPromote == false then
+    return false
+  end
+  local how = Promote.classify(control)
+  return how == "exact" or how == "clone" or how == "flatten"
 end
 
 -- The ControlBranch type a macro for this control must be built from, or nil if
@@ -247,6 +263,8 @@ end
 --
 -- The failure direction is the safe one. An unfamiliar control with extra object
 -- arguments falls back to "flatten" rather than aliasing something it should not.
+local baseSpecFor
+
 local CLONE_SAFE_KEYS = {
   branch = true,
   gainbias = true,
@@ -266,6 +284,25 @@ local function isObjectValued(v)
   return t == "table" and getmetatable(v) ~= nil
 end
 
+-- The spec of the promotable class a control DESCENDS from, or nil. Base.Class
+-- deep-copies members, so the inherited `type` is exactly the right signal here,
+-- where the whole point is to catch subclasses -- the opposite of what specFor
+-- needs.
+baseSpecFor = function(control)
+  local class = control and getmetatable(control)
+  if class == nil then
+    return nil
+  end
+  if specs == nil then
+    specs = buildSpecs()
+  end
+  for cls, spec in pairs(specs) do
+    if cls.type == class.type then
+      return spec
+    end
+  end
+end
+
 -- Returns "exact" | "clone" | "flatten" | nil, plus the sorted list of foreign
 -- object-valued keys that forced a "flatten".
 function Promote.classify(control)
@@ -282,12 +319,7 @@ function Promote.classify(control)
   -- Must descend from a promotable class. Base.Class deep-copies members, so the
   -- inherited `type` is exactly the right signal HERE, where the whole point is
   -- to catch subclasses -- the opposite of what specFor needs.
-  local base
-  for cls, spec in pairs(specs) do
-    if cls.type == class.type then
-      base = spec
-    end
-  end
+  local base = baseSpecFor(control)
   if base == nil or control.branch == nil or control.defaults == nil then
     return nil
   end
@@ -304,8 +336,15 @@ function Promote.classify(control)
   return "flatten", foreign
 end
 
+-- The spec that governs a control, whether it IS a promotable class or merely
+-- descends from one. Every caller that acts on a control wants this; only the
+-- clone/flatten decision cares about the difference.
+local function effectiveSpec(control)
+  return specFor(control) or baseSpecFor(control)
+end
+
 function Promote.branchTypeFor(control)
-  local spec = specFor(control)
+  local spec = effectiveSpec(control)
   return spec and spec.branchType
 end
 
@@ -411,7 +450,22 @@ function Promote.createInertMacro(control, targetUnit, position)
 
   -- Same branch type as the origin, so a promoted Pitch is a Pitch and the
   -- macro reads in cents rather than as a bare number.
-  local macro = targetUnit:addControlBranch(Promote.branchTypeFor(control), name)
+  --
+  -- And for a subclass that can be cloned, the same CONTROL class too, so a
+  -- promoted mode selector is a mode selector rather than a numeric fader
+  -- driving a quantized index. `classify` refuses to clone anything holding a
+  -- reference into its own unit, which is what stops a cloned macro from
+  -- editing the origin's parameters behind its back.
+  local ControlClass = require "Unit.ControlClass"
+  local branchData
+  if Promote.classify(control) == "clone" then
+    branchData = {
+      controlClass = getmetatable(control),
+      controlArgs = ControlClass.dataArgs(control.defaults)
+    }
+  end
+  local macro = targetUnit:addControlBranch(Promote.branchTypeFor(control), name,
+                                            branchData)
   -- addControlBranch does not put the control in any view; deserialize pairs the
   -- two (Unit/init.lua), and without this the macro exists but is invisible.
   targetUnit:placeControl(name, "expanded", position)
@@ -539,12 +593,15 @@ function Promote.commit(origin, macroBranch)
   end
 
   local macroControl = macroBranch.control
-  local spec = specFor(origin)
+  -- effectiveSpec, not specFor: a subclass has no spec of its own and is governed
+  -- by the one it descends from. Using the exact lookup here refused every
+  -- subclass at commit while the menu happily offered it.
+  local spec = effectiveSpec(origin)
   -- The macro was built from the origin's own branch type, so the two must agree
   -- on shape. Check both rather than trusting that: a mismatch means the macro is
   -- not what it should be, and wiring a half-configured object into the patch is
   -- the one outcome worth refusing outright.
-  if spec == nil or specFor(macroControl) ~= spec then
+  if spec == nil or effectiveSpec(macroControl) ~= spec then
     return false, "Macro does not match the control it came from."
   end
   if not (spec.ready(origin) and spec.ready(macroControl)) then
@@ -578,6 +635,10 @@ function Promote.commit(origin, macroBranch)
   -- Macro takes the state BEFORE it is wired, so no frame sees the origin driven
   -- by an unconfigured object.
   spec.apply(macroControl, state)
+  -- A value-derived label (a mode name) is recomputed by its class only from its
+  -- own init and its own encoder handler, never after a programmatic set. Without
+  -- this the macro would sit showing modeNames[0] until the user turned it.
+  require("Unit.ControlClass").resyncDisplay(macroControl)
 
   -- Ordering buys the cheaper transient. Parameter writes are not batched by the
   -- audio-thread transaction (it covers task-list changes only), so the audio

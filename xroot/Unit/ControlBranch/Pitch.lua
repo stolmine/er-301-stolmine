@@ -27,13 +27,29 @@ function PitchBranch:init(args)
   ControlBranch.init(self, args)
   self:setClassName("Unit.ControlBranch.Pitch")
 
-  self.control = Pitch {
-    button = id,
-    description = args.description or PitchBranch.classDescription,
-    branch = self,
-    offset = tune,
-    range = range
-  }
+  -- [stol:promote-control-type-spec] See Unit/ControlBranch/GainBias.lua for
+  -- why the control class is a parameter and why a failure falls back to stock.
+  local cargs = {}
+  for k, v in pairs(args.controlArgs or {}) do
+    cargs[k] = v
+  end
+  cargs.button = id
+  cargs.description = cargs.description or args.description or
+                          PitchBranch.classDescription
+  cargs.branch = self
+  cargs.offset = tune
+  cargs.range = range
+
+  local Custom = args.controlClass
+  if Custom then
+    local ok, control = pcall(Custom, cargs)
+    if ok and control then
+      self.control = control
+    else
+      app.logInfo("%s: custom control class failed, using stock.", self)
+    end
+  end
+  self.control = self.control or Pitch(cargs)
 end
 
 return PitchBranch
