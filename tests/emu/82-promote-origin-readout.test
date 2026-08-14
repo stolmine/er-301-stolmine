@@ -1,0 +1,64 @@
+# [stol:promote-control-to-top-level] The promoted origin reports the value that
+# is actually passing through it.
+#
+# Without this the origin reads 0 after promotion, because the macro holds the
+# value and the origin is a 0-centred trim. Correct, and unreadable: the inner
+# control says 0 while the patch plays 440 Hz. Rebinding the origin's READOUT to
+# its range object's Center makes it report what is really there. That is the
+# same swap the global unitControlReadoutSource = "actual" setting performs at
+# construction, applied per control and only while it is being driven.
+#
+# The state is DERIVED, not flagged: "am I driven by a macro" is read off the
+# branch's input source, which is already part of the serialized patch. So it
+# survives a reload with nothing extra written, and it cannot drift out of step
+# with the wiring because it IS the wiring. The reload half of this test is the
+# part that would fail if it were ever changed to a stored flag.
+
+frames 20
+lua local F=require('Unit.Factory'); local t=F.getUnitsByLibrary('builtins'); for _,u in ipairs(t) do if (u.title or u.moduleName)=='Custom Effect' then require('Channels').getChain(1):loadUnit(u) end end
+frames 60
+lua (function() local c=require('Channels').getChain(1):getUnit(1) local F=require('Unit.Factory') for _,u in ipairs(F.getUnitsByLibrary('builtins')) do if (u.title or u.moduleName)=='Test Osc' then c.patch:loadUnit(u) end end return 'ok' end)()
+frames 60
+lua (function() _G.__unit=function() return require('Channels').getChain(1):getUnit(1) end _G.__origin=function() return require('Channels').getChain(1):getUnit(1).patch:getUnit(1).controls.freq end _G.__center=function(c) local r=c.fader:getRangeObject() return r and r:getParameter('Center') end return 'ok' end)()
+
+# Before promotion the control is nobody's follower.
+!assert _G.__origin():isDrivenByMacro() == false
+!assert rawget(_G.__origin(),'preMacroReadout') == nil
+
+lua (function() _G.__origin().fader:getValueParameter():hardSet(440) return 'ok' end)()
+frames 20
+
+lua (function() local P=require('Unit.Promote') local m,n=P.createInertMacro(_G.__origin(),_G.__unit()) _G.__name=n _G.__macro=m local ok,why=P.commit(_G.__origin(),m) return tostring(ok)..','..tostring(why) end)()
+frames 60
+
+# The origin is now driven, and its readout has been swapped to the live value.
+# preMacroReadout holds the parameter it was showing, so the swap is reversible.
+!assert _G.__origin():isDrivenByMacro() == true
+!assert rawget(_G.__origin(),'preMacroReadout') ~= nil
+!assert rawget(_G.__origin(),'preMacroReadout') == _G.__origin().fader:getValueParameter()
+
+# The origin's own bias really is 0 -- the readout is reporting the signal, not
+# hiding the hollowing.
+!assert math.abs(_G.__origin().fader:getValueParameter():target() - 0) < 1e-4
+!assert math.abs(_G.__macro.control.fader:getValueParameter():target() - 440) < 1e-4
+
+# Only the readout moved. The encoder still edits the trim and the bar still
+# shows it, or the user could not reach the offset the origin still owns.
+!assert _G.__origin().fader:getValueParameter() ~= _G.__center(_G.__origin())
+
+# ---- it survives a reload, with nothing extra serialized --------------------
+lua (function() _G.__saved=require('Channels').getChain(1):serialize() return 'ok' end)()
+lua (function() require('Channels').getChain(1):deserialize(_G.__saved) return 'ok' end)()
+frames 120
+!assert _G.__origin():isDrivenByMacro() == true
+!assert rawget(_G.__origin(),'preMacroReadout') ~= nil
+
+# ---- and it reverses when the macro stops driving it ------------------------
+# Deleting the macro releases the origin's input source, so the origin goes back
+# to reporting its own bias. Nothing has to remember that it was ever promoted.
+lua (function() _G.__unit():removeControlBranch(_G.__name) return 'ok' end)()
+frames 60
+!assert _G.__origin():isDrivenByMacro() == false
+!assert rawget(_G.__origin(),'preMacroReadout') == nil
+
+quit
