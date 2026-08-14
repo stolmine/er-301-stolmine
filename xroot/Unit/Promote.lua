@@ -370,6 +370,48 @@ function Promote.ancestorsOf(control)
   return out
 end
 
+-- Does this control's modulation branch actually feed the object the control
+-- drives?
+--
+-- Promotion assumes it does. It wires the macro into the branch and then relies
+-- on `out = bias + gain*in` at the control's own object to make the macro's
+-- value arrive intact. A unit is free to put something BETWEEN them, and one
+-- does: Filterbank/Tomograph builds
+--
+--   connect(vOctGain, "Out", vOctOffset, "In")
+--   self:addMonoBranch("vOctOffset", vOctGain, "In", vOctOffset, "Out")
+--
+-- so the branch feeds a gain stage in front of the parameter the control edits.
+-- Promote that and the wiring succeeds, the origin's mod button and scope light
+-- up as if modulated, and the macro moves nothing at all -- habitat's convention
+-- is that a mod gain defaults to 0, so the intervening stage swallows it. That
+-- is the worst failure this feature can have: it looks like it worked.
+--
+-- Refuse rather than try to compensate. Neutralizing an intervening stage means
+-- guessing what it is for, and the unit's author put it there deliberately.
+--
+-- Strict on purpose: promote only when the branch DEMONSTRABLY lands on the
+-- control's own object. Measured across biome, spreadsheet, catchall and mi,
+-- 421 of 422 promotable controls satisfy this with none unverifiable, so
+-- strictness costs one control and buys a guarantee.
+function Promote.branchReachesParameter(control)
+  local branch = control and control.branch
+  local destination = branch and branch.leftDestination
+  if destination == nil then
+    return false
+  end
+  local defaults = control.defaults or {}
+  local object = defaults.gainbias or defaults.offset or control.comparator
+  if object == nil then
+    return false
+  end
+  local ok, inlet = pcall(object.getInput, object, "In")
+  if not ok or inlet == nil then
+    return false
+  end
+  return inlet == destination
+end
+
 -- Single choke point for "may this control be promoted right now?".
 -- Returns true, or false plus a reason string suitable for a flash message.
 --
@@ -385,6 +427,12 @@ function Promote.check(control, quiet)
     -- into. Both promotable classes hard-error without one at construction, so
     -- this is a belt-and-braces guard rather than a reachable case.
     return false, "That control has no modulation branch."
+  end
+
+  if not Promote.branchReachesParameter(control) then
+    -- Reported from the bench 2026-08-13: the origin's graphics lit up as if
+    -- modulated, and the macro moved nothing.
+    return false, "This control's modulation is wired indirectly."
   end
 
   local ancestors = Promote.ancestorsOf(control)

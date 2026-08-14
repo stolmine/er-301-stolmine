@@ -1,0 +1,58 @@
+# [stol:promote-control-to-top-level] Refuse a control whose branch does not feed
+# the parameter it edits.
+#
+# Reported from the bench 2026-08-13: a control promoted, the origin's graphics
+# changed to show it was modulated, and the macro moved nothing.
+#
+# Promotion assumes the branch lands on the control's own object, so that
+# out = bias + gain*in delivers the macro's value intact. A unit may put
+# something in between, and Filterbank/Tomograph does:
+#
+#   connect(vOctGain, "Out", vOctOffset, "In")
+#   self:addMonoBranch("vOctOffset", vOctGain, "In", vOctOffset, "Out")
+#
+# The control drives vOctOffset; its branch feeds vOctGain, a gain stage in
+# front. Wiring a macro in succeeds and lights up the origin's mod button, but
+# habitat's convention is that a mod gain defaults to 0, so the stage swallows
+# the macro entirely. The feature looks like it worked and did nothing -- the
+# worst failure mode available to it.
+#
+# The guard is strict: promote only when the branch DEMONSTRABLY lands on the
+# control's own object. Measured across biome, spreadsheet, catchall and mi, 421
+# of 422 promotable controls satisfy that with none unverifiable, so strictness
+# costs one control and buys a guarantee.
+
+!packages spreadsheet
+
+frames 20
+!assert (function() local M=require('Package.Manager') local pk for k,v in pairs(M.getPackages()) do if k:find('spreadsheet') then pk=v end end return M.install(pk)==true end)()
+frames 10
+lua local F=require('Unit.Factory'); local t=F.getUnitsByLibrary('builtins'); for _,u in ipairs(t) do if (u.title or u.moduleName)=='Custom Effect' then require('Channels').getChain(1):loadUnit(u) end end
+frames 60
+lua (function() local c=require('Channels').getChain(1):getUnit(1) local F=require('Unit.Factory') for _,u in ipairs(F.getUnitsByLibrary('spreadsheet')) do if (u.title or ''):find('Tomograph') then c.patch:loadUnit(u) end end return 'ok' end)()
+frames 60
+lua (function() _G.__u=function() local p=require('Channels').getChain(1):getUnit(1).patch for i=1,p:length() do local u=p:getUnit(i) if tostring(u.title):find('Tomograph') then return u end end end return 'ok' end)()
+!assert _G.__u() ~= nil
+!assert _G.__u().controls.vOctOffset ~= nil
+
+# The control is otherwise a perfectly ordinary promotable one: right class,
+# has a branch, has an ancestor. Only the wiring disqualifies it, so this is a
+# genuine test of the new guard rather than of some other precondition.
+!assert require('Unit.Promote').classify(_G.__u().controls.vOctOffset) ~= nil
+!assert _G.__u().controls.vOctOffset.branch ~= nil
+!assert #require('Unit.Promote').ancestorsOf(_G.__u().controls.vOctOffset) == 1
+
+# Its branch lands somewhere other than the object it drives...
+!assert require('Unit.Promote').branchReachesParameter(_G.__u().controls.vOctOffset) == false
+
+# ...so it is refused, with a reason, and the menu does not offer it.
+!assert require('Unit.Promote').check(_G.__u().controls.vOctOffset, true) == false
+!assert (function() local ok,why=require('Unit.Promote').check(_G.__u().controls.vOctOffset, true) return type(why)=='string' and #why>0 end)()
+!assert (function() for _,e in ipairs(_G.__u().controls.vOctOffset:getFloatingMenuItems()) do if e=='promote' then return false end end return true end)()
+
+# Other controls on the SAME unit are still promotable, so the guard is about
+# this control's wiring and not about the unit or the package.
+!assert (function() local n=0 for id,c in pairs(_G.__u().controls) do if require('Unit.Promote').check(c,true) then n=n+1 end end return n>0 end)()
+!assert (function() local n=0 for id,c in pairs(_G.__u().controls) do if require('Unit.Promote').branchReachesParameter(c) then n=n+1 end end return n>0 end)()
+
+quit
