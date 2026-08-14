@@ -5,7 +5,7 @@ ER-301-STOLMINE TODO (generated — DO NOT EDIT)
 ledger, not this file. Status/verification are gate-enforced (`scripts/dev
 check`): a `done` item must have a real test or its named artifact.*
 
-**114 items** — 79 done, 33 todo, 2 archived. *Rendered 2026-08-13.*
+**114 items** — 81 done, 31 todo, 2 archived. *Rendered 2026-08-13.*
 
 ## Sequencer
 
@@ -36,8 +36,6 @@ check`): a `done` item must have a real test or its named artifact.*
 |   | `cpu-metering-ui` | More visible / granular CPU metering in the UI | manual · 2026-07-14 |
 |   | `crashdiag-ui-flightrecorder-seams` | On-device flight recorder captures UI seam events (P1b) | manual · 2026-07-12 |
 |   | `mix-input-native-cv` | Native CV/modulation on the channel mix input slider (SHIFT gesture) | manual · 2026-07-13 |
-|   | `promote-control-to-top-level` | Promote an inner control to its container's top-level control interface (one action) | manual · 2026-08-13 |
-|   | `promote-control-type-spec` | Class-level promotion spec so habitat GainBias subclasses can be promoted | manual · 2026-08-13 |
 |   | `ui-audio-editor-selection-ops` | Audio editor: selection-scoped destructive operations (idea) | manual · 2026-07-09 |
 |   | `ui-chain-ref-invalidation-link-unlink` | Chain-reference invalidation on stereo link/unlink (LocalChooser / Source.Chooser) | manual · 2026-07-09 |
 |   | `ui-core-keyword-type-revamp` | Core package keyword + type revamp: sampling glyph + keyword audit | manual · 2026-07-09 |
@@ -48,6 +46,8 @@ check`): a `done` item must have a real test or its named artifact.*
 | ✓ | `control-shift-subdisplay-indicator` | Detect controls with an extra SHIFT sub-display and surface a discoverability indicator | manual *(attested)* · 2026-08-12 |
 | ✓ | `crashdiag-ui-arm-toggle` | Expose the crash-diagnostics arm toggle in the normal System Settings menu | manual *(attested)* · 2026-07-12 |
 | ✓ | `infra-crash-diag-debug-mode-ui` | Debug-mode admin toggle + on-boot crash screen + past-report viewer | screenshot: with an injected report present, boot shows a 'crash captured' screen; the admin diagnostics viewer lists and displays past reports; captured as a tests/emu golden/trace *(attested)* · 2026-07-10 |
+| ✓ | `promote-control-to-top-level` | Promote an inner control to its container's top-level control interface (one action) | manual *(attested)* · 2026-08-13 |
+| ✓ | `promote-control-type-spec` | Class-level promotion spec so habitat GainBias subclasses can be promoted | manual *(attested)* · 2026-08-13 |
 | ✓ | `ui-chain-replace-picker-favorites` | Chain-UI replace picker opens in normal browse, not favorites-tagging mode | manual *(attested)* · 2026-07-09 |
 | ✓ | `ui-dense-unit-picker` | Dense 2-column unit picker: type glyphs, alphabet ribbon, sort/filter, M-key gestures | screenshot: Admin > Settings > Units > Unit picker style: dense; capture the 2-column layout with type glyphs, alphabet jump ribbon, and section dividers; cycle M2 sort modes and M3 type filter *(attested)* · 2026-07-09 |
 | ✓ | `ui-favorites-picker` | Favorites in the unit picker: shift-toggle edit mode, own category above Recents | manual *(attested)* · 2026-07-09 |

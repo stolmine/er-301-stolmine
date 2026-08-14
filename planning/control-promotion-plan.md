@@ -4,44 +4,39 @@
 macro on any ancestor unit in one gesture, preserving its value, its display and
 its modulation.*
 
-## CURRENT STATE (2026-08-13) — resume here
+## CURRENT STATE (2026-08-13) — done, bench-confirmed
 
-**Status: implemented end to end, bench-pending.** Every step of the build order
-below has landed and is covered by emu tests (50/52 suite green; the two failures
-are untracked WIP package smoke tests needing packages that are not in the
-sandbox). It has **not** been exercised on hardware or through the real gesture
-on a real patch — only programmatically from the test harness.
+**Promotion works on hardware.** Confirmed by the maintainer across several
+builds. One gesture from the fan-out menu: pick an ancestor, place the macro on a
+proxy screen, commit. The macro appears pre-wired and the origin follows it.
 
-### Landed
+### What it covers
 
-| step | what | where | test |
-|---|---|---|---|
-| Phase 1 | `scaling` joins the GainBias customization path | `GainBias.lua` (`customKeys`, `customize`, `getCustomizableValue`, `setFaderScaling` now records `self.faderScaling` because `od::Fader` has no getter) | `tests/emu/67` |
-| Step 2 | discriminator + menu gating, all four preconditions in one choke point | `xroot/Unit/Promote.lua` (`isPromotableControl`, `ancestorsOf`, `check`) + the `promote` entry in `Unit/ViewControl/init.lua` | `tests/emu/68` |
-| Step 3a | ancestor picker | `xroot/Unit/PromoteTargetView.lua` | none (UI) |
-| Step 3b | inert macro create + rollback | `Promote.createInertMacro` / `Promote.rollback` | `tests/emu/69` |
-| Step 4 | placement — a proxy screen; encoder walks a name panel along a row of name panels | `xroot/Unit/PromotePlaceView.lua` | `tests/emu/70`, `75` |
-| Step 5 | transplant | `Promote.commit` | `tests/emu/71`, `72`, `74` |
-| Step 6 | three-part scene clear | `clearSceneState` in `Promote.lua` | `tests/emu/73` |
-| fix | `removeControlBranch` leaked a running branch and a stale `unit.branches` entry | `Unit/Section.lua` | covered by `69`'s create/cancel loop |
+| | |
+|---|---|
+| core types | GainBias, Pitch, Gate |
+| package types | any subclass of those, **opt-out** — `canPromote = false` on the class refuses it |
+| subclass macros | rebuilt as their OWN class where that is safe, so a promoted mode selector shows mode NAMES, immediately and after a reload |
+| excluded | BranchMeter (its branch carries signal, not modulation), anything with no branch, and any control whose branch does not feed the parameter it edits |
+| tests | `tests/emu/67`–`84` |
 
-Commits: `eb37399` (Phase 1), `4c86577` (steps 2 + 3a/3b + the fix), `f835461`
-(placement), `b51290f` (transplant + scene clear).
+### The origin, settled
 
-### What is left
+A promoted origin is **just a modulated control**: bias 0, readout showing that
+bias, no mark, no special casing. Two attempts to dress it up (mirroring the
+readout to the live value; drawing a "driven" mark) were both built and both
+removed, on the maintainer's argument that a control whose readout shows its own
+bias while something else moves the value is what *every* modulated control here
+already does. `tests/emu/82` exists to stop a third attempt.
 
-1. **Bench validation.** The success criterion in §10 is *audible* transparency,
-   and no test here can assert that. Promote a dialed-in control on a real patch
-   and confirm the sound does not change; repeat promote/delete for resource
-   lifecycle; check a promoted control in a patch that also uses scenes.
-2. **Plan tests 5 (subclass rejection against real habitat), 6 (picker offers
-   exactly the ancestors) and 8 (key uniqueness across the whole tree)** are the
-   three from §9 with no direct coverage. 5 is partly covered by `68` against
-   core classes only; `66` shows the habitat harness exists if it is wanted.
-3. The v2 items still deferred: clamp forwarding (§4) and `canMove` honoured by
-   placement (§8). Pitch and Gate both landed, see below.
+### What is not claimed
+
+Audible transparency was never A/B measured. The feature behaves correctly and
+sounds right in use; nobody has put a scope on the moment of promotion. The
+one-frame dip at commit (§5) is documented, not observed.
 
 ### Deviations from this plan, already made
+
 
 **`createInertMacro` snapshots display attributes under `pcall` per key.** A
 blanket copy threw on Test Osc's `freq`, whose `freqGain` map has no
