@@ -3,6 +3,46 @@
 * NEW: A new feature. Relevant to users and developers.
 * SYS: A system-level change.  Usually only relevant to developers.
 
+# v0.7.0-stolmine.9.7.0
+* NEW: Control promotion. Hold a control inside a nested unit and pick
+  `promote` from the fan-out menu to lift it onto any unit that
+  contains it, as a macro that is already wired. Choose the
+  destination from a picker showing only that control's ancestors,
+  then choose where it sits on the destination's strip. Replaces
+  building a macro by hand and connecting it back down.
+* NEW: A promoted macro takes the control's value, its gain and its
+  whole modulation branch, so the patch sounds the same at the moment
+  of promotion. The original becomes a pass-through at zero and stays
+  usable as a per-instance trim on top of the macro.
+* NEW: Promotion covers standard faders, V/oct offsets and gates, and
+  the specialised controls in packages. Where it is safe, the macro
+  is built as the same kind of control as the original, so promoting
+  a mode selector gives you a mode selector showing mode names, not a
+  numeric fader.
+* NEW: Nothing is created until you confirm. Backing out of either
+  screen leaves the patch untouched.
+* NEW: SHIFT sub-display marks. `Admin > Settings > Units` gains
+  `Show SHIFT sub-display marks?`, OFF by default, which marks every
+  control that has a second sub display under SHIFT. Detection is
+  structural, so packages are covered without declaring anything.
+* FIX: A control whose customisations changed its own value lost that
+  value on every patch load. Affects customised V/oct controls in
+  existing patches, which will now load with the offset they were
+  saved with.
+* FIX: Deleting a custom control left its modulation branch running on
+  the audio thread and a stale entry behind it. Affects the existing
+  `Edit Controls > Delete Control` path as well as promotion.
+* SYS: Promotion refuses anything it cannot promise transparency for:
+  a control with no modulation branch, a mixer-style input level, or
+  a control whose branch is wired through an intervening stage rather
+  than into the parameter it edits.
+* SYS: Promotion is refused while a scene is being authored or is
+  engaged, and clears the promoted control's own scene deltas on
+  commit. Other controls' scene data is untouched.
+* SYS: `make firmware` prints the SD card copy commands, with the
+  version filled in, after every build.
+* SYS: 20 new emulator regression tests.
+
 # v0.7.0-stolmine.9.6.0
 * NEW: Crash diagnostics. `Admin > Crash Reports` lists and displays
   past reports, and a notice screen appears on boot when a report is
