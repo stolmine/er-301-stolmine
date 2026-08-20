@@ -66,7 +66,7 @@ check`): a `done` item must have a real test or its named artifact.*
 | | id | item | verify |
 |---|---|---|---|
 |   | `dsp-multi-output-followups` | Multi-output framework follow-ups (preset rewriter, picker glyph, topology surfacing, LUT audit) | manual · 2026-07-09 |
-|   | `dsp-stolmine-core-package` | Stolmine Core package: multi-output core units, default install with vanilla Core bundled | manual · 2026-07-09 |
+|   | `dsp-stolmine-core-package` | Stolmine Core package: multi-output core units, default install with vanilla Core bundled | manual · 2026-08-20 |
 |   | `onboard-sample-analysis-browsing` | Onboard sample-content analysis for browsing (waveform/transient/pitch/loudness) | manual · 2026-07-20 |
 |   | `polyphony-poly-container` | Polyphony via a 'polyphonize' poly container (transparent voice cloning, MIDI-driven) | manual · 2026-07-15 |
 |   | `sample-auto-classification` | Auto-classify samples (loop/one-shot, drum hits, instrument type) for browsing/tagging | manual · 2026-07-20 |
