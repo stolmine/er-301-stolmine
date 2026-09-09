@@ -41,7 +41,7 @@ uint64_t Rng_read64(void)
     return splitmix64();
   }
 
-  uint64_t output;
+  uint64_t output = 0;
   FILE *f = fopen("/dev/urandom", "r");
   if (f)
   {
@@ -65,7 +65,7 @@ uint32_t Rng_read32(void)
     return (uint32_t)(splitmix64() >> 32);
   }
 
-  uint32_t output;
+  uint32_t output = 0;
   FILE *f = fopen("/dev/urandom", "r");
   if (f)
   {

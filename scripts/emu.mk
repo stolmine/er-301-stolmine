@@ -43,7 +43,6 @@ sdl2 := $(shell brew --prefix sdl2)
 sdl2_ttf := $(shell brew --prefix sdl2_ttf)
 fftw := $(shell brew --prefix fftw)
 
-CFLAGS += -rdynamic
 CFLAGS += -I$(sdl2)/include -I$(sdl2)/include/SDL2 -I$(sdl2_ttf)/include -I$(fftw)/include
 CFLAGS += $(ARCH_FLAGS)
 LFLAGS += -L$(sdl2)/lib -L$(sdl2_ttf)/lib -L$(fftw)/lib
@@ -52,6 +51,7 @@ endif
 CFLAGS += -DFIRMWARE_VERSION=\"$(FIRMWARE_VERSION)\"
 CFLAGS += -DBUILD_PROFILE=\"$(PROFILE)\"
 CFLAGS += -DDOOMGENERIC_RESX=320 -DDOOMGENERIC_RESY=200
+CFLAGS += -Wno-unused-function -Wno-unused-const-variable -Wno-unused-variable -Wno-unused-private-field -Wno-unused-but-set-variable -Wno-overloaded-virtual -Wno-uninitialized -Wno-sometimes-uninitialized -Wno-non-c-typedef-for-linkage -Wno-pointer-to-int-cast -Wno-absolute-value -Wno-mismatched-tags
 LFLAGS += -lSDL2 -lSDL2_ttf -lfftw3f -lm -ldl -lstdc++ 
 
 all: $(out_dir)/$(program_name).elf

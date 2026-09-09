@@ -23,7 +23,6 @@ namespace od
   private:
     LockFreeQueue<Job *, 128> mQueue;
     Job *mCurrentJob = 0;
-    int mStatus = STATUS_NONE;
 
     const uint32_t onPush = EventFlags::flag01;
     virtual void run();

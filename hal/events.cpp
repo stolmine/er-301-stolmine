@@ -11,7 +11,7 @@
 #define REPEAT_PERIOD 3
 #define REPEAT_DELAY 25
 
-typedef struct
+typedef struct Local
 {
   fifo_t Q;
   od::EventFlags events;

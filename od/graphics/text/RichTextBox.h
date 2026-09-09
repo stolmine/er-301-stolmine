@@ -24,7 +24,7 @@ namespace od
         void setAlignment(Alignment align);
         void setMargins(int left, int bottom, int right, int top);
         void setFontSize(int size);
-        virtual void setSize(int width, int height);
+        void setSize(int width, int height, bool updateSaved = true) override;
         void fitHeight(int width);
         void fitHeight();
 
@@ -38,7 +38,7 @@ namespace od
         }
 
 #ifndef SWIGLUA
-        virtual void draw(FrameBuffer &fb);
+        void draw(FrameBuffer &fb) override;
 #endif
 
     protected:

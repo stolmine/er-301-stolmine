@@ -38,8 +38,6 @@ namespace od
     LinearRamp mFade;
     float mLeftBias = 0.0f;
     float mRightBias = 0.0f;
-    int mSavedLoopStart = 0;
-    int mSavedLoopEnd = 0;
 
     inline void jumpToStereo(int next);
     inline void jumpToMono(int next);

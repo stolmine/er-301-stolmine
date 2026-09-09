@@ -12,7 +12,7 @@ namespace od
         virtual ~SourceUnit();
 
 #ifndef SWIGLUA
-        virtual void process();
+        void process() override;
 #endif
 
     protected:

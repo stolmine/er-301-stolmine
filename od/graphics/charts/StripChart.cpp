@@ -23,9 +23,9 @@ namespace od
 	{
 	}
 
-	void StripChart::setSize(int width, int height)
+	void StripChart::setSize(int width, int height, bool updateSaved)
 	{
-		Graphic::setSize(width, height);
+		Graphic::setSize(width, height, updateSaved);
 		if (width > 0)
 		{
 			mFifo.allocate(width);
