@@ -138,7 +138,7 @@ namespace od
       float32x2_t kd = vdup_n_f32(K[i]);
       float32x2_t rd = vdup_n_f32(R[i]);
 
-      float32x2_t xd;
+      float32x2_t xd = vdup_n_f32(0.0f);
       xd = vld1_lane_f32(leftIn + i, xd, 0);
       xd = vld1_lane_f32(rightIn + i, xd, 1);
       xd = vadd_f32(xd, noise);      // add regularization noise

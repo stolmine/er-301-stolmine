@@ -63,19 +63,41 @@ namespace emu
   FC_Font *Window::getFont(int size)
   {
     static const char *fontFiles[] = {
-        "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
         "libs/SDL_FontCache/test/fonts/FreeSans.ttf",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/System/Library/Fonts/Supplemental/Georgia.ttf",
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/System/Library/Fonts/HelveticaNeue.ttc",
+        "/System/Library/Fonts/Menlo.ttc",
+        "/System/Library/Fonts/SFNS.ttf",
+        "/Library/Fonts/Arial Unicode.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
         NULL};
     auto i = fontMap.find(size);
     if (i == fontMap.end())
     {
       FC_Font *font = FC_CreateFont();
+      const char *basePath = SDL_GetBasePath();
       for (const char **filename = fontFiles; *filename; filename++)
       {
-        logDebug(10, "Trying %s, size=%d", *filename, size);
-        if (FC_LoadFont(font, renderer, *filename, size, FC_MakeColor(0, 0, 0, 255), TTF_STYLE_NORMAL))
+        std::string candidate = *filename;
+        if (basePath != NULL && candidate.find('/') != 0)
         {
-          logDebug(10, "Loaded %s, size=%d", *filename, size);
+          candidate = std::string(basePath) + candidate;
+        }
+
+        SDL_RWops *rw = SDL_RWFromFile(candidate.c_str(), "rb");
+        if (rw == NULL)
+        {
+          logDebug(10, "Skipping missing font %s, size=%d", candidate.c_str(), size);
+          continue;
+        }
+        SDL_RWclose(rw);
+
+        logDebug(10, "Trying %s, size=%d", candidate.c_str(), size);
+        if (FC_LoadFont(font, renderer, candidate.c_str(), size, FC_MakeColor(0, 0, 0, 255), TTF_STYLE_NORMAL))
+        {
+          logDebug(10, "Loaded %s, size=%d", candidate.c_str(), size);
           fontMap[size] = font;
           return font;
         }

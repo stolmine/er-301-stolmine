@@ -64,9 +64,9 @@ namespace od
         mRebuildNeeded = true;
     }
 
-    void RichTextBox::setSize(int width, int height)
+    void RichTextBox::setSize(int width, int height, bool updateSaved)
     {
-        Graphic::setSize(width, height);
+        Graphic::setSize(width, height, updateSaved);
         //rebuild();
     }
 

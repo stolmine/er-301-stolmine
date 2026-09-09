@@ -115,9 +115,9 @@ namespace od
     mInvalidatedIntervals.clear();
   }
 
-  void SampleView::setSize(int width, int height)
+  void SampleView::setSize(int width, int height, bool updateSaved)
   {
-    Graphic::setSize(width, height);
+    Graphic::setSize(width, height, updateSaved);
     prepareVectors();
     mZoomLevelSaved = 0; // force a refresh
   }

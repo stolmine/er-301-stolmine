@@ -43,7 +43,9 @@
 %}
 
 %{
+#if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
 
 #undef SWIGLUA
 

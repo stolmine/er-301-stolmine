@@ -19,8 +19,9 @@
 
 namespace emu
 {
-  struct Window
+  class Window
   {
+  public:
     Window();
     ~Window();
 

@@ -44,7 +44,6 @@ namespace od
     LoudnessProbe mProbe;
     Outlet *mpWatchedOutlet = 0;
     float mDecibels = -160;
-    float mPeak = 0;
 
     int mDisplayDecibels = 0;
     std::string mDisplayText;

@@ -29,7 +29,7 @@ namespace od
     }
 
     void forceRefresh();
-    virtual void setSize(int width, int height);
+    void setSize(int width, int height, bool updateSaved = true) override;
 
     void showTimeZoomGadget()
     {
@@ -56,8 +56,8 @@ namespace od
     void setViewGainInDecibels(int decibels);
 
 #ifndef SWIGLUA
-    virtual void draw(FrameBuffer &fb);
-    virtual void notifyVisible();
+    void draw(FrameBuffer &fb) override;
+    void notifyVisible() override;
     void drawPosition(FrameBuffer &fb, int position, const char *name,
                       int width = 5);
     void drawMiniPosition(FrameBuffer &fb, int position, int height, int y);
