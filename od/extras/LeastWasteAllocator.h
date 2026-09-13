@@ -48,7 +48,7 @@ namespace od
       }
 
       // Define an ordering relation on sections for sorting.
-      const bool operator<(const Section &rhs)
+      bool operator<(const Section &rhs) const
       {
         return mpData < rhs.mpData;
       }

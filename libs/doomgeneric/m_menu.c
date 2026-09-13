@@ -1320,7 +1320,7 @@ int M_StringWidth(char* string)
 	
     for (i = 0;i < strlen(string);i++)
     {
-	c = toupper(string[i]) - HU_FONTSTART;
+	c = toupper((unsigned char)string[i]) - HU_FONTSTART;
 	if (c < 0 || c >= HU_FONTSIZE)
 	    w += 4;
 	else

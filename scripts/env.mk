@@ -15,13 +15,17 @@ ifndef ARCH
   endif
 endif
 
-GIT_DESCRIBE := $(shell git describe --match v*.*.*-* --tags --abbrev=0)
-COMMIT_COUNT := $(shell git rev-list --count $(GIT_DESCRIBE)..HEAD)
+GIT_DESCRIBE := $(shell git describe --match 'v*.*.*-*' --tags --abbrev=0 2>/dev/null)
 
-ifeq ($(COMMIT_COUNT),0)
-	FIRMWARE_VERSION = $(GIT_DESCRIBE:v%=%)
+ifneq ($(strip $(GIT_DESCRIBE)),)
+  COMMIT_COUNT := $(shell git rev-list --count $(GIT_DESCRIBE)..HEAD 2>/dev/null)
+  ifeq ($(COMMIT_COUNT),0)
+    FIRMWARE_VERSION = $(GIT_DESCRIBE:v%=%)
+  else
+    FIRMWARE_VERSION = $(GIT_DESCRIBE:v%=%).$(COMMIT_COUNT)
+  endif
 else
-	FIRMWARE_VERSION = $(GIT_DESCRIBE:v%=%).$(COMMIT_COUNT)
+  FIRMWARE_VERSION = dev
 endif
 
 scriptname := $(word 1, $(MAKEFILE_LIST))
@@ -159,7 +163,7 @@ CFLAGS += $(addprefix -I,$(includes))
 CFLAGS += $(addprefix -D,$(symbols))
 
 # swig-specific flags
-SWIGFLAGS = -lua -no-old-metatable-bindings
+SWIGFLAGS = -lua
 SWIGFLAGS += $(addprefix -I,$(includes)) 
 # Replace speed optimization flags with size optimization flags.
 CFLAGS.swig = $(subst $(CFLAGS.speed),$(CFLAGS.size),$(CFLAGS))

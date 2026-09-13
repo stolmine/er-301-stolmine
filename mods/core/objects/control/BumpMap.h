@@ -12,10 +12,18 @@ namespace od
     BumpMap();
     virtual ~BumpMap();
 
-    virtual void setSample(Sample *sample, int channel = 0);
+    void setSample(Sample *sample) override
+    {
+      Head::setSample(sample);
+      if (sample)
+      {
+        mChannelIndex = 0;
+      }
+    }
+    void setSample(Sample *sample, int channel);
 
 #ifndef SWIGLUA
-    virtual void process();
+    void process() override;
     Inlet mInput{"In"};
     Outlet mOutput{"Out"};
     Inlet mPhase{"Phase"};

@@ -73,7 +73,7 @@ namespace od
 #endif
 
 	private:
-		typedef struct
+		struct Location
 		{
 			int section = 0;
 			int spot = 0;
@@ -83,7 +83,7 @@ namespace od
 				section = 0;
 				spot = 0;
 			}
-		} Location;
+		};
 
 		std::vector<SpottedSection *> mSections;
 		float mOriginState = 0.0f;

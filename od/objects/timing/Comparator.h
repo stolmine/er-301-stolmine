@@ -26,7 +26,7 @@ namespace od
     virtual ~Comparator();
 
 #ifndef SWIGLUA
-    virtual void process();
+    void process() override;
     Inlet mInput{"In"};
     Outlet mOutput{"Out"};
     Parameter mThreshold{"Threshold", 0.1f};

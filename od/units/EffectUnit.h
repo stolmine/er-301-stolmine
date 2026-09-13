@@ -12,7 +12,7 @@ namespace od
         virtual ~EffectUnit();
 
 #ifndef SWIGLUA
-        virtual void process();
+        void process() override;
 #endif
 
     protected:

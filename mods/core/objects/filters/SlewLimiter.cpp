@@ -55,7 +55,7 @@ namespace od
 #endif
     finalValue /= FRAMELENGTH;
 
-    float diff;
+    float diff = 0.0f;
     switch (mDirection.value())
     {
     case CHOICE_UP:

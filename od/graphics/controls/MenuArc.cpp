@@ -8,8 +8,10 @@
 namespace od
 {
 
-    const float arcOffsets[] = {0, sin(M_PI * 0.167), sin(M_PI * 0.333), 1, sin(M_PI * 0.333),
-                                sin(M_PI * 0.167), 0};
+    const float arcOffsets[] = {0, static_cast<float>(sin(M_PI * 0.167)),
+                                static_cast<float>(sin(M_PI * 0.333)), 1,
+                                static_cast<float>(sin(M_PI * 0.333)),
+                                static_cast<float>(sin(M_PI * 0.167)), 0};
 
     static inline float interpolateArc(int i, float w)
     {
@@ -50,7 +52,7 @@ namespace od
         }
         else
         {
-            left -= x + selected ? selectedWidth : width;
+            left -= x + (selected ? selectedWidth : width);
         }
 
         if (selected)

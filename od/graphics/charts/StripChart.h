@@ -21,10 +21,10 @@ namespace od
 		virtual ~StripChart();
 
 #ifndef SWIGLUA
-		virtual void draw(FrameBuffer &fb);
+		void draw(FrameBuffer &fb) override;
 #endif
 
-		virtual void setSize(int width, int height);
+		void setSize(int width, int height, bool updateSaved = true) override;
 
 		void addValue(float value);
 		void setRange(float min, float max);

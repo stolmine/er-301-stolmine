@@ -52,7 +52,6 @@ namespace od
 		float mLastDuration = -1.0f;
 		bool mIsPaused = false;
 		bool mIsFailed = false;
-		int mFlashCount = 0;
 		bool mFocusDuration = true;
 	};
 

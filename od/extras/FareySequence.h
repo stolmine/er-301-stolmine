@@ -28,8 +28,6 @@ namespace od
 		float mValue = 0;
 
 	private:
-		int mMaxDenonimator = 1;
-
 		struct Entry
 		{
 			Entry(float num, float den) : num((int)num), den((int)den), value(num / den)

@@ -32,7 +32,6 @@ namespace od
 		std::vector<std::string> lines;
 		std::string empty_line;
 		int nlines;
-		int ncols;
 		int pos;
 		int last;
 	};

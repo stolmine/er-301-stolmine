@@ -94,7 +94,14 @@ local function parsePrereleaseAndBuild(str)
 end
 
 local function parseVersion(str)
-  local sMajor, sMinor, sPatch, sPrereleaseAndBuild = str:match(
+  local normalized = tostring(str or "")
+  normalized = normalized:match("^%s*(.-)%s*$")
+  if normalized == "" or normalized == "dev" or normalized == "development" or normalized == "unknown" then
+    return 0, 0, 0
+  end
+  normalized = normalized:gsub("^v", "")
+
+  local sMajor, sMinor, sPatch, sPrereleaseAndBuild = normalized:match(
                                                           "^(%d+)%.?(%d*)%.?(%d*)(.-)$")
   assert(type(sMajor) == 'string',
          ("Could not extract version number(s) from %q"):format(str))

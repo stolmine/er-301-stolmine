@@ -15,6 +15,7 @@ extern "C"
 namespace od
 {
 
+#if INTERPRETER_RECORD_ALLOCATIONS
   static inline size_t nextPowerOfTwo(size_t v)
   {
     v--;
@@ -26,6 +27,7 @@ namespace od
     v++;
     return v;
   }
+#endif
 
   Interpreter::Interpreter()
   {

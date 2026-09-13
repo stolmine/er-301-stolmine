@@ -13,8 +13,8 @@
 namespace od
 {
 
-  static inline void computeSquaredSpectrum(float *out,
-                                            complex_float_t *fft, int n)
+  [[maybe_unused]] static inline void computeSquaredSpectrum(float *out,
+                                                             complex_float_t *fft, int n)
   {
     // skip DC coefficient
     fft++;
@@ -25,8 +25,8 @@ namespace od
     }
   }
 
-  static inline void computeSpectrum(float *out, complex_float_t *fft,
-                                     int n)
+  [[maybe_unused]] static inline void computeSpectrum(float *out, complex_float_t *fft,
+                                                     int n)
   {
     // skip DC coefficient
     fft++;
@@ -38,8 +38,8 @@ namespace od
     }
   }
 
-  static inline void computeWeightedSpectrum(float *out,
-                                             complex_float_t *fft, int n)
+  [[maybe_unused]] static inline void computeWeightedSpectrum(float *out,
+                                                             complex_float_t *fft, int n)
   {
     // skip DC coefficient
     fft++;
@@ -65,8 +65,8 @@ namespace od
     return sum;
   }
 
-  static inline float computeModifiedKullbackLeibler(float *cur, float *prev,
-                                                     int n)
+  [[maybe_unused]] static inline float computeModifiedKullbackLeibler(float *cur, float *prev,
+                                                                       int n)
   {
     float sum = 0.0f;
     for (int i = 0; i < n; i++)
@@ -88,7 +88,7 @@ namespace od
     return sum / n;
   }
 
-  static inline float computeEnergy(float *cur, int n)
+  [[maybe_unused]] static inline float computeEnergy(float *cur, int n)
   {
     float sum = 0.0f;
     float mean = computeMean(cur, n);
