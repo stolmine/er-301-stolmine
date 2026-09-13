@@ -56,6 +56,7 @@ deploy-hint: $(firmware_archive)
 
 $(build_dir)/install.lua: scripts/install.lua scripts/env.mk
 	@echo $(describe_env) SED $(describe_target)
+	@mkdir -p $(@D)
 	@sed 's/FIRMWARE_VERSION/$(FIRMWARE_VERSION)/g' $< > $@
 
 app-libs:

@@ -19,9 +19,79 @@ TXo's 4 CV + 4 TR hardware outputs.
   - Gain 1.0 = ±5V, Gain 2.0 = ±10V, Gain 0.5 = ±2.5V
 - Build system fixes: darwin gcc-15 compat, mod linker flags
 
+## Quick Start: Build for AM335x using Docker on MacOS
+
+There is no native AM335x cross-build on a Mac — the TI Processor SDK
+RTOS is Linux x86 only, so the toolchain lives inside a Docker
+container. The image carries the whole TI toolchain, so no manual SDK
+install is needed.
+
+### 1. Install Docker
+
+Install Docker Desktop, which ships the Docker engine:
+
+```bash
+brew install --cask docker
+```
+
+Or download it from https://docs.docker.com/desktop/install/mac-install/.
+Launch Docker Desktop once and let it finish starting before building.
+
+**On Apple Silicon, Rosetta must be OFF.** Go to Settings > General and
+*uncheck* "Use Rosetta for x86/amd64 emulation" so Docker falls back to
+QEMU. The TI toolchain is x86-only and the build fails under Rosetta;
+QEMU emulation is required.
+
+### 2. Clone the Repository
+
+```bash
+git clone https://github.com/stolmine/er-301-stolmine
+cd er-301-stolmine
+```
+
+### 3. Build the Toolchain Image
+
+This bakes the TI Processor SDK RTOS 04.01.00.06 into the image. It is a
+long, one-time step — the TI installer is large.
+
+Use the mac-specific Dockerfile. It passes
+`--disable-components TI_CGT_PRU`, without which the TI installer never
+terminates, and it must be built as `linux/amd64`:
+
+```bash
+docker build --platform linux/amd64 -f docker/Dockerfile.am335x-mac -t er301-am335x-mac .
+```
+
+### 4. Compile
+
+Mount the repo into the container and build:
+
+```bash
+docker run --name er-301-linux --rm -it --cpus=4 --platform linux/amd64 -v "$PWD":/er-301 -w /er-301 er301-am335x-mac bash
+```
+
+Then, inside the container:
+
+```bash
+make firmware ARCH=am335x
+```
+
+Artifacts land in `release/am335x/` on the host, since the working
+directory is bind-mounted — so you can pull the zip straight onto the SD
+card from Finder. Continue at
+[step 4 below](#4-install-on-er-301-hardware) to install on hardware.
+
+**Note**: QEMU emulation makes the build noticeably slower than a native
+x86 Linux host. Give Docker Desktop plenty of CPU and memory (Settings >
+Resources) and keep `--cpus=4` or higher.
+
+**Note**: the build uses the stock distro `swig` from the image — there is
+no separate `.local/swig-4.2.1` install to worry about.
+
 ## What Needs To Be Done (on this Linux machine)
 
 Cross-compile the firmware and TXo mod for the AM335x (ER-301 hardware).
+Skip to step 4 if you used the Docker route above.
 
 ### 1. Install Dependencies
 

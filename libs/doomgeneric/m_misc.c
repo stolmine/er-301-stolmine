@@ -249,7 +249,7 @@ void M_ForceUppercase(char *text)
 
     for (p = text; *p != '\0'; ++p)
     {
-        *p = toupper(*p);
+        *p = toupper((unsigned char)*p);
     }
 }
 

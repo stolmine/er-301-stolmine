@@ -4,8 +4,12 @@ include scripts/utils.mk
 program_name := sbl
 program_dir := $(program_name)
 out_dir := $(build_dir)/$(program_name)
+# Objects for the sbl/ sources go here. They cannot live in $(out_dir)/$(program_dir)
+# because a case-insensitive host filesystem (macOS) would collide that directory
+# with the $(out_dir)/SBL artefact.
+sbl_obj_dir := $(out_dir)/sbl_obj
 
-src_dirs := $(program_dir) $(hal_dir) $(arch_dir)/$(ARCH)/hal $(ti_dir)
+src_dirs := $(hal_dir) $(arch_dir)/$(ARCH)/hal $(ti_dir)
 
 includes += $(ne10_dir)/inc
 symbols += BUILDOPT_SBL
@@ -34,7 +38,11 @@ cpp_sources += $(od_dir)/extras/FileReader.cpp
 cpp_sources += $(od_dir)/extras/Random.cpp
 c_sources += $(od_dir)/graphics/fonts/pixelsix48.c
 
-objects := $(addprefix $(out_dir)/,$(c_sources:%.c=%.o) $(cpp_sources:%.cpp=%.o)) 
+sbl_cpp_sources := $(call rwildcard,$(program_dir),*.cpp)
+sbl_c_sources := $(call rwildcard,$(program_dir),*.c)
+
+objects := $(addprefix $(out_dir)/,$(c_sources:%.c=%.o) $(cpp_sources:%.cpp=%.o))
+objects += $(addprefix $(sbl_obj_dir)/,$(sbl_c_sources:%.c=%.o) $(sbl_cpp_sources:%.cpp=%.o))
 
 CFLAGS += $(sysbios_cflags) -DSBL_VERSION=\"4.0-$(PROFILE)\"
 LFLAGS = $(sysbios_lflags) -Wl,--gc-sections -lm -lstdc++ -lc -lnosys -u _printf_float
@@ -47,6 +55,16 @@ $(sysbios_build_dir)/.timestamp: $(sysbios_objects)
 	@echo $(describe_env) XS $<
 	@$(XS) -t $(sysbios_target) -p $(sysbios_platform) -r $(sysbios_buildtype) -o $(sysbios_build_dir) $<
 	@touch $(sysbios_build_dir)/.timestamp
+
+$(sbl_obj_dir)/%.o: %.c
+	@echo $(describe_env) C $(describe_input)
+	@mkdir -p $(@D)
+	@$(CC) $(DEPFLAGS) $(CFLAGS) -std=gnu11 -c $< -o $@
+
+$(sbl_obj_dir)/%.o: %.cpp
+	@echo $(describe_env) C++ $(describe_input)
+	@mkdir -p $(@D)
+	@$(CPP) $(DEPFLAGS) $(CFLAGS) -std=gnu++11 -c $< -o $@
 
 $(out_dir)/$(program_name).elf: $(objects) $(libraries)
 	@echo $(describe_env) LINK $(describe_target)

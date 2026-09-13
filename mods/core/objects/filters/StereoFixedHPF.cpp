@@ -29,7 +29,8 @@ namespace od
 
     float32x2_t r = vdup_n_f32(1.0f - (2.0f * M_PI * mCutoff.value() * globalConfig.samplePeriod));
     float32x2_t y = mY;
-    float32x2_t x1, x0 = mPrevX;
+    float32x2_t x1 = vdup_n_f32(0.0f);
+    float32x2_t x0 = mPrevX;
 
     for (int i = 0; i < FRAMELENGTH; i++)
     {
