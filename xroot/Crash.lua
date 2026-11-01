@@ -33,11 +33,10 @@ local function showDialog(reportSaved)
     local label = app.Label("Oops! Something went wrong.", 12)
     label:setCenter(128, app.GRID4_LINE1)
     dialog:addMainGraphic(label)
-    label = app.Label("Report saved to crash.log. Please send the report to:",
-                      10)
+    label = app.Label("Report saved to crash.log.", 10)
     label:setCenter(128, app.GRID4_LINE2)
     dialog:addMainGraphic(label)
-    label = app.Label("clarkson@orthogonaldevices.com", 10)
+    label = app.Label("View it in Admin > Crash Reports.", 10)
     label:setCenter(128, app.GRID4_LINE3)
     dialog:addMainGraphic(label)
   else
